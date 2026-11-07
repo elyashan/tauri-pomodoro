@@ -130,6 +130,28 @@ export interface Translations {
   selectWorkTopic: string;
   changeWorkTopic: string;
 
+  // Çalışma Planları & Döngü & Kısa Mola
+  plansTitle: string;
+  selectPlan: string;
+  planWorkMins: string;
+  planShortBreakMins: string;
+  planStandardBreakMins: string;
+  planLongBreakMins: string;
+  planLongBreakInterval: string;
+  planLongBreakIntervalDesc: (n: number) => string;
+  shortBreakBtn: (m: number) => string;
+  shortBreaksCountBadge: (n: number) => string;
+  cycleProgressBadge: (curr: number, total: number) => string;
+  standardBreakBadge: (m: number, curr: number, total: number) => string;
+  longBreakBadge: (m: number, count: number) => string;
+  shortBreakBadge: (m: number, count: number) => string;
+  returnToWorkBtn: string;
+  startSessionWithPlan: (name: string) => string;
+  editPlansTitle: string;
+  resetPlansDefault: string;
+  savePlansSuccess: string;
+  planNameLabel: string;
+
   defaultDistractionTags: string[];
   defaultEndingTags: string[];
   defaultWorkTags: string[];
@@ -273,6 +295,31 @@ const tr: Translations = {
   workTopicPlaceholder: "Ders, konu veya görev yaz (örn: Matematik, Rust)...",
   selectWorkTopic: "Konu Seç",
   changeWorkTopic: "Çalışma Konusunu Değiştir",
+
+  // Çalışma Planları & Döngü & Kısa Mola
+  plansTitle: "Çalışma Planı",
+  selectPlan: "Plan Seçimi",
+  planWorkMins: "Çalışma Süresi (dk)",
+  planShortBreakMins: "Kısa Mola (dk)",
+  planStandardBreakMins: "Standart Mola (dk)",
+  planLongBreakMins: "Uzun Mola (dk)",
+  planLongBreakInterval: "Uzun Mola Döngüsü",
+  planLongBreakIntervalDesc: (n: number) => `Her ${n} çalışmada bir`,
+  shortBreakBtn: (m: number) => `☕ Kısa Mola (${m} dk)`,
+  shortBreaksCountBadge: (n: number) => `☕ ${n} kısa mola`,
+  cycleProgressBadge: (curr: number, total: number) => `Döngü: ${curr}/${total}`,
+  standardBreakBadge: (m: number, curr: number, total: number) =>
+    `☕ Standart Mola (${m} dk) • ${curr}/${total}`,
+  longBreakBadge: (m: number, count: number) =>
+    `🎉 Uzun Mola (${m} dk) • ${count}. Çalışma Tamamlandı!`,
+  shortBreakBadge: (m: number, count: number) =>
+    `☕ Kısa Mola (${m} dk) • #${count}`,
+  returnToWorkBtn: "🟢 Çalışmaya Dön",
+  startSessionWithPlan: (name: string) => `🟢 ${name} Başlat`,
+  editPlansTitle: "Çalışma & Mola Planları",
+  resetPlansDefault: "Varsayılan Planlara Dön",
+  savePlansSuccess: "Planlar kaydedildi!",
+  planNameLabel: "Plan Adı",
 
   defaultDistractionTags: [
     "Telefon",
@@ -448,6 +495,31 @@ const en: Translations = {
   workTopicPlaceholder: "Enter topic or task (e.g. Math, Rust, Study)...",
   selectWorkTopic: "Select Topic",
   changeWorkTopic: "Change Work Topic",
+
+  // Study Plans & Cycle & Short Break
+  plansTitle: "Study Plan",
+  selectPlan: "Select Plan",
+  planWorkMins: "Work Duration (min)",
+  planShortBreakMins: "Short Break (min)",
+  planStandardBreakMins: "Standard Break (min)",
+  planLongBreakMins: "Long Break (min)",
+  planLongBreakInterval: "Long Break Cycle",
+  planLongBreakIntervalDesc: (n: number) => `Every ${n} sessions`,
+  shortBreakBtn: (m: number) => `☕ Short Break (${m}m)`,
+  shortBreaksCountBadge: (n: number) => `☕ ${n} short breaks`,
+  cycleProgressBadge: (curr: number, total: number) => `Cycle: ${curr}/${total}`,
+  standardBreakBadge: (m: number, curr: number, total: number) =>
+    `☕ Standard Break (${m}m) • ${curr}/${total}`,
+  longBreakBadge: (m: number, count: number) =>
+    `🎉 Long Break (${m}m) • ${count}. Session Finished!`,
+  shortBreakBadge: (m: number, count: number) =>
+    `☕ Short Break (${m}m) • #${count}`,
+  returnToWorkBtn: "🟢 Return to Work",
+  startSessionWithPlan: (name: string) => `🟢 Start ${name}`,
+  editPlansTitle: "Study & Break Plans",
+  resetPlansDefault: "Reset Plans to Default",
+  savePlansSuccess: "Plans saved!",
+  planNameLabel: "Plan Name",
 
   defaultDistractionTags: [
     "Phone",

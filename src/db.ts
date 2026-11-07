@@ -106,6 +106,55 @@ export interface WeeklySummary {
   activeDaysCount: number;
 }
 
+export interface StudyPlan {
+  id: string; // "developer" | "classic" | "ultradian" | "custom"
+  name: string;
+  workMins: number;
+  shortBreakMins: number;
+  standardBreakMins: number;
+  longBreakMins: number;
+  longBreakInterval: number;
+}
+
+export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
+  {
+    id: "developer",
+    name: "Geliştirici Standardı",
+    workMins: 50,
+    shortBreakMins: 5,
+    standardBreakMins: 10,
+    longBreakMins: 30,
+    longBreakInterval: 3,
+  },
+  {
+    id: "classic",
+    name: "Klasik Pomodoro",
+    workMins: 25,
+    shortBreakMins: 3,
+    standardBreakMins: 5,
+    longBreakMins: 25,
+    longBreakInterval: 4,
+  },
+  {
+    id: "ultradian",
+    name: "Ultradian Ritmi",
+    workMins: 90,
+    shortBreakMins: 5,
+    standardBreakMins: 20,
+    longBreakMins: 45,
+    longBreakInterval: 2,
+  },
+  {
+    id: "custom",
+    name: "Özel Plan",
+    workMins: 40,
+    shortBreakMins: 5,
+    standardBreakMins: 10,
+    longBreakMins: 25,
+    longBreakInterval: 3,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Sabitler
 // ---------------------------------------------------------------------------
@@ -1142,7 +1191,7 @@ export async function exportAllData(): Promise<string> {
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.8",
+    version: "0.1.9",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,
@@ -1152,4 +1201,86 @@ export async function exportAllData(): Promise<string> {
   };
 
   return JSON.stringify(data, null, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Çalışma Planları (Study Plans) & Döngü / Kısa Mola Sayacı
+// ---------------------------------------------------------------------------
+
+export async function loadStudyPlans(): Promise<StudyPlan[]> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'studyPlans'",
+  );
+  if (rows.length === 0) return DEFAULT_STUDY_PLANS;
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // fallback
+  }
+  return DEFAULT_STUDY_PLANS;
+}
+
+export async function saveStudyPlans(plans: StudyPlan[]): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('studyPlans', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [JSON.stringify(plans)],
+  );
+}
+
+export async function loadActivePlanId(): Promise<string> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'activePlanId'",
+  );
+  if (rows.length === 0) return "developer";
+  return rows[0].value || "developer";
+}
+
+export async function saveActivePlanId(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('activePlanId', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [id],
+  );
+}
+
+export async function loadSessionCycleStats(): Promise<{
+  completedWorkCount: number;
+  shortBreakCount: number;
+}> {
+  const db = await getDb();
+  const rows = await db.select<{ key: string; value: string }[]>(
+    "SELECT key, value FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount')",
+  );
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const c = parseInt(map.get("completedWorkCount") || "0", 10);
+  const s = parseInt(map.get("sessionShortBreakCount") || "0", 10);
+  return {
+    completedWorkCount: Number.isFinite(c) && c >= 0 ? c : 0,
+    shortBreakCount: Number.isFinite(s) && s >= 0 ? s : 0,
+  };
+}
+
+export async function saveSessionCycleStats(
+  completedWorkCount: number,
+  shortBreakCount: number,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('completedWorkCount', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(completedWorkCount)],
+  );
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('sessionShortBreakCount', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(shortBreakCount)],
+  );
 }

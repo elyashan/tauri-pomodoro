@@ -31,6 +31,8 @@ const COLORS = [
 
 export function ConfettiCanvas({ durationMs = 3800, onComplete }: ConfettiProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -101,14 +103,14 @@ export function ConfettiCanvas({ durationMs = 3800, onComplete }: ConfettiProps)
         animId = requestAnimationFrame(render);
       } else {
         ctx.clearRect(0, 0, width, height);
-        if (onComplete) onComplete();
+        if (onCompleteRef.current) onCompleteRef.current();
       }
     };
 
     animId = requestAnimationFrame(render);
 
     return () => cancelAnimationFrame(animId);
-  }, [durationMs, onComplete]);
+  }, [durationMs]);
 
   return (
     <canvas

@@ -36,7 +36,14 @@ import {
   loadAlwaysOnTop,
   saveAlwaysOnTop,
   loadDefaultBreakMins,
-  saveDefaultBreakMins,
+  StudyPlan,
+  DEFAULT_STUDY_PLANS,
+  loadStudyPlans,
+  saveStudyPlans,
+  loadActivePlanId,
+  saveActivePlanId,
+  loadSessionCycleStats,
+  saveSessionCycleStats,
   recordDistraction,
   getDaysSummary,
   getWeeklySummary,
@@ -217,6 +224,21 @@ export default function App() {
   const activeLang = resolveLanguage(langPref);
   const t = translations[activeLang];
 
+  // Çalışma Planları (Study Plans) & Döngü Takibi
+  const [studyPlans, setStudyPlans] = useState<StudyPlan[]>(DEFAULT_STUDY_PLANS);
+  const [activePlanId, setActivePlanId] = useState<string>("developer");
+  const [editingPlanId, setEditingPlanId] = useState<string>("developer");
+  const [completedWorkCount, setCompletedWorkCount] = useState<number>(0);
+  const [sessionShortBreakCount, setSessionShortBreakCount] = useState<number>(0);
+  const [breakKind, setBreakKind] = useState<"standard" | "long" | "short">("standard");
+  const savedWorkSecondsLeftRef = useRef<number>(DEFAULT_WORK_SEC);
+  const savedWorkElapsedSecRef = useRef<number>(0);
+
+  const currentPlan =
+    studyPlans.find((p) => p.id === activePlanId) ||
+    studyPlans[0] ||
+    DEFAULT_STUDY_PLANS[0];
+
   const [workSecondsLeft, setWorkSecondsLeft] = useState(DEFAULT_WORK_SEC);
   const [workElapsedSec, setWorkElapsedSec] = useState(0);
   const [breakSecondsLeft, setBreakSecondsLeft] = useState(DEFAULT_BREAK_SEC);
@@ -244,8 +266,6 @@ export default function App() {
 
   const [isRunning, setIsRunning] = useState(false);
   const [isCelebrating, setIsCelebrating] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editMinutes, setEditMinutes] = useState("50");
   const [autoStartOn, setAutoStartOn] = useState(false);
 
   // Dikkat Dağılma Ek Süresi (Dakika) ve Seans İçi Dağılma Sayacı
@@ -369,6 +389,25 @@ export default function App() {
         setDefaultBreakMins(savedBreakMins);
         setBreakTotalSec(savedBreakMins * 60);
 
+        const loadedPlans = await loadStudyPlans();
+        const loadedPlanId = await loadActivePlanId();
+        const loadedCycles = await loadSessionCycleStats();
+        setStudyPlans(loadedPlans);
+        setActivePlanId(loadedPlanId);
+        setEditingPlanId(loadedPlanId);
+        setCompletedWorkCount(loadedCycles.completedWorkCount);
+        setSessionShortBreakCount(loadedCycles.shortBreakCount);
+
+        const foundPlan =
+          loadedPlans.find((p) => p.id === loadedPlanId) ||
+          loadedPlans[0] ||
+          DEFAULT_STUDY_PLANS[0];
+
+        // Eğer henüz başlanmamış tertemiz bir durumdaysa süreyi aktif plana eşitle
+        if (saved.work_elapsed_sec === 0 && saved.work_seconds_left === DEFAULT_WORK_SEC) {
+          setWorkSecondsLeft(foundPlan.workMins * 60);
+        }
+
         const timeline = await getTimelineSessions(stats.dayId);
         setTimelineSessions(timeline);
       } catch (err) {
@@ -407,11 +446,11 @@ export default function App() {
       const hasBanner =
         updateStatus.kind === "available" ||
         updateStatus.kind === "downloading";
-      win.setSize(new LogicalSize(310, hasBanner ? 346 : 312));
+      win.setSize(new LogicalSize(310, hasBanner ? 390 : 355));
     } else if (page === "summary") {
       win.setSize(new LogicalSize(380, 480));
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(310, 470));
+      win.setSize(new LogicalSize(315, 480));
     } else if (
       showStopBox ||
       showDistractBox ||
@@ -420,7 +459,7 @@ export default function App() {
     ) {
       win.setSize(new LogicalSize(310, 330));
     } else {
-      win.setSize(new LogicalSize(240, 126));
+      win.setSize(new LogicalSize(260, 134));
     }
   }, [
     page,
@@ -544,8 +583,20 @@ export default function App() {
         setTimelineSessions(await getTimelineSessions());
       })();
 
+      // Seans döngüsünü arttır ve uzun mola mı standart mola mı belirle
+      const nextCompleted = completedWorkCount + 1;
+      setCompletedWorkCount(nextCompleted);
+      saveSessionCycleStats(nextCompleted, sessionShortBreakCount).catch(() => {});
+
+      const isLong = nextCompleted % currentPlan.longBreakInterval === 0;
+      const bKind = isLong ? ("long" as const) : ("standard" as const);
+      const bMins = isLong
+        ? currentPlan.longBreakMins
+        : currentPlan.standardBreakMins;
+      const bSec = bMins * 60;
+
       // Çalışma bitince otomatik olarak molaya geç ve başlat
-      const bSec = defaultBreakMins * 60;
+      setBreakKind(bKind);
       setPage("break");
       setBreakSecondsLeft(bSec);
       setBreakTotalSec(bSec);
@@ -563,8 +614,19 @@ export default function App() {
     activeLang,
     currentWorkTag,
     currentWorkReason,
-    defaultBreakMins,
+    completedWorkCount,
+    sessionShortBreakCount,
+    currentPlan,
   ]);
+
+  // Kutlama animasyonu ve konfeti en geç 4.2 saniye sonra kesinlikle kapanır
+  useEffect(() => {
+    if (!isCelebrating) return;
+    const timer = setTimeout(() => {
+      setIsCelebrating(false);
+    }, 4200);
+    return () => clearTimeout(timer);
+  }, [isCelebrating]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -593,19 +655,6 @@ export default function App() {
       .padStart(2, "0");
     const s = (sec % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
-  };
-
-  const handleSaveEditedTime = () => {
-    const mins = parseInt(editMinutes, 10);
-    if (!isNaN(mins) && mins > 0) {
-      if (page === "work") {
-        setWorkSecondsLeft(mins * 60);
-        setWorkElapsedSec(0);
-      } else {
-        setBreakSecondsLeft(mins * 60);
-      }
-    }
-    setIsEditing(false);
   };
 
   // ---------------------------------------------------------------------------
@@ -698,7 +747,7 @@ export default function App() {
       setWeeklySummary(await getWeeklySummary(locale));
       setTimelineSessions(await getTimelineSessions());
     }
-    setWorkSecondsLeft(DEFAULT_WORK_SEC);
+    setWorkSecondsLeft(currentPlan.workMins * 60);
     setWorkElapsedSec(0);
     setCurrentSessionDistractions(0);
     setShowStopBox(false);
@@ -716,13 +765,74 @@ export default function App() {
     await getCurrentWindow().setAlwaysOnTop(next).catch(() => {});
   };
 
-  const handleSelectBreakPreset = async (mins: 7 | 10 | 20) => {
-    setDefaultBreakMins(mins);
-    await saveDefaultBreakMins(mins);
-    const sec = mins * 60;
-    setBreakTotalSec(sec);
-    setBreakSecondsLeft(sec);
+  const handleTakeShortBreak = async () => {
+    savedWorkSecondsLeftRef.current = workSecondsLeft;
+    savedWorkElapsedSecRef.current = workElapsedSec;
+    const nextShort = sessionShortBreakCount + 1;
+    setSessionShortBreakCount(nextShort);
+    await saveSessionCycleStats(completedWorkCount, nextShort);
+
+    const bSec = currentPlan.shortBreakMins * 60;
+    setBreakKind("short");
+    setBreakTotalSec(bSec);
+    setBreakSecondsLeft(bSec);
     setBreakOverdueSec(0);
+    setPage("break");
+    setIsRunning(true);
+    playBreakChime();
+    breakStartedAtRef.current = new Date().toISOString();
+  };
+
+  const handleSelectPlan = async (planId: string) => {
+    setActivePlanId(planId);
+    await saveActivePlanId(planId);
+    const chosen = studyPlans.find((p) => p.id === planId);
+    if (chosen && !isRunning && workElapsedSec === 0) {
+      setWorkSecondsLeft(chosen.workMins * 60);
+    }
+  };
+
+  const handleStartSessionWithPlan = (plan: StudyPlan) => {
+    setIsCelebrating(false);
+    setActivePlanId(plan.id);
+    saveActivePlanId(plan.id).catch(() => {});
+    setWorkSecondsLeft(plan.workMins * 60);
+    setWorkElapsedSec(0);
+    setPage("work");
+    setIsRunning(true);
+    workStartedAtRef.current = new Date().toISOString();
+  };
+
+  const handleUpdatePlanField = async (
+    planId: string,
+    field: keyof StudyPlan,
+    value: string | number,
+  ) => {
+    const updated = studyPlans.map((p) => {
+      if (p.id !== planId) return p;
+      return { ...p, [field]: value };
+    });
+    setStudyPlans(updated);
+    await saveStudyPlans(updated);
+    if (
+      planId === activePlanId &&
+      field === "workMins" &&
+      !isRunning &&
+      workElapsedSec === 0
+    ) {
+      setWorkSecondsLeft(Number(value) * 60);
+    }
+  };
+
+  const handleResetPlansDefault = async () => {
+    setStudyPlans(DEFAULT_STUDY_PLANS);
+    await saveStudyPlans(DEFAULT_STUDY_PLANS);
+    const current =
+      DEFAULT_STUDY_PLANS.find((p) => p.id === activePlanId) ||
+      DEFAULT_STUDY_PLANS[0];
+    if (!isRunning && workElapsedSec === 0) {
+      setWorkSecondsLeft(current.workMins * 60);
+    }
   };
 
   const handleOpenBreakOverdueBox = async () => {
@@ -744,7 +854,13 @@ export default function App() {
 
   const submitBreakOverdue = async (skipReason = false) => {
     const totalBreakSec = breakTotalSec + breakOverdueSec;
-    const tag = skipReason ? undefined : selectedBreakOverdueTag;
+    const defaultTag =
+      breakKind === "short"
+        ? "Kısa Mola"
+        : breakKind === "long"
+          ? "Uzun Mola"
+          : "Standart Mola";
+    const tag = skipReason ? defaultTag : selectedBreakOverdueTag;
     const reason = skipReason
       ? undefined
       : breakOverdueReasonText.trim() || selectedBreakOverdueTag;
@@ -760,11 +876,18 @@ export default function App() {
 
     setShowBreakOverdueBox(false);
     setBreakOverdueSec(0);
-    setBreakSecondsLeft(defaultBreakMins * 60);
+
+    if (breakKind === "short") {
+      setWorkSecondsLeft(savedWorkSecondsLeftRef.current);
+      setWorkElapsedSec(savedWorkElapsedSecRef.current);
+    } else {
+      setWorkSecondsLeft(currentPlan.workMins * 60);
+      setWorkElapsedSec(0);
+      workStartedAtRef.current = new Date().toISOString();
+    }
 
     // Çalışmaya geç
     setPage("work");
-    workStartedAtRef.current = new Date().toISOString();
     setIsRunning(true);
   };
 
@@ -949,11 +1072,14 @@ export default function App() {
         new Date().toISOString(),
       );
     }
-    setWorkSecondsLeft(DEFAULT_WORK_SEC);
+    setWorkSecondsLeft(currentPlan.workMins * 60);
     setWorkElapsedSec(0);
-    setBreakSecondsLeft(defaultBreakMins * 60);
+    setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
     setBreakOverdueSec(0);
     setCurrentSessionDistractions(0);
+    setCompletedWorkCount(0);
+    setSessionShortBreakCount(0);
+    await saveSessionCycleStats(0, 0);
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const freshStats = await startNewDay(locale);
     setDayStats(freshStats);
@@ -1112,23 +1238,73 @@ export default function App() {
           <div className="top-bar hover-reveal">
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <span className="badge">
-                ⠿ {page === "work" ? t.work : t.break}
-                {page === "work" && currentSessionDistractions > 0 && (
-                  <span style={{ fontSize: "9px", color: "#fbbf24", marginLeft: "4px" }}>
-                    ({currentSessionDistractions}x)
-                  </span>
+                {page === "work" ? (
+                  <>
+                    💼 {t.work}
+                    {currentSessionDistractions > 0 && (
+                      <span
+                        style={{
+                          fontSize: "9px",
+                          color: "#fbbf24",
+                          marginLeft: "3px",
+                        }}
+                      >
+                        ({currentSessionDistractions}x)
+                      </span>
+                    )}
+                  </>
+                ) : breakKind === "short" ? (
+                  t.shortBreakBadge(
+                    Math.round(breakTotalSec / 60),
+                    sessionShortBreakCount,
+                  )
+                ) : breakKind === "long" ? (
+                  t.longBreakBadge(
+                    Math.round(breakTotalSec / 60),
+                    completedWorkCount,
+                  )
+                ) : (
+                  t.standardBreakBadge(
+                    Math.round(breakTotalSec / 60),
+                    (completedWorkCount % currentPlan.longBreakInterval) ||
+                      currentPlan.longBreakInterval,
+                    currentPlan.longBreakInterval,
+                  )
                 )}
               </span>
 
               {page === "work" && (
-                <button
-                  className="work-topic-badge"
-                  onClick={handleOpenWorkTopicBox}
-                  title={t.changeWorkTopic}
-                >
-                  🏷️ {currentWorkTag || t.selectWorkTopic}
-                  {currentWorkReason ? `: ${currentWorkReason}` : ""}
-                </button>
+                <>
+                  <button
+                    className="work-topic-badge"
+                    onClick={handleOpenWorkTopicBox}
+                    title={t.changeWorkTopic}
+                  >
+                    🏷️ {currentWorkTag || t.selectWorkTopic}
+                    {currentWorkReason ? `: ${currentWorkReason}` : ""}
+                  </button>
+
+                  <span
+                    className="cycle-badge"
+                    title={t.planLongBreakIntervalDesc(
+                      currentPlan.longBreakInterval,
+                    )}
+                  >
+                    {t.cycleProgressBadge(
+                      completedWorkCount % currentPlan.longBreakInterval,
+                      currentPlan.longBreakInterval,
+                    )}
+                  </span>
+
+                  {sessionShortBreakCount > 0 && (
+                    <span
+                      className="short-break-chip"
+                      title={t.shortBreaksCountBadge(sessionShortBreakCount)}
+                    >
+                      {t.shortBreaksCountBadge(sessionShortBreakCount)}
+                    </span>
+                  )}
+                </>
               )}
             </div>
 
@@ -1159,55 +1335,13 @@ export default function App() {
           </div>
 
           <div className="timer-wrap">
-            {isEditing ? (
-              <input
-                className="timer-input"
-                type="number"
-                value={editMinutes}
-                autoFocus
-                onChange={(e) => setEditMinutes(e.target.value)}
-                onBlur={handleSaveEditedTime}
-                onKeyDown={(e) => e.key === "Enter" && handleSaveEditedTime()}
-              />
-            ) : isAlarm ? (
+            {isAlarm ? (
               <div className="timer-display alarm-timer">
                 -{formatClock(breakOverdueSec)}
               </div>
             ) : (
-              <div
-                className={`timer-display ${!isRunning ? "clickable-timer" : ""}`}
-                title={!isRunning ? t.clickToEditTime : ""}
-                onClick={() => {
-                  if (!isRunning) {
-                    setEditMinutes(Math.ceil(activeSeconds / 60).toString());
-                    setIsEditing(true);
-                  }
-                }}
-              >
+              <div className="timer-display">
                 {formatClock(activeSeconds)}
-              </div>
-            )}
-
-            {page === "break" && !showBreakOverdueBox && !isAlarm && (
-              <div className="break-presets-row">
-                <button
-                  className={`break-chip-btn ${breakTotalSec === 7 * 60 ? "active" : ""}`}
-                  onClick={() => handleSelectBreakPreset(7)}
-                >
-                  {t.breakPreset7}
-                </button>
-                <button
-                  className={`break-chip-btn ${breakTotalSec === 10 * 60 ? "active" : ""}`}
-                  onClick={() => handleSelectBreakPreset(10)}
-                >
-                  {t.breakPreset10}
-                </button>
-                <button
-                  className={`break-chip-btn ${breakTotalSec === 20 * 60 ? "active" : ""}`}
-                  onClick={() => handleSelectBreakPreset(20)}
-                >
-                  {t.breakPreset20}
-                </button>
               </div>
             )}
 
@@ -1657,13 +1791,28 @@ export default function App() {
           ) : isAlarm ? (
             <div className="btn-row hover-reveal">
               <button className="primary-btn" onClick={handleStartWorkFromBreak}>
-                🟢 {t.startWorkBtn}
+                🟢 {breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn}
               </button>
               <button
                 onClick={() => {
                   setBreakSecondsLeft(5 * 60);
                   setBreakTotalSec((prev) => prev + 5 * 60);
                   setBreakOverdueSec(0);
+                }}
+              >
+                {t.extendBreak5m}
+              </button>
+              <button onClick={handleStopSession}>{t.stop}</button>
+            </div>
+          ) : page === "break" ? (
+            <div className="btn-row hover-reveal">
+              <button className="primary-btn" onClick={handleStartWorkFromBreak}>
+                🟢 {breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn}
+              </button>
+              <button
+                onClick={() => {
+                  setBreakSecondsLeft((prev) => prev + 5 * 60);
+                  setBreakTotalSec((prev) => prev + 5 * 60);
                 }}
               >
                 {t.extendBreak5m}
@@ -1685,12 +1834,17 @@ export default function App() {
                     ? t.resume
                     : t.start}
               </button>
+              <button
+                className="short-break-btn"
+                onClick={handleTakeShortBreak}
+                title={`Kısa mola (${currentPlan.shortBreakMins} dk)`}
+              >
+                {t.shortBreakBtn(currentPlan.shortBreakMins)}
+              </button>
               <button onClick={handleStopSession}>{t.stop}</button>
-              {page === "work" && (
-                <button className="warn-btn" onClick={handleDistractedClick}>
-                  {t.distractedBtnText(distractPenaltyMins)}
-                </button>
-              )}
+              <button className="warn-btn" onClick={handleDistractedClick}>
+                {t.distractedBtnText(distractPenaltyMins)}
+              </button>
             </div>
           )}
         </>
@@ -1770,24 +1924,60 @@ export default function App() {
             </div>
           )}
 
+          {/* ÇALIŞMA PLANI SEÇİCİ */}
+          <div className="plan-picker-box">
+            <div className="plan-picker-header">
+              <span>{t.plansTitle}</span>
+              <span className="cycle-badge">
+                {t.cycleProgressBadge(
+                  completedWorkCount % currentPlan.longBreakInterval,
+                  currentPlan.longBreakInterval,
+                )}
+              </span>
+            </div>
+            <select
+              className="plan-dropdown-select"
+              value={activePlanId}
+              onChange={(e) => handleSelectPlan(e.target.value)}
+            >
+              {studyPlans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.workMins} dk / {p.standardBreakMins} dk • {p.longBreakInterval}+1)
+                </option>
+              ))}
+            </select>
+            <div className="plan-chips-row">
+              <span className="plan-chip highlight">💼 {currentPlan.workMins} dk</span>
+              <span className="plan-chip">☕ {currentPlan.shortBreakMins} dk kısa</span>
+              <span className="plan-chip">🌴 {currentPlan.standardBreakMins} dk standart</span>
+              <span className="plan-chip">🎉 {currentPlan.longBreakMins} dk uzun ({currentPlan.longBreakInterval}+1)</span>
+              {sessionShortBreakCount > 0 && (
+                <span className="plan-chip" style={{ color: "#38bdf8" }}>
+                  ☕ {sessionShortBreakCount} kısa mola
+                </span>
+              )}
+            </div>
+          </div>
+
           <div className="menu-actions">
-            <button
-              className="primary-btn"
-              onClick={() => {
-                setIsCelebrating(false);
-                setPage("work");
-              }}
-            >
-              {t.switchToWork}
-            </button>
-            <button
-              onClick={() => {
-                setIsCelebrating(false);
-                setPage("break");
-              }}
-            >
-              {t.switchToBreak}
-            </button>
+            {hasPausedProgress ? (
+              <button
+                className="primary-btn"
+                onClick={() => {
+                  setIsCelebrating(false);
+                  setPage("work");
+                }}
+              >
+                🟢 {t.resume} ({formatClock(workSecondsLeft)})
+              </button>
+            ) : (
+              <button
+                className="primary-btn"
+                onClick={() => handleStartSessionWithPlan(currentPlan)}
+              >
+                {t.startSessionWithPlan(currentPlan.name)}
+              </button>
+            )}
             <button className="warn-btn full-width" onClick={handleStartNewDay}>
               {t.startNewDay}
             </button>
@@ -1871,27 +2061,155 @@ export default function App() {
             </button>
           </div>
 
-          {/* VARSAYILAN MOLA SÜRESİ */}
+          {/* ÇALIŞMA PLANLARI & MOLA AYARLARI */}
           <div className="settings-section">
-            <div className="settings-label">
-              {activeLang === "tr"
-                ? "Varsayılan Mola Süresi"
-                : "Default Break Duration"}
+            <div
+              className="settings-label"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span>{t.editPlansTitle}</span>
+              <button
+                className="ghost-btn"
+                style={{ fontSize: "8px", padding: "1px 5px" }}
+                onClick={handleResetPlansDefault}
+              >
+                {t.resetPlansDefault}
+              </button>
             </div>
-            <div className="penalty-selector">
-              {([7, 10, 20] as const).map((mins) => (
-                <button
-                  key={mins}
-                  className={`penalty-btn ${defaultBreakMins === mins ? "active" : ""}`}
-                  onClick={() => handleSelectBreakPreset(mins)}
-                >
-                  {mins === 7
-                    ? t.breakPreset7
-                    : mins === 10
-                      ? t.breakPreset10
-                      : t.breakPreset20}
-                </button>
-              ))}
+
+            <div className="plans-settings-wrapper">
+              <div className="plans-selector-tabs">
+                {studyPlans.map((p) => (
+                  <button
+                    key={p.id}
+                    className={`plan-tab-btn ${editingPlanId === p.id ? "active" : ""}`}
+                    onClick={() => setEditingPlanId(p.id)}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+
+              {(() => {
+                const currentEditPlan =
+                  studyPlans.find((p) => p.id === editingPlanId) ||
+                  studyPlans[0] ||
+                  DEFAULT_STUDY_PLANS[0];
+                return (
+                  <div className="plans-editor-card">
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">{t.planNameLabel}</span>
+                      <input
+                        className="plan-text-input"
+                        value={currentEditPlan.name}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "name",
+                            e.target.value,
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">💼 {t.planWorkMins}</span>
+                      <input
+                        type="number"
+                        className="plan-number-input"
+                        min={1}
+                        max={180}
+                        value={currentEditPlan.workMins}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "workMins",
+                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">☕ {t.planShortBreakMins}</span>
+                      <input
+                        type="number"
+                        className="plan-number-input"
+                        min={1}
+                        max={60}
+                        value={currentEditPlan.shortBreakMins}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "shortBreakMins",
+                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">🌴 {t.planStandardBreakMins}</span>
+                      <input
+                        type="number"
+                        className="plan-number-input"
+                        min={1}
+                        max={60}
+                        value={currentEditPlan.standardBreakMins}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "standardBreakMins",
+                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">🎉 {t.planLongBreakMins}</span>
+                      <input
+                        type="number"
+                        className="plan-number-input"
+                        min={1}
+                        max={120}
+                        value={currentEditPlan.longBreakMins}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "longBreakMins",
+                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                          )
+                        }
+                      />
+                    </div>
+
+                    <div className="plan-field-row">
+                      <span className="plan-field-label">
+                        🔄 {t.planLongBreakInterval}
+                      </span>
+                      <input
+                        type="number"
+                        className="plan-number-input"
+                        min={1}
+                        max={10}
+                        value={currentEditPlan.longBreakInterval}
+                        onChange={(e) =>
+                          handleUpdatePlanField(
+                            currentEditPlan.id,
+                            "longBreakInterval",
+                            Math.max(1, parseInt(e.target.value, 10) || 1),
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

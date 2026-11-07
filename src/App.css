@@ -75,6 +75,7 @@ body,
   background: var(--shell-bg, rgba(26, 24, 20, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
+  overflow: hidden;
   padding: 10px 12px;
   color: #f4f4f5;
   display: flex;
@@ -1139,13 +1140,12 @@ button:disabled {
    ========================================================================== */
 .progress-bar-container {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 2.5px;
-  background: rgba(255, 255, 255, 0.05);
-  border-bottom-left-radius: 14px;
-  border-bottom-right-radius: 14px;
+  bottom: 4px;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
   overflow: hidden;
   pointer-events: none;
   z-index: 10;
@@ -1153,6 +1153,7 @@ button:disabled {
 
 .progress-bar-fill {
   height: 100%;
+  border-radius: 9999px;
   transition: width 0.3s ease-out;
   box-shadow: 0 0 6px currentColor;
 }
@@ -1398,4 +1399,207 @@ button:disabled {
   color: #f87171;
   font-weight: 700;
   margin-left: 3px;
+}
+
+/* ==========================================================================
+   Çalışma Planları (Study Plans) & Kısa Mola & Döngü Stilleri
+   ========================================================================== */
+
+/* Menü / Anasayfa Plan Seçici */
+.plan-picker-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.plan-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+.plan-dropdown-select {
+  width: 100%;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: #f4f4f5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.plan-dropdown-select:focus {
+  border-color: #3b82f6;
+}
+
+.plan-dropdown-select option {
+  background: #18181b;
+  color: #f4f4f5;
+}
+
+.plan-chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.plan-chip {
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d4d4d8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.plan-chip.highlight {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+/* Üst Çubuk Rozetleri: Döngü & Kısa Mola */
+.cycle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.short-break-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: rgba(14, 165, 233, 0.15);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  color: #38bdf8;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+/* Kısa Mola Butonu */
+.short-break-btn {
+  background: rgba(14, 165, 233, 0.18) !important;
+  border-color: rgba(56, 189, 248, 0.4) !important;
+  color: #7dd3fc !important;
+}
+
+.short-break-btn:hover {
+  background: rgba(14, 165, 233, 0.3) !important;
+  color: #bae6fd !important;
+}
+
+/* Ayarlar Sayfası: Plan Editörü */
+.plans-settings-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plans-selector-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.plan-tab-btn {
+  padding: 5px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.plan-tab-btn.active {
+  background: rgba(59, 130, 246, 0.35);
+  border-color: #60a5fa;
+  color: #ffffff;
+}
+
+.plans-editor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.plan-field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.plan-field-label {
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+.plan-number-input {
+  width: 58px;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #f4f4f5;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: right;
+  outline: none;
+}
+
+.plan-number-input:focus {
+  border-color: #3b82f6;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.plan-text-input {
+  flex: 1;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #f4f4f5;
+  font-size: 10px;
+  outline: none;
+}
+
+.plan-text-input:focus {
+  border-color: #3b82f6;
 }
