@@ -10,6 +10,7 @@ import {
   DaySummary,
   DistractionFrequency,
   ThemeSettings,
+  LangCode,
   DEFAULT_THEME,
   DEFAULT_WORK_SEC,
   DEFAULT_BREAK_SEC,
@@ -17,6 +18,8 @@ import {
   saveAppState,
   loadThemeSettings,
   saveThemeSettings,
+  loadLanguagePreference,
+  saveLanguagePreference,
   getActiveDayStats,
   startNewDay,
   recordWorkSession,
@@ -26,6 +29,7 @@ import {
   getDistractionFrequencies,
 } from "./db";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
+import { translations, resolveLanguage } from "./i18n";
 import "./App.css";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
@@ -96,6 +100,11 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [page, setPage] = useState<PageType>("work");
 
+  // Dil durumu
+  const [langPref, setLangPref] = useState<LangCode>("auto");
+  const activeLang = resolveLanguage(langPref);
+  const t = translations[activeLang];
+
   const [workSecondsLeft, setWorkSecondsLeft] = useState(DEFAULT_WORK_SEC);
   const [workElapsedSec, setWorkElapsedSec] = useState(0);
   const [breakSecondsLeft, setBreakSecondsLeft] = useState(DEFAULT_BREAK_SEC);
@@ -155,12 +164,17 @@ export default function App() {
     (async () => {
       try {
         const saved = await loadAppState();
-        const stats = await getActiveDayStats();
+        const savedLang = await loadLanguagePreference();
+        const active = resolveLanguage(savedLang);
+        const currentT = translations[active];
+
+        const stats = await getActiveDayStats(active === "tr" ? "tr-TR" : "en-US");
         const days = await getDaysSummary();
-        const choices = await getReasonChoices();
+        const choices = await getReasonChoices(currentT.defaultReasons);
         const freqs = await getDistractionFrequencies(false);
         const savedTheme = await loadThemeSettings();
 
+        setLangPref(savedLang);
         setPage(saved.page);
         setWorkSecondsLeft(saved.work_seconds_left);
         setWorkElapsedSec(saved.work_elapsed_sec);
@@ -212,7 +226,7 @@ export default function App() {
     } else if (page === "summary") {
       win.setSize(new LogicalSize(360, 390));
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(310, 330));
+      win.setSize(new LogicalSize(310, 395));
     } else if (showDistractBox) {
       win.setSize(new LogicalSize(285, 235));
     } else {
@@ -301,14 +315,14 @@ export default function App() {
         await recordWorkSession(workElapsedSec);
         setWorkSecondsLeft(DEFAULT_WORK_SEC);
         setWorkElapsedSec(0);
-        setDayStats(await getActiveDayStats());
+        setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
       })();
     } else if (page === "break" && breakSecondsLeft === 0) {
       setIsRunning(false);
       playBeep();
       setBreakSecondsLeft(DEFAULT_BREAK_SEC);
     }
-  }, [isRunning, page, workSecondsLeft, breakSecondsLeft, workElapsedSec]);
+  }, [isRunning, page, workSecondsLeft, breakSecondsLeft, workElapsedSec, activeLang]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -339,13 +353,6 @@ export default function App() {
     return `${m}:${s}`;
   };
 
-  const formatDurationText = (sec: number) => {
-    const hrs = Math.floor(sec / 3600);
-    const mins = Math.round((sec % 3600) / 60);
-    if (hrs === 0) return `${mins} dk`;
-    return `${hrs}s ${mins}dk`;
-  };
-
   const handleSaveEditedTime = () => {
     const mins = parseInt(editMinutes, 10);
     if (!isNaN(mins) && mins > 0) {
@@ -364,7 +371,7 @@ export default function App() {
     if (page === "work") {
       if (workElapsedSec >= 60) {
         await recordWorkSession(workElapsedSec);
-        setDayStats(await getActiveDayStats());
+        setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
       }
       setWorkSecondsLeft(DEFAULT_WORK_SEC);
       setWorkElapsedSec(0);
@@ -375,7 +382,7 @@ export default function App() {
 
   const handleDistractedClick = async () => {
     setWorkSecondsLeft((prev) => prev + 60);
-    setReasonChoices(await getReasonChoices());
+    setReasonChoices(await getReasonChoices(t.defaultReasons));
     setShowDistractBox(true);
   };
 
@@ -383,13 +390,13 @@ export default function App() {
     await recordDistraction(reasonText);
     setDistractReason("");
     setShowDistractBox(false);
-    setReasonChoices(await getReasonChoices());
+    setReasonChoices(await getReasonChoices(t.defaultReasons));
   };
 
   const openMenu = async () => {
     setIsRunning(false);
     setShowDistractBox(false);
-    setDayStats(await getActiveDayStats());
+    setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
     setPage("menu");
   };
 
@@ -417,13 +424,21 @@ export default function App() {
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
     setBreakSecondsLeft(DEFAULT_BREAK_SEC);
-    const freshStats = await startNewDay();
+    const freshStats = await startNewDay(activeLang === "tr" ? "tr-TR" : "en-US");
     setDayStats(freshStats);
   };
 
   const updateTheme = (patch: Partial<ThemeSettings>) => {
     themeDirtyRef.current = true;
     setTheme((prev) => ({ ...prev, ...patch }));
+  };
+
+  const handleLanguageChange = async (newPref: LangCode) => {
+    setLangPref(newPref);
+    await saveLanguagePreference(newPref);
+    const newActive = resolveLanguage(newPref);
+    const newT = translations[newActive];
+    setReasonChoices(await getReasonChoices(newT.defaultReasons));
   };
 
   const openSettings = () => {
@@ -451,7 +466,7 @@ export default function App() {
     return (
       <div className="widget-shell solid-bg" onMouseDown={handleMouseDown}>
         <div className="top-bar">
-          <span className="badge">⠿ Veritabanı hatası</span>
+          <span className="badge">⠿ Error</span>
           <button className="ghost-btn" onClick={hideToTray}>
             ✕
           </button>
@@ -498,19 +513,20 @@ export default function App() {
         <>
           <div className="top-bar hover-reveal">
             <span className="badge">
-              ⠿ {page === "work" ? "Çalışma" : "Mola"}
+              ⠿ {page === "work" ? t.work : t.break}
             </span>
             <div style={{ display: "flex", gap: "4px" }}>
               <button
                 className="ghost-btn"
                 onClick={openMenu}
-                title={updateAvailable ? "Yeni sürüm mevcut" : ""}
+                title={updateAvailable ? t.updateAvailableHint : ""}
               >
-                Menü{updateAvailable && <span className="update-dot" />}
+                {t.menu}
+                {updateAvailable && <span className="update-dot" />}
               </button>
               <button
                 className="ghost-btn"
-                title="Arka plana (sağ alt tepsiye) gizle"
+                title={t.hideToTray}
                 onClick={hideToTray}
               >
                 ✕
@@ -532,7 +548,7 @@ export default function App() {
             ) : (
               <div
                 className={`timer-display ${!isRunning ? "clickable-timer" : ""}`}
-                title={!isRunning ? "Dakikayı ayarlamak için tıkla" : ""}
+                title={!isRunning ? t.clickToEditTime : ""}
                 onClick={() => {
                   if (!isRunning) {
                     setEditMinutes(Math.ceil(activeSeconds / 60).toString());
@@ -546,7 +562,7 @@ export default function App() {
 
             {hasPausedProgress && !showDistractBox && (
               <div className="resume-hint">
-                Kaldığın yer ({Math.floor(workElapsedSec / 60)} dk çalışıldı)
+                {t.resumeHint(Math.floor(workElapsedSec / 60))}
               </div>
             )}
           </div>
@@ -567,7 +583,7 @@ export default function App() {
               <div className="new-reason-row">
                 <input
                   className="distract-input"
-                  placeholder="Veya yeni neden yaz..."
+                  placeholder={t.orNewReason}
                   value={distractReason}
                   autoFocus
                   onChange={(e) => setDistractReason(e.target.value)}
@@ -581,12 +597,14 @@ export default function App() {
                 <button
                   className="primary-btn"
                   onClick={() =>
-                    submitDistractionReason(distractReason || "Diğer")
+                    submitDistractionReason(distractReason || t.other)
                   }
                 >
-                  Ekle
+                  {t.add}
                 </button>
-                <button onClick={() => setShowDistractBox(false)}>İptal</button>
+                <button onClick={() => setShowDistractBox(false)}>
+                  {t.cancel}
+                </button>
               </div>
             </div>
           ) : (
@@ -596,15 +614,15 @@ export default function App() {
                 onClick={() => setIsRunning(!isRunning)}
               >
                 {isRunning
-                  ? "Duraklat"
+                  ? t.pause
                   : hasPausedProgress
-                    ? "Devam Et"
-                    : "Başlat"}
+                    ? t.resume
+                    : t.start}
               </button>
-              <button onClick={handleStopSession}>Durdur</button>
+              <button onClick={handleStopSession}>{t.stop}</button>
               {page === "work" && (
                 <button className="warn-btn" onClick={handleDistractedClick}>
-                  +1dk Dağıldım
+                  {t.distractedBtn}
                 </button>
               )}
             </div>
@@ -616,21 +634,23 @@ export default function App() {
       {page === "menu" && (
         <>
           <div className="top-bar">
-            <span className="badge">⠿ Menü • {dayStats.label}</span>
+            <span className="badge">
+              ⠿ {t.menu} • {dayStats.label}
+            </span>
             <div style={{ display: "flex", gap: "4px" }}>
               <button
                 className="ghost-btn"
-                title="Renkler, otomatik başlatma ve güncellemeler"
+                title={t.settings}
                 onClick={openSettings}
               >
-                ⚙ Ayarlar
+                ⚙ {t.settings}
               </button>
               <button className="ghost-btn" onClick={openSummary}>
-                Özet →
+                {t.summary} →
               </button>
               <button
                 className="ghost-btn"
-                title="Tepsiye gizle"
+                title={t.hideToTray}
                 onClick={hideToTray}
               >
                 ✕
@@ -641,25 +661,24 @@ export default function App() {
           <div className="stats-grid">
             <div className="stat-card">
               <div className="stat-val">
-                {formatDurationText(dayStats.totalSec)}
+                {t.formatDuration(dayStats.totalSec)}
               </div>
-              <div className="stat-lbl">Toplam Çalışma</div>
+              <div className="stat-lbl">{t.totalWork}</div>
             </div>
             <div className="stat-card">
               <div className="stat-val">{dayStats.sessionCount}</div>
-              <div className="stat-lbl">Seans</div>
+              <div className="stat-lbl">{t.sessions}</div>
             </div>
             <div className="stat-card">
               <div className="stat-val">
-                {Math.round(dayStats.avgSec / 60)} dk
+                {Math.round(dayStats.avgSec / 60)} {activeLang === "tr" ? "dk" : "min"}
               </div>
-              <div className="stat-lbl">Ortalama</div>
+              <div className="stat-lbl">{t.average}</div>
             </div>
           </div>
 
           <div className="last-pos-bar">
-            Son durum: Çalışma <b>{formatClock(workSecondsLeft)}</b> • Mola{" "}
-            <b>{formatClock(breakSecondsLeft)}</b>
+            {t.lastState(formatClock(workSecondsLeft), formatClock(breakSecondsLeft))}
           </div>
 
           {(updateStatus.kind === "available" ||
@@ -667,29 +686,24 @@ export default function App() {
             <div className="update-banner">
               {updateStatus.kind === "available" ? (
                 <>
-                  <span>Yeni sürüm hazır: v{updateStatus.version}</span>
+                  <span>{t.newVersionReady(updateStatus.version)}</span>
                   <button className="primary-btn" onClick={handleInstallUpdate}>
-                    Güncelle
+                    {t.installVersion(updateStatus.version)}
                   </button>
                 </>
               ) : (
-                <span>
-                  Güncelleme indiriliyor
-                  {updateStatus.percent !== null
-                    ? ` %${updateStatus.percent}`
-                    : "..."}
-                </span>
+                <span>{t.updateDownloading(updateStatus.percent)}</span>
               )}
             </div>
           )}
 
           <div className="menu-actions">
             <button className="primary-btn" onClick={() => setPage("work")}>
-              Çalışmaya Geç
+              {t.switchToWork}
             </button>
-            <button onClick={() => setPage("break")}>Molaya Geç</button>
+            <button onClick={() => setPage("break")}>{t.switchToBreak}</button>
             <button className="warn-btn full-width" onClick={handleStartNewDay}>
-              Yeni Günü Başlat (Eski Günü Bitir)
+              {t.startNewDay}
             </button>
           </div>
         </>
@@ -699,14 +713,40 @@ export default function App() {
       {page === "settings" && (
         <>
           <div className="top-bar">
-            <span className="badge">⠿ Ayarlar</span>
+            <span className="badge">{t.settingsTitle}</span>
             <button className="ghost-btn" onClick={openMenu}>
-              ← Ana Sayfa
+              ← {t.home}
             </button>
           </div>
 
+          {/* DİL SEÇİMİ */}
           <div className="settings-section">
-            <div className="settings-label">Arka plan rengi</div>
+            <div className="settings-label">{t.langLabel}</div>
+            <div className="lang-switcher">
+              <button
+                className={`lang-btn ${langPref === "auto" ? "active" : ""}`}
+                onClick={() => handleLanguageChange("auto")}
+              >
+                {t.langAuto}
+              </button>
+              <button
+                className={`lang-btn ${langPref === "tr" ? "active" : ""}`}
+                onClick={() => handleLanguageChange("tr")}
+              >
+                {t.langTr}
+              </button>
+              <button
+                className={`lang-btn ${langPref === "en" ? "active" : ""}`}
+                onClick={() => handleLanguageChange("en")}
+              >
+                {t.langEn}
+              </button>
+            </div>
+          </div>
+
+          {/* ARKA PLAN RENK & OPAKLIK */}
+          <div className="settings-section">
+            <div className="settings-label">{t.bgColorLabel}</div>
             <div className="swatch-row">
               {BG_PRESETS.map((c) => (
                 <button
@@ -720,13 +760,13 @@ export default function App() {
               <input
                 type="color"
                 className="color-input"
-                title="Özel renk seç"
+                title={t.customColorTitle}
                 value={theme.bgColor}
                 onChange={(e) => updateTheme({ bgColor: e.target.value })}
               />
             </div>
             <div className="settings-label slider-label">
-              <span>Opaklık</span>
+              <span>{t.opacityLabel}</span>
               <span>%{theme.bgOpacity}</span>
             </div>
             <input
@@ -741,9 +781,10 @@ export default function App() {
             />
           </div>
 
+          {/* SAYAÇ RENGİ */}
           <div className="settings-section">
             <div className="settings-label slider-label">
-              <span>Sayaç rengi</span>
+              <span>{t.timerColorLabel}</span>
               <span className="timer-preview">50:00</span>
             </div>
             <div className="swatch-row">
@@ -759,7 +800,7 @@ export default function App() {
               <input
                 type="color"
                 className="color-input"
-                title="Özel renk seç"
+                title={t.customColorTitle}
                 value={theme.timerColor}
                 onChange={(e) => updateTheme({ timerColor: e.target.value })}
               />
@@ -768,29 +809,24 @@ export default function App() {
 
           <div className="settings-actions">
             <button
-              title="Bilgisayar açıldığında otomatik başlat"
+              title={t.autoStartOnBoot(autoStartOn)}
               onClick={toggleAutoStart}
             >
-              Açılışta başlat: {autoStartOn ? "Açık" : "Kapalı"}
+              {t.autoStartOnBoot(autoStartOn)}
             </button>
             <button onClick={() => updateTheme({ ...DEFAULT_THEME })}>
-              Varsayılan renkler
+              {t.resetDefaultColors}
             </button>
           </div>
 
           <div className="update-row">
-            <span>Sürüm v{appVersion || "?"}</span>
+            <span>{t.versionLabel(appVersion)}</span>
             {updateStatus.kind === "available" ? (
               <button className="primary-btn" onClick={handleInstallUpdate}>
-                v{updateStatus.version} yükle
+                {t.installVersion(updateStatus.version)}
               </button>
             ) : updateStatus.kind === "downloading" ? (
-              <span>
-                İndiriliyor
-                {updateStatus.percent !== null
-                  ? ` %${updateStatus.percent}`
-                  : "..."}
-              </span>
+              <span>{t.updateDownloading(updateStatus.percent)}</span>
             ) : (
               <button
                 className="ghost-btn"
@@ -798,12 +834,12 @@ export default function App() {
                 onClick={handleCheckUpdate}
               >
                 {updateStatus.kind === "checking"
-                  ? "Denetleniyor..."
+                  ? t.checkingUpdates
                   : updateStatus.kind === "up-to-date"
-                    ? "Güncel ✓"
+                    ? t.upToDate
                     : updateStatus.kind === "error"
-                      ? "Hata, tekrar dene"
-                      : "Güncellemeleri denetle"}
+                      ? t.checkErrorRetry
+                      : t.checkUpdates}
               </button>
             )}
           </div>
@@ -819,28 +855,39 @@ export default function App() {
       {page === "summary" && (
         <>
           <div className="top-bar">
-            <span className="badge">⠿ Çalışma ve Odak Özeti</span>
+            <span className="badge">{t.summaryTitle}</span>
             <button className="ghost-btn" onClick={openMenu}>
-              ← Ana Sayfa
+              ← {t.home}
             </button>
           </div>
 
           <div className="tooltip-banner">
             {hoveredDay ? (
-              <>
-                <span>
-                  <b>{hoveredDay.label}</b>:{" "}
-                  {(hoveredDay.total_sec / 3600).toFixed(1)} sa
-                </span>
-                <span>
-                  {hoveredDay.session_count} seans • Ort:{" "}
-                  {hoveredDay.session_count > 0
-                    ? `${Math.round(hoveredDay.total_sec / hoveredDay.session_count / 60)} dk`
-                    : "0 dk"}
-                </span>
-              </>
+              (() => {
+                const hours = (hoveredDay.total_sec / 3600).toFixed(1);
+                const avgMins =
+                  hoveredDay.session_count > 0
+                    ? Math.round(
+                        hoveredDay.total_sec / hoveredDay.session_count / 60,
+                      )
+                    : 0;
+                const details = t.summaryBarDetails(
+                  hoveredDay.label,
+                  hours,
+                  hoveredDay.session_count,
+                  avgMins,
+                );
+                return (
+                  <>
+                    <span>
+                      <b>{details.main}</b>
+                    </span>
+                    <span>{details.sub}</span>
+                  </>
+                );
+              })()
             ) : (
-              <span>Detay görmek için gün çubuklarının üzerine gel</span>
+              <span>{t.summaryHoverHint}</span>
             )}
           </div>
 
@@ -854,7 +901,9 @@ export default function App() {
                   className="bar-col"
                   onMouseEnter={() => setHoveredDay(d)}
                 >
-                  <span className="bar-hours">{hours.toFixed(1)}s</span>
+                  <span className="bar-hours">
+                    {hours.toFixed(1)}{activeLang === "tr" ? "s" : "h"}
+                  </span>
                   <div
                     className={`bar-fill ${hoveredDay?.id === d.id ? "active-bar" : ""}`}
                     style={{ height: `${heightPct}%` }}
@@ -868,9 +917,9 @@ export default function App() {
           </div>
 
           <div className="freq-header">
-            <span>Dikkat Dağılma Sıklığı ({totalDistractions})</span>
+            <span>{t.distractionFreqHeader(totalDistractions)}</span>
             <button className="ghost-btn" onClick={toggleFreqFilter}>
-              {freqOnlyToday ? "Filtre: Bugün" : "Filtre: Genel"}
+              {freqOnlyToday ? t.filterToday : t.filterAll}
             </button>
           </div>
 
@@ -885,9 +934,7 @@ export default function App() {
                   <div key={item.reason} className="freq-item">
                     <div className="freq-label-row">
                       <span>{item.reason}</span>
-                      <span>
-                        {item.count} kez (%{pct})
-                      </span>
+                      <span>{t.timesCount(item.count, pct)}</span>
                     </div>
                     <div className="freq-bar-bg">
                       <div
@@ -900,7 +947,7 @@ export default function App() {
               })
             ) : (
               <div style={{ fontSize: "10px", color: "#a1a1aa" }}>
-                Henüz kayıtlı dikkat dağılma nedeni yok.
+                {t.noDistractions}
               </div>
             )}
           </div>

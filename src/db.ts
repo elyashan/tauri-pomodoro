@@ -135,13 +135,14 @@ export function getDb(): Promise<Database> {
 // Yardımcılar
 // ---------------------------------------------------------------------------
 
-function makeDayLabel(date: Date): string {
-  // Örn: "06 Kas"
-  return date.toLocaleDateString("tr-TR", { day: "2-digit", month: "short" });
+function makeDayLabel(date: Date, locale = "tr-TR"): string {
+  // Örn: "06 Kas" veya "06 Nov"
+  return date.toLocaleDateString(locale, { day: "2-digit", month: "short" });
 }
 
 async function getOrCreateActiveDay(
   db: Database,
+  locale = "tr-TR",
 ): Promise<{ id: number; label: string }> {
   const rows = await db.select<{ id: number; label: string }[]>(
     "SELECT id, label FROM study_days WHERE is_active = 1 ORDER BY id DESC LIMIT 1",
@@ -149,7 +150,7 @@ async function getOrCreateActiveDay(
   if (rows.length > 0) return rows[0];
 
   const now = new Date();
-  const label = makeDayLabel(now);
+  const label = makeDayLabel(now, locale);
   const res = await db.execute(
     "INSERT INTO study_days (label, started_at, is_active) VALUES ($1, $2, 1)",
     [label, now.toISOString()],
@@ -209,9 +210,9 @@ export async function saveAppState(state: AppState): Promise<void> {
 // Günler ve seanslar
 // ---------------------------------------------------------------------------
 
-export async function getActiveDayStats(): Promise<ActiveDayStats> {
+export async function getActiveDayStats(locale = "tr-TR"): Promise<ActiveDayStats> {
   const db = await getDb();
-  const day = await getOrCreateActiveDay(db);
+  const day = await getOrCreateActiveDay(db, locale);
 
   const rows = await db.select<{ total: number | null; cnt: number }[]>(
     `SELECT COALESCE(SUM(duration_sec), 0) AS total, COUNT(id) AS cnt
@@ -233,7 +234,7 @@ export async function getActiveDayStats(): Promise<ActiveDayStats> {
 }
 
 // Aktif günü bitirir, yeni bir gün açar ve yeni günün (boş) istatistiklerini döner
-export async function startNewDay(): Promise<ActiveDayStats> {
+export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   const db = await getDb();
   const nowIso = new Date().toISOString();
 
@@ -243,10 +244,10 @@ export async function startNewDay(): Promise<ActiveDayStats> {
   );
   await db.execute(
     "INSERT INTO study_days (label, started_at, is_active) VALUES ($1, $2, 1)",
-    [makeDayLabel(new Date()), nowIso],
+    [makeDayLabel(new Date(), locale), nowIso],
   );
 
-  return getActiveDayStats();
+  return getActiveDayStats(locale);
 }
 
 export async function recordWorkSession(durationSec: number): Promise<void> {
@@ -312,7 +313,7 @@ export async function recordDistraction(rawReason: string): Promise<void> {
 }
 
 // Daha önce seçilen şıkları en sık kullanılandan başlayarak getirir
-export async function getReasonChoices(): Promise<string[]> {
+export async function getReasonChoices(fallbackDefaults?: string[]): Promise<string[]> {
   const db = await getDb();
   const rows = await db.select<{ reason: string; cnt: number }[]>(`
     SELECT reason, COUNT(id) AS cnt, MAX(id) AS last_id
@@ -323,10 +324,11 @@ export async function getReasonChoices(): Promise<string[]> {
   `);
 
   const saved = rows.map((r) => r.reason);
-  for (const def of DEFAULT_REASONS) {
+  const defaults = fallbackDefaults && fallbackDefaults.length > 0 ? fallbackDefaults : DEFAULT_REASONS;
+  for (const def of defaults) {
     if (
       !saved.some(
-        (s) => s.toLocaleLowerCase("tr-TR") === def.toLocaleLowerCase("tr-TR"),
+        (s) => s.toLocaleLowerCase() === def.toLocaleLowerCase(),
       )
     ) {
       saved.push(def);
@@ -366,8 +368,31 @@ export async function getDistractionFrequencies(
 }
 
 // ---------------------------------------------------------------------------
-// Tema ayarları (renkler)
+// Dil ve Tema ayarları
 // ---------------------------------------------------------------------------
+
+export type LangCode = "auto" | "tr" | "en";
+
+export async function loadLanguagePreference(): Promise<LangCode> {
+  const db = await getDb();
+  const rows = await db.select<{ key: string; value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'language'",
+  );
+  const val = rows[0]?.value;
+  if (val === "tr" || val === "en" || val === "auto") {
+    return val;
+  }
+  return "auto";
+}
+
+export async function saveLanguagePreference(lang: LangCode): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('language', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [lang],
+  );
+}
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 

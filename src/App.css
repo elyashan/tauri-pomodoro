@@ -571,3 +571,51 @@ button:disabled {
 .light-theme button.swatch {
   border-color: rgba(0, 0, 0, 0.2);
 }
+
+/* Dil seçici butonları */
+.lang-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.lang-btn {
+  padding: 5px 4px;
+  font-size: 10px;
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #d4d4d8;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.lang-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.lang-btn.active {
+  background: rgba(59, 130, 246, 0.4);
+  border-color: #60a5fa;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.light-theme .lang-btn {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.05);
+  color: #27272a;
+}
+
+.light-theme .lang-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #000;
+}
+
+.light-theme .lang-btn.active {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: #3b82f6;
+  color: #1e3a8a;
+}
