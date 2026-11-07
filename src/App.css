@@ -70,13 +70,14 @@ body,
 
 /* Hafif saydam pencere (renkler Ayarlar sayfasından CSS değişkenleriyle gelir) */
 .widget-shell {
+  position: relative;
   width: 100%;
   height: 100%;
   background: var(--shell-bg, rgba(26, 24, 20, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   overflow: hidden;
-  padding: 10px 12px;
+  padding: 9px 11px 11px;
   color: #f4f4f5;
   display: flex;
   flex-direction: column;
@@ -115,14 +116,57 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
   font-size: 11px;
   color: #a1a1aa;
-  min-height: 20px;
+  min-height: 22px;
+  width: 100%;
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
 .badge {
   font-weight: 600;
   color: #d4d4d8;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+button.icon-btn {
+  padding: 2px 6px;
+  min-width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  position: relative;
+}
+
+button.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Sayaç: Fare dışarıdayken dikeyde ortalı durur, hover'da hafif yukarı kayar */
@@ -131,16 +175,17 @@ body,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  transform: translateY(2px);
+  transform: translateY(1px);
   transition: transform 0.16s ease;
 }
 
 .timer-display {
-  font-size: 40px;
+  font-size: 38px;
   font-weight: 700;
   letter-spacing: 1px;
   line-height: 1;
   color: var(--timer-color, #ffffff);
+  font-variant-numeric: tabular-nums;
 }
 
 .timer-display.clickable-timer {
@@ -174,16 +219,21 @@ body,
   display: flex;
   gap: 5px;
   justify-content: center;
+  align-items: center;
+  flex-wrap: nowrap;
+  padding-bottom: 3px;
 }
 
 button {
   background: rgba(255, 255, 255, 0.11);
   color: #f4f4f5;
   border: none;
-  padding: 5px 9px;
+  padding: 5px 8px;
   border-radius: 7px;
   font-size: 11px;
   font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.14s ease;
 }
@@ -929,19 +979,24 @@ button:disabled {
 /* Özet Ekranı: Tag Kırılımı ve Açıklama Accordion Listesi */
 .summary-subtabs {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   margin: 6px 0 4px;
+  flex-wrap: nowrap;
 }
 
 .subtab-btn {
   flex: 1;
-  font-size: 10px;
-  padding: 3px 6px;
+  min-width: 0;
+  font-size: 9.5px;
+  padding: 3px 4px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.05);
   color: #a1a1aa;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .subtab-btn.active {
@@ -1268,15 +1323,22 @@ button:disabled {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
   color: #e4e4e7;
-  padding: 1px 7px;
+  padding: 2px 6px;
   border-radius: 999px;
   font-size: 10px;
+  line-height: 1.2;
   cursor: pointer;
-  max-width: 140px;
+  max-width: 78px;
+  min-width: 0;
+  flex-shrink: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: all 0.12s ease;
+}
+
+.work-topic-badge.menu-topic {
+  max-width: 128px;
 }
 
 .work-topic-badge:hover {
@@ -1405,7 +1467,92 @@ button:disabled {
    Çalışma Planları (Study Plans) & Kısa Mola & Döngü Stilleri
    ========================================================================== */
 
-/* Menü / Anasayfa Plan Seçici */
+/* Menü / Anasayfa Canlı Seans Durumu & Özel Plan Seçici */
+.session-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  font-size: 11px;
+  color: #e4e4e7;
+}
+
+.session-status-bar.active-work {
+  background: rgba(16, 185, 129, 0.11);
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
+.session-status-bar.active-break {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.session-status-bar.active-alarm {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.session-status-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.session-status-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #71717a;
+}
+
+.status-dot.work {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+}
+
+.status-dot.break {
+  background: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.7);
+}
+
+.status-dot.alarm {
+  background: #ef4444;
+  box-shadow: 0 0 7px rgba(239, 68, 68, 0.85);
+}
+
+.status-dot.paused {
+  background: #fbbf24;
+}
+
+.session-clock-pill {
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+}
+
+.session-state-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+}
+
 .plan-picker-box {
   display: flex;
   flex-direction: column;
@@ -1413,54 +1560,126 @@ button:disabled {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  padding: 7px 9px;
+  position: relative;
 }
 
-.plan-picker-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  color: #a1a1aa;
-}
-
-.plan-dropdown-select {
+.plan-dropdown-wrap {
+  position: relative;
   width: 100%;
-  padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.35);
+}
+
+button.plan-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  background: rgba(0, 0, 0, 0.32);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 6px;
+  border-radius: 7px;
   color: #f4f4f5;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s ease;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
 }
 
-.plan-dropdown-select:focus {
-  border-color: #3b82f6;
+button.plan-dropdown-trigger:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(96, 165, 250, 0.55);
 }
 
-.plan-dropdown-select option {
-  background: #18181b;
-  color: #f4f4f5;
+button.plan-dropdown-trigger.open {
+  border-color: #60a5fa;
+}
+
+.plan-trigger-meta {
+  font-size: 10px;
+  font-weight: 500;
+  color: #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.plan-dropdown-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #18181f;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  border-radius: 8px;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 80;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+
+button.plan-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: transparent;
+  color: #e4e4e7;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+}
+
+button.plan-dropdown-item:hover {
+  background: rgba(59, 130, 246, 0.25);
+  color: #fff;
+}
+
+button.plan-dropdown-item.selected {
+  background: rgba(59, 130, 246, 0.4);
+  color: #fff;
+  font-weight: 600;
+}
+
+.plan-item-meta {
+  font-size: 9.5px;
+  color: #a1a1aa;
+  font-variant-numeric: tabular-nums;
+}
+
+button.plan-dropdown-item.selected .plan-item-meta {
+  color: #dbeafe;
+}
+
+.plan-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
 }
 
 .plan-chips-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: nowrap;
 }
 
 .plan-chip {
-  font-size: 9px;
+  font-size: 9.5px;
   padding: 2px 5px;
-  border-radius: 4px;
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.06);
   color: #d4d4d8;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  cursor: default;
 }
 
 .plan-chip.highlight {
@@ -1470,31 +1689,116 @@ button:disabled {
   font-weight: 600;
 }
 
-/* Üst Çubuk Rozetleri: Döngü & Kısa Mola */
+/* Üst Çubuk Rozetleri: Döngü, Kısa Mola & Dağılma */
 .cycle-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
+  gap: 2px;
+  padding: 2px 5px;
   background: rgba(245, 158, 11, 0.15);
   border: 1px solid rgba(245, 158, 11, 0.3);
   color: #fbbf24;
   border-radius: 9999px;
-  font-size: 9px;
+  font-size: 9.5px;
+  line-height: 1.2;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
 }
 
 .short-break-chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
+  gap: 2px;
+  padding: 2px 5px;
   background: rgba(14, 165, 233, 0.15);
   border: 1px solid rgba(14, 165, 233, 0.3);
   color: #38bdf8;
   border-radius: 9999px;
-  font-size: 9px;
+  font-size: 9.5px;
+  line-height: 1.2;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.distract-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 5px;
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  color: #fca5a5;
+  border-radius: 9999px;
+  font-size: 9.5px;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.light-theme .session-status-bar {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #18181b;
+}
+
+.light-theme .session-clock-pill {
+  color: #18181b;
+}
+
+.light-theme .session-state-tag {
+  background: rgba(0, 0, 0, 0.08);
+  color: #3f3f46;
+}
+
+.light-theme .plan-picker-box {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.light-theme button.plan-dropdown-trigger {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(0, 0, 0, 0.18);
+  color: #18181b;
+}
+
+.light-theme .plan-trigger-meta {
+  color: #1d4ed8;
+}
+
+.light-theme .plan-dropdown-list {
+  background: #f4f4f5;
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.light-theme button.plan-dropdown-item {
+  color: #18181b;
+}
+
+.light-theme button.plan-dropdown-item.selected {
+  color: #1e3a8a;
+}
+
+.light-theme button.plan-dropdown-item.selected .plan-item-meta {
+  color: #1e40af;
+}
+
+.light-theme .plan-chip {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #27272a;
+}
+
+.light-theme .work-topic-badge {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: #18181b;
 }
 
 /* Kısa Mola Butonu */

@@ -4,7 +4,29 @@ import Database from "@tauri-apps/plugin-sql";
 // Tipler
 // ---------------------------------------------------------------------------
 
-export type PageType = "menu" | "work" | "break" | "summary" | "settings";
+// "work" / "break" eski sürümlerden kalan değerlerdir; yeni sürümde sayaç ekranı "timer"dır.
+export type PageType = "menu" | "timer" | "work" | "break" | "summary" | "settings";
+export type TimerMode = "work" | "break";
+export type BreakKind = "standard" | "long" | "short";
+
+// Uygulama kapanıp açıldığında seansın kaldığı yerden devam edebilmesi için
+// sayaç dışındaki çalışma zamanı durumu.
+export interface RuntimeState {
+  sessionActive: boolean;
+  mode: TimerMode;
+  breakKind: BreakKind;
+  breakTotalSec: number;
+  breakElapsedSec: number;
+  breakOverdueSec: number;
+  breakOvertimeAccumSec: number;
+  savedWorkSecondsLeft: number;
+  savedWorkElapsedSec: number;
+  workStartedAt: string | null;
+  breakStartedAt: string | null;
+  workTag: string;
+  workReason: string;
+  sessionDistractions: number;
+}
 
 export interface ThemeSettings {
   bgColor: string; // "#rrggbb"
@@ -116,19 +138,11 @@ export interface StudyPlan {
   longBreakInterval: number;
 }
 
+// Plan adı boş ("") ise arayüz, aktif dile göre varsayılan kısa adı gösterir.
 export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
   {
-    id: "developer",
-    name: "Geliştirici Standardı",
-    workMins: 50,
-    shortBreakMins: 5,
-    standardBreakMins: 10,
-    longBreakMins: 30,
-    longBreakInterval: 3,
-  },
-  {
     id: "classic",
-    name: "Klasik Pomodoro",
+    name: "",
     workMins: 25,
     shortBreakMins: 3,
     standardBreakMins: 5,
@@ -136,8 +150,17 @@ export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
     longBreakInterval: 4,
   },
   {
+    id: "developer",
+    name: "",
+    workMins: 50,
+    shortBreakMins: 5,
+    standardBreakMins: 10,
+    longBreakMins: 30,
+    longBreakInterval: 3,
+  },
+  {
     id: "ultradian",
-    name: "Ultradian Ritmi",
+    name: "",
     workMins: 90,
     shortBreakMins: 5,
     standardBreakMins: 20,
@@ -146,7 +169,7 @@ export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
   },
   {
     id: "custom",
-    name: "Özel Plan",
+    name: "",
     workMins: 40,
     shortBreakMins: 5,
     standardBreakMins: 10,
@@ -154,6 +177,31 @@ export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
     longBreakInterval: 3,
   },
 ];
+
+// Önceki sürümlerin kaydettiği uzun varsayılan adlar; bunlar da "varsayılan ad" sayılır.
+const LEGACY_PLAN_NAMES = new Set([
+  "Geliştirici Standardı",
+  "Klasik Pomodoro",
+  "Ultradian Ritmi",
+  "Özel Plan",
+]);
+
+function sanitizePlan(raw: Partial<StudyPlan>, fallback: StudyPlan): StudyPlan {
+  const num = (v: unknown, min: number, max: number, def: number) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n >= min && n <= max ? n : def;
+  };
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  return {
+    id: fallback.id,
+    name: LEGACY_PLAN_NAMES.has(name) ? "" : name.slice(0, 24),
+    workMins: num(raw.workMins, 1, 240, fallback.workMins),
+    shortBreakMins: num(raw.shortBreakMins, 1, 60, fallback.shortBreakMins),
+    standardBreakMins: num(raw.standardBreakMins, 1, 90, fallback.standardBreakMins),
+    longBreakMins: num(raw.longBreakMins, 1, 180, fallback.longBreakMins),
+    longBreakInterval: num(raw.longBreakInterval, 1, 12, fallback.longBreakInterval),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Sabitler
@@ -164,7 +212,7 @@ export const DEFAULT_BREAK_SEC = 10 * 60;
 
 const DB_URL = "sqlite:pomodoro.db";
 const SUMMARY_DAY_LIMIT = 7;
-const VALID_PAGES: PageType[] = ["menu", "work", "break", "summary", "settings"];
+const VALID_PAGES: PageType[] = ["menu", "timer", "work", "break", "summary", "settings"];
 
 const DEFAULT_REASONS = [
   "Telefon",
@@ -276,6 +324,29 @@ async function initDb(): Promise<Database> {
     // sütun zaten varsa hata yok sayılır
   }
 
+  // Erken bitirme nedeni, çalışma konusundan (tag/reason) ayrı tutulur.
+  // Önceden ikisi aynı sütunları paylaştığı için özet verileri birbirine karışıyordu.
+  try {
+    await db.execute("ALTER TABLE sessions ADD COLUMN end_tag TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE sessions ADD COLUMN end_reason TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  // v0.1.7 ve öncesinde (started_at olmayan kayıtlar) tag/reason sadece erken
+  // bitirme nedeni için kullanılıyordu; bunları yeni sütunlara taşı.
+  await db.execute(
+    `UPDATE sessions
+     SET end_tag = tag, end_reason = reason, tag = NULL, reason = NULL
+     WHERE mode = 'work' AND started_at IS NULL AND end_tag IS NULL
+       AND (tag IS NOT NULL OR reason IS NOT NULL)`,
+  );
+
   return db;
 }
 
@@ -330,7 +401,7 @@ export async function loadAppState(): Promise<AppState> {
 
   if (rows.length === 0) {
     return {
-      page: "work",
+      page: "menu",
       work_seconds_left: DEFAULT_WORK_SEC,
       work_elapsed_sec: 0,
       break_seconds_left: DEFAULT_BREAK_SEC,
@@ -338,11 +409,17 @@ export async function loadAppState(): Promise<AppState> {
   }
 
   const row = rows[0];
+  const wLeft = Number(row.work_seconds_left);
+  const wElap = Number(row.work_elapsed_sec);
+  const bLeft = Number(row.break_seconds_left);
+
   return {
-    page: VALID_PAGES.includes(row.page) ? row.page : "work",
-    work_seconds_left: Number(row.work_seconds_left) || DEFAULT_WORK_SEC,
-    work_elapsed_sec: Number(row.work_elapsed_sec) || 0,
-    break_seconds_left: Number(row.break_seconds_left) || DEFAULT_BREAK_SEC,
+    page: VALID_PAGES.includes(row.page) ? row.page : "menu",
+    work_seconds_left:
+      Number.isFinite(wLeft) && wLeft >= 0 ? wLeft : DEFAULT_WORK_SEC,
+    work_elapsed_sec: Number.isFinite(wElap) && wElap >= 0 ? wElap : 0,
+    break_seconds_left:
+      Number.isFinite(bLeft) && bLeft >= 0 ? bLeft : DEFAULT_BREAK_SEC,
   };
 }
 
@@ -409,12 +486,35 @@ export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   return getActiveDayStats(locale);
 }
 
+// Yeni bir seans başlatırken çağrılır. Aktif gün hâlihazırda boşsa (hiç kayıt
+// yoksa) onu yeniden kullanır; böylece boş gün kayıtları birikmez.
+export async function beginSessionDay(locale = "tr-TR"): Promise<ActiveDayStats> {
+  const db = await getDb();
+  const day = await getOrCreateActiveDay(db, locale);
+  const rows = await db.select<{ cnt: number }[]>(
+    `SELECT (SELECT COUNT(id) FROM sessions WHERE day_id = $1) +
+            (SELECT COUNT(id) FROM distractions WHERE day_id = $1) AS cnt`,
+    [day.id],
+  );
+  if (Number(rows[0]?.cnt ?? 0) > 0) {
+    return startNewDay(locale);
+  }
+  const nowIso = new Date().toISOString();
+  await db.execute(
+    "UPDATE study_days SET label = $1, started_at = $2 WHERE id = $3",
+    [makeDayLabel(new Date(), locale), nowIso, day.id],
+  );
+  return getActiveDayStats(locale);
+}
+
 export async function recordWorkSession(
   durationSec: number,
   tag?: string,
   reason?: string,
   startedAt?: string,
   endedAt?: string,
+  endTag?: string,
+  endReason?: string,
 ): Promise<void> {
   const sec = Math.round(durationSec);
   if (sec <= 0) return;
@@ -426,9 +526,19 @@ export async function recordWorkSession(
   const startIso = startedAt || new Date(now.getTime() - sec * 1000).toISOString();
 
   await db.execute(
-    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec)
-     VALUES ($1, 'work', $2, $3, $4, $5, $6, $7, 0)`,
-    [day.id, sec, endIso, tag ?? null, reason ?? null, startIso, endIso],
+    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec, end_tag, end_reason)
+     VALUES ($1, 'work', $2, $3, $4, $5, $6, $7, 0, $8, $9)`,
+    [
+      day.id,
+      sec,
+      endIso,
+      tag || null,
+      reason || null,
+      startIso,
+      endIso,
+      endTag || null,
+      endReason || null,
+    ],
   );
 }
 
@@ -502,14 +612,23 @@ export async function getTimelineSessions(
       ? new Date(r.started_at)
       : new Date(end.getTime() - dur * 1000);
 
-    const sH =
-      start.getHours() +
-      start.getMinutes() / 60 +
-      start.getSeconds() / 3600;
-    const eH =
-      end.getHours() +
-      end.getMinutes() / 60 +
-      end.getSeconds() / 3600;
+    const sH = Math.min(
+      23.95,
+      Math.max(
+        0,
+        start.getHours() +
+          start.getMinutes() / 60 +
+          start.getSeconds() / 3600,
+      ),
+    );
+    const crossedMidnight =
+      end.getFullYear() !== start.getFullYear() ||
+      end.getMonth() !== start.getMonth() ||
+      end.getDate() !== start.getDate();
+    const rawEndH = crossedMidnight
+      ? 24
+      : end.getHours() + end.getMinutes() / 60 + end.getSeconds() / 3600;
+    const eH = Math.min(24, Math.max(sH + 0.05, rawEndH));
 
     const pad = (n: number) => n.toString().padStart(2, "0");
     const timeRangeLabel = `${pad(start.getHours())}:${pad(start.getMinutes())} - ${pad(end.getHours())}:${pad(end.getMinutes())}`;
@@ -531,7 +650,7 @@ export async function getTimelineSessions(
       startedAt: start.toISOString(),
       endedAt: end.toISOString(),
       startHour: sH,
-      endHour: Math.max(sH + 0.05, eH),
+      endHour: eH,
       timeRangeLabel,
       durationLabel: durLabel,
     };
@@ -742,7 +861,10 @@ export async function clearAllData(locale = "tr-TR"): Promise<void> {
   await db.execute("DELETE FROM distractions");
   await db.execute("DELETE FROM study_days");
   await db.execute(
-    "UPDATE app_state SET work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
+    "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
+  );
+  await db.execute(
+    "UPDATE app_state SET page = 'menu', work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
     [DEFAULT_WORK_SEC, DEFAULT_BREAK_SEC],
   );
   await getOrCreateActiveDay(db, locale);
@@ -852,10 +974,10 @@ export async function updateTag(
         oldName,
       ]);
     } else if (kind === "ending") {
-      await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'work'", [
-        normalized,
-        oldName,
-      ]);
+      await db.execute(
+        "UPDATE sessions SET end_tag = $1 WHERE end_tag = $2 AND mode = 'work'",
+        [normalized, oldName],
+      );
     } else if (kind === "work") {
       await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'work'", [
         normalized,
@@ -886,7 +1008,7 @@ export async function getPreviousReasons(
       const rows = await db.select<{ reason: string; cnt: number }[]>(
         `SELECT reason, COUNT(id) AS cnt FROM distractions
          WHERE tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
         [tag.trim()],
       );
       if (rows.length > 0) return rows.map((r) => r.reason);
@@ -894,7 +1016,7 @@ export async function getPreviousReasons(
     const rows = await db.select<{ reason: string; cnt: number }[]>(
       `SELECT reason, COUNT(id) AS cnt FROM distractions
        WHERE reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
     );
     return rows.map((r) => r.reason);
   } else if (kind === "work") {
@@ -902,7 +1024,7 @@ export async function getPreviousReasons(
       const rows = await db.select<{ reason: string; cnt: number }[]>(
         `SELECT reason, COUNT(id) AS cnt FROM sessions
          WHERE mode = 'work' AND tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
         [tag.trim()],
       );
       if (rows.length > 0) return rows.map((r) => r.reason);
@@ -910,40 +1032,42 @@ export async function getPreviousReasons(
     const rows = await db.select<{ reason: string; cnt: number }[]>(
       `SELECT reason, COUNT(id) AS cnt FROM sessions
        WHERE mode = 'work' AND reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
     );
     return rows.map((r) => r.reason);
   } else if (kind === "break_overtime") {
     if (tag && tag.trim()) {
       const rows = await db.select<{ reason: string; cnt: number }[]>(
         `SELECT reason, COUNT(id) AS cnt FROM sessions
-         WHERE mode = 'break' AND tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+         WHERE mode = 'break' AND overtime_sec > 0 AND tag = $1
+           AND reason IS NOT NULL AND reason != '' AND reason != tag
+         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
         [tag.trim()],
       );
       if (rows.length > 0) return rows.map((r) => r.reason);
     }
     const rows = await db.select<{ reason: string; cnt: number }[]>(
       `SELECT reason, COUNT(id) AS cnt FROM sessions
-       WHERE mode = 'break' AND reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+       WHERE mode = 'break' AND overtime_sec > 0 AND reason IS NOT NULL AND reason != ''
+       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
     );
     return rows.map((r) => r.reason);
   } else {
-    // ending
+    // ending (ayrı end_tag / end_reason sütunlarını kullanır)
     if (tag && tag.trim()) {
       const rows = await db.select<{ reason: string; cnt: number }[]>(
-        `SELECT reason, COUNT(id) AS cnt FROM sessions
-         WHERE tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+        `SELECT end_reason AS reason, COUNT(id) AS cnt FROM sessions
+         WHERE mode = 'work' AND end_tag = $1
+           AND end_reason IS NOT NULL AND end_reason != '' AND end_reason != end_tag
+         GROUP BY end_reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
         [tag.trim()],
       );
       if (rows.length > 0) return rows.map((r) => r.reason);
     }
     const rows = await db.select<{ reason: string; cnt: number }[]>(
-      `SELECT reason, COUNT(id) AS cnt FROM sessions
-       WHERE reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+      `SELECT end_reason AS reason, COUNT(id) AS cnt FROM sessions
+       WHERE mode = 'work' AND end_reason IS NOT NULL AND end_reason != ''
+       GROUP BY end_reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
     );
     return rows.map((r) => r.reason);
   }
@@ -999,10 +1123,10 @@ export async function getSummaryReasonsData(
   );
   const workTags = buildTagItems(workRows);
 
-  // 2. Mola Gecikmeleri (Break Overtime tags)
+  // 2. Mola Gecikmeleri (yalnızca gerçekten süre aşımı olan molalar: overtime_sec > 0)
   const breakFilter = onlyToday
-    ? "WHERE mode = 'break' AND day_id = $1 AND (overtime_sec > 0 OR tag IS NOT NULL OR reason IS NOT NULL)"
-    : "WHERE mode = 'break' AND (overtime_sec > 0 OR tag IS NOT NULL OR reason IS NOT NULL)";
+    ? "WHERE mode = 'break' AND day_id = $1 AND overtime_sec > 0"
+    : "WHERE mode = 'break' AND overtime_sec > 0";
   const breakRows = await db.select<{ tag: string | null; reason: string | null }[]>(
     `SELECT tag, reason FROM sessions ${breakFilter}`,
     params,
@@ -1016,12 +1140,12 @@ export async function getSummaryReasonsData(
   );
   const distractionTags = buildTagItems(distRows);
 
-  // 4. Erken Bitirme Kayıtları
+  // 4. Erken Bitirme Kayıtları (end_tag / end_reason sütunlarından okunur)
   const endingFilter = onlyToday
-    ? "WHERE mode = 'work' AND day_id = $1 AND reason IS NOT NULL"
-    : "WHERE mode = 'work' AND reason IS NOT NULL";
+    ? "WHERE mode = 'work' AND day_id = $1 AND (end_tag IS NOT NULL OR end_reason IS NOT NULL)"
+    : "WHERE mode = 'work' AND (end_tag IS NOT NULL OR end_reason IS NOT NULL)";
   const endingRows = await db.select<{ tag: string | null; reason: string | null }[]>(
-    `SELECT tag, reason FROM sessions ${endingFilter}`,
+    `SELECT end_tag AS tag, end_reason AS reason FROM sessions ${endingFilter}`,
     params,
   );
   const endingTags = buildTagItems(endingRows);
@@ -1191,7 +1315,7 @@ export async function exportAllData(): Promise<string> {
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.9",
+    version: "0.1.10",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,
@@ -1212,24 +1336,81 @@ export async function loadStudyPlans(): Promise<StudyPlan[]> {
   const rows = await db.select<{ value: string }[]>(
     "SELECT value FROM settings WHERE key = 'studyPlans'",
   );
-  if (rows.length === 0) return DEFAULT_STUDY_PLANS;
+  if (rows.length === 0) return DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
   try {
     const parsed = JSON.parse(rows[0].value);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      return DEFAULT_STUDY_PLANS.map((def) => {
+        const found = parsed.find(
+          (item: Partial<StudyPlan>) => item && item.id === def.id,
+        );
+        return found ? sanitizePlan(found, def) : { ...def };
+      });
     }
   } catch {
     // fallback
   }
-  return DEFAULT_STUDY_PLANS;
+  return DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
 }
 
 export async function saveStudyPlans(plans: StudyPlan[]): Promise<void> {
   const db = await getDb();
+  const sanitized = DEFAULT_STUDY_PLANS.map((def) => {
+    const found = plans.find((p) => p.id === def.id);
+    return found ? sanitizePlan(found, def) : { ...def };
+  });
   await db.execute(
     `INSERT INTO settings (key, value) VALUES ('studyPlans', $1)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [JSON.stringify(plans)],
+    [JSON.stringify(sanitized)],
+  );
+}
+
+export async function loadRuntimeState(): Promise<RuntimeState | null> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'runtimeState'",
+  );
+  if (rows.length === 0) return null;
+  try {
+    const raw = JSON.parse(rows[0].value) as Partial<RuntimeState>;
+    if (!raw || typeof raw !== "object") return null;
+    const mode: TimerMode = raw.mode === "break" ? "break" : "work";
+    const breakKind: BreakKind =
+      raw.breakKind === "long" || raw.breakKind === "short"
+        ? raw.breakKind
+        : "standard";
+    const posInt = (v: unknown, def: number) => {
+      const n = Math.round(Number(v));
+      return Number.isFinite(n) && n >= 0 ? n : def;
+    };
+    return {
+      sessionActive: Boolean(raw.sessionActive),
+      mode,
+      breakKind,
+      breakTotalSec: Math.max(60, posInt(raw.breakTotalSec, DEFAULT_BREAK_SEC)),
+      breakElapsedSec: posInt(raw.breakElapsedSec, 0),
+      breakOverdueSec: posInt(raw.breakOverdueSec, 0),
+      breakOvertimeAccumSec: posInt(raw.breakOvertimeAccumSec, 0),
+      savedWorkSecondsLeft: posInt(raw.savedWorkSecondsLeft, DEFAULT_WORK_SEC),
+      savedWorkElapsedSec: posInt(raw.savedWorkElapsedSec, 0),
+      workStartedAt: typeof raw.workStartedAt === "string" ? raw.workStartedAt : null,
+      breakStartedAt: typeof raw.breakStartedAt === "string" ? raw.breakStartedAt : null,
+      workTag: typeof raw.workTag === "string" ? raw.workTag : "",
+      workReason: typeof raw.workReason === "string" ? raw.workReason : "",
+      sessionDistractions: posInt(raw.sessionDistractions, 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRuntimeState(state: RuntimeState): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('runtimeState', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [JSON.stringify(state)],
   );
 }
 
