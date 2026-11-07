@@ -222,11 +222,11 @@ export default function App() {
       const hasBanner =
         updateStatus.kind === "available" ||
         updateStatus.kind === "downloading";
-      win.setSize(new LogicalSize(310, hasBanner ? 326 : 290));
+      win.setSize(new LogicalSize(310, hasBanner ? 346 : 312));
     } else if (page === "summary") {
       win.setSize(new LogicalSize(360, 390));
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(310, 395));
+      win.setSize(new LogicalSize(310, 420));
     } else if (showDistractBox) {
       win.setSize(new LogicalSize(285, 235));
     } else {
@@ -706,6 +706,10 @@ export default function App() {
               {t.startNewDay}
             </button>
           </div>
+
+          <div className="credits-bar">
+            Credits by <b>Elyas</b>
+          </div>
         </>
       )}
 
@@ -848,6 +852,10 @@ export default function App() {
               {updateStatus.message}
             </div>
           )}
+
+          <div className="credits-bar">
+            Credits by <b>Elyas</b>
+          </div>
         </>
       )}
 
