@@ -640,3 +640,184 @@ button:disabled {
 .light-theme .credits-bar b {
   color: #3f3f46;
 }
+
+/* Erken Bitirme ve Tag Yönetimi */
+.stop-box {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.stop-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stop-box-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.stop-box-hint {
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+.stop-chips {
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.tag-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  padding: 1px 3px 1px 1px;
+  gap: 2px;
+}
+
+.tag-chip-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 3px 6px !important;
+  font-size: 10px !important;
+  color: #e4e4e7 !important;
+  cursor: pointer;
+}
+
+.tag-chip-btn:hover {
+  color: #fff !important;
+}
+
+.tag-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tag-icon-btn {
+  background: transparent !important;
+  border: none !important;
+  padding: 1px 3px !important;
+  font-size: 9px !important;
+  color: #a1a1aa !important;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.tag-icon-btn:hover {
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.tag-icon-btn.del-btn:hover {
+  color: #f87171 !important;
+  background: rgba(239, 68, 68, 0.25) !important;
+}
+
+.stop-box-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* Özet Haftalık Görünüm & Sekmeler */
+.summary-tab-group {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.tab-btn {
+  background: transparent;
+  border: none;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.tab-btn.active {
+  background: rgba(59, 130, 246, 0.45);
+  color: #fff;
+  font-weight: 600;
+}
+
+.weekly-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin: 6px 0;
+}
+
+.summary-bottom-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.reset-data-btn {
+  color: #f87171;
+  font-size: 10px;
+}
+
+.reset-data-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.reset-confirm-box {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 10px 0;
+  text-align: center;
+}
+
+.reset-confirm-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fca5a5;
+  margin-bottom: 4px;
+}
+
+.reset-confirm-desc {
+  font-size: 10px;
+  color: #d4d4d8;
+  line-height: 1.4;
+}
+
+.light-theme .tag-chip-wrap {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.light-theme .tag-chip-btn {
+  color: #27272a !important;
+}
+
+.light-theme .tag-icon-btn {
+  color: #52525b !important;
+}
+
+.light-theme .summary-tab-group {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.light-theme .tab-btn.active {
+  background: rgba(59, 130, 246, 0.3);
+  color: #1e3a8a;
+}

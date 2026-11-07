@@ -46,6 +46,29 @@ export interface DistractionFrequency {
   count: number;
 }
 
+export interface TagItem {
+  id: number;
+  name: string;
+}
+
+export interface WeekDayStat {
+  dayIndex: number;
+  shortLabel: string;
+  dateLabel: string;
+  fullDateStr: string;
+  total_sec: number;
+  session_count: number;
+  is_today: boolean;
+}
+
+export interface WeeklySummary {
+  days: WeekDayStat[];
+  totalSec: number;
+  sessionCount: number;
+  dailyAvgSec: number;
+  activeDaysCount: number;
+}
+
 // ---------------------------------------------------------------------------
 // Sabitler
 // ---------------------------------------------------------------------------
@@ -116,6 +139,19 @@ async function initDb(): Promise<Database> {
       value TEXT NOT NULL
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  try {
+    await db.execute("ALTER TABLE sessions ADD COLUMN tag TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
 
   return db;
 }
@@ -250,15 +286,15 @@ export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   return getActiveDayStats(locale);
 }
 
-export async function recordWorkSession(durationSec: number): Promise<void> {
+export async function recordWorkSession(durationSec: number, tag?: string): Promise<void> {
   const sec = Math.round(durationSec);
   if (sec <= 0) return;
 
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
   await db.execute(
-    "INSERT INTO sessions (day_id, mode, duration_sec, created_at) VALUES ($1, 'work', $2, $3)",
-    [day.id, sec, new Date().toISOString()],
+    "INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag) VALUES ($1, 'work', $2, $3, $4)",
+    [day.id, sec, new Date().toISOString(), tag ?? null],
   );
 }
 
@@ -365,6 +401,174 @@ export async function getDistractionFrequencies(
   }
 
   return rows.map((r) => ({ reason: r.reason, count: Number(r.count) }));
+}
+
+// ---------------------------------------------------------------------------
+// Haftalık Özet
+// ---------------------------------------------------------------------------
+
+export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary> {
+  const db = await getDb();
+
+  const now = new Date();
+  const currentDay = now.getDay(); // 0: Pazar, 1: Pazartesi...
+  const mondayOffset = (currentDay + 6) % 7; // Pazartesi 0, Salı 1... Pazar 6
+
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - mondayOffset);
+  monday.setHours(0, 0, 0, 0);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+
+  const rows = await db.select<{ duration_sec: number; created_at: string }[]>(
+    `SELECT duration_sec, created_at FROM sessions
+     WHERE mode = 'work' AND created_at >= $1 AND created_at <= $2`,
+    [monday.toISOString(), sunday.toISOString()],
+  );
+
+  const isTr = locale.toLowerCase().startsWith("tr");
+  const shortDaysTr = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+  const shortDaysEn = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const shortNames = isTr ? shortDaysTr : shortDaysEn;
+
+  const days: WeekDayStat[] = [];
+  let totalSec = 0;
+  let totalSessions = 0;
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear();
+
+    const dayYear = d.getFullYear();
+    const dayMonth = d.getMonth();
+    const dayDate = d.getDate();
+
+    const matching = rows.filter((r) => {
+      const rd = new Date(r.created_at);
+      return (
+        rd.getFullYear() === dayYear &&
+        rd.getMonth() === dayMonth &&
+        rd.getDate() === dayDate
+      );
+    });
+
+    const daySec = matching.reduce((acc, r) => acc + Number(r.duration_sec), 0);
+    const dayCount = matching.length;
+
+    totalSec += daySec;
+    totalSessions += dayCount;
+
+    days.push({
+      dayIndex: i,
+      shortLabel: shortNames[i],
+      dateLabel: d.toLocaleDateString(locale, { day: "2-digit", month: "short" }),
+      fullDateStr: d.toISOString().slice(0, 10),
+      total_sec: daySec,
+      session_count: dayCount,
+      is_today: isToday,
+    });
+  }
+
+  const activeDaysCount = days.filter((d) => d.total_sec > 0).length;
+  const dailyAvgSec = Math.round(totalSec / 7);
+
+  return {
+    days,
+    totalSec,
+    sessionCount: totalSessions,
+    dailyAvgSec,
+    activeDaysCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Verileri Sıfırlama
+// ---------------------------------------------------------------------------
+
+export async function clearAllData(locale = "tr-TR"): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM sessions");
+  await db.execute("DELETE FROM distractions");
+  await db.execute("DELETE FROM study_days");
+  await db.execute(
+    "UPDATE app_state SET work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
+    [DEFAULT_WORK_SEC, DEFAULT_BREAK_SEC],
+  );
+  await getOrCreateActiveDay(db, locale);
+}
+
+// ---------------------------------------------------------------------------
+// Tag (Erken Bitirme / Kategori) Yönetimi
+// ---------------------------------------------------------------------------
+
+const DEFAULT_TAGS_TR = [
+  "Toplantı",
+  "Yemek",
+  "Mola İhtiyacı",
+  "Acil İş",
+  "Ders Bitti",
+  "Yorgunluk",
+];
+
+export async function getTags(fallbackDefaults?: string[]): Promise<TagItem[]> {
+  const db = await getDb();
+  const rows = await db.select<TagItem[]>("SELECT id, name FROM tags ORDER BY id ASC");
+  if (rows.length > 0) return rows;
+
+  const defaults =
+    fallbackDefaults && fallbackDefaults.length > 0 ? fallbackDefaults : DEFAULT_TAGS_TR;
+  const nowIso = new Date().toISOString();
+  for (const name of defaults) {
+    try {
+      await db.execute("INSERT INTO tags (name, created_at) VALUES ($1, $2)", [name, nowIso]);
+    } catch {
+      // Çift kayıtları yoksay
+    }
+  }
+  return db.select<TagItem[]>("SELECT id, name FROM tags ORDER BY id ASC");
+}
+
+export async function addTag(rawName: string): Promise<TagItem | null> {
+  const name = rawName.trim();
+  if (!name) return null;
+  const normalized = name.charAt(0).toLocaleUpperCase("tr-TR") + name.slice(1);
+  const db = await getDb();
+  try {
+    const res = await db.execute("INSERT INTO tags (name, created_at) VALUES ($1, $2)", [
+      normalized,
+      new Date().toISOString(),
+    ]);
+    return { id: Number(res.lastInsertId), name: normalized };
+  } catch {
+    const rows = await db.select<TagItem[]>("SELECT id, name FROM tags WHERE name = $1", [normalized]);
+    return rows[0] ?? null;
+  }
+}
+
+export async function updateTag(id: number, rawName: string): Promise<void> {
+  const name = rawName.trim();
+  if (!name) return;
+  const normalized = name.charAt(0).toLocaleUpperCase("tr-TR") + name.slice(1);
+  const db = await getDb();
+  const oldRows = await db.select<{ name: string }[]>("SELECT name FROM tags WHERE id = $1", [id]);
+  const oldName = oldRows[0]?.name;
+
+  await db.execute("UPDATE tags SET name = $1 WHERE id = $2", [normalized, id]);
+  if (oldName) {
+    await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2", [normalized, oldName]);
+  }
+}
+
+export async function deleteTag(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM tags WHERE id = $1", [id]);
 }
 
 // ---------------------------------------------------------------------------

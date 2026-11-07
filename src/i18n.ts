@@ -63,6 +63,31 @@ export interface Translations {
   todayLabel: string;
   formatDuration: (sec: number) => string;
   defaultReasons: string[];
+
+  // Erken durdurma & Taglar
+  earlyStopTitle: string;
+  earlyStopWorkedTime: (mins: number) => string;
+  finishWithoutTag: string;
+  cancelReturn: string;
+  addAndFinish: string;
+  newTagPlaceholder: string;
+  editTags: string;
+  doneEditing: string;
+  defaultTags: string[];
+  deleteTagConfirm: (name: string) => string;
+  editTagPrompt: (name: string) => string;
+
+  // Özet haftalık görünüm & sıfırlama
+  viewWeekly: string;
+  viewRecentDays: string;
+  weeklyTotal: string;
+  weeklyDailyAvg: string;
+  weeklyDaysWorked: (days: number) => string;
+  resetAllData: string;
+  resetConfirmTitle: string;
+  resetConfirmDesc: string;
+  resetConfirmYes: string;
+  dataResetSuccess: string;
 }
 
 const tr: Translations = {
@@ -136,6 +161,39 @@ const tr: Translations = {
     "Mesaj / Bildirim",
     "Dış Gürültü",
   ],
+
+  // Erken durdurma & Taglar
+  earlyStopTitle: "Seansı Bitir (Neden / Tag)",
+  earlyStopWorkedTime: (mins) => `${mins} dakika çalışıldı`,
+  finishWithoutTag: "Tag'siz Bitir",
+  cancelReturn: "Vazgeç / Devam Et",
+  addAndFinish: "Ekle & Bitir",
+  newTagPlaceholder: "Yeni tag veya neden...",
+  editTags: "Tagları Düzenle",
+  doneEditing: "Tamam",
+  defaultTags: [
+    "Toplantı",
+    "Yemek",
+    "Mola İhtiyacı",
+    "Acil İş",
+    "Ders Bitti",
+    "Yorgunluk",
+  ],
+  deleteTagConfirm: (name) => `"${name}" tag'ini silmek istiyor musunuz?`,
+  editTagPrompt: (name) => `"${name}" için yeni tag adı:`,
+
+  // Özet haftalık görünüm & sıfırlama
+  viewWeekly: "Haftalık Görünüm",
+  viewRecentDays: "Son Günler",
+  weeklyTotal: "Haftalık Toplam",
+  weeklyDailyAvg: "Haftalık Günlük Ort.",
+  weeklyDaysWorked: (days) => `${days}/7 gün çalışıldı`,
+  resetAllData: "Verileri Sıfırla",
+  resetConfirmTitle: "Veriler Sıfırlansın mı?",
+  resetConfirmDesc:
+    "Tüm geçmiş çalışma seansları, günler ve dikkat dağılma kayıtları tamamen silinecektir. Bu işlem geri alınamaz.",
+  resetConfirmYes: "Evet, Tümünü Sıfırla",
+  dataResetSuccess: "Tüm veriler başarıyla sıfırlandı.",
 };
 
 const en: Translations = {
@@ -209,6 +267,39 @@ const en: Translations = {
     "Message / Notification",
     "Noise",
   ],
+
+  // Erken durdurma & Taglar
+  earlyStopTitle: "End Session (Reason / Tag)",
+  earlyStopWorkedTime: (mins) => `${mins} minutes completed`,
+  finishWithoutTag: "Finish Without Tag",
+  cancelReturn: "Cancel / Continue",
+  addAndFinish: "Add & Finish",
+  newTagPlaceholder: "New tag or reason...",
+  editTags: "Edit Tags",
+  doneEditing: "Done",
+  defaultTags: [
+    "Meeting",
+    "Meal",
+    "Need a Break",
+    "Urgent Task",
+    "Finished",
+    "Fatigue",
+  ],
+  deleteTagConfirm: (name) => `Delete tag "${name}"?`,
+  editTagPrompt: (name) => `Enter new name for "${name}":`,
+
+  // Özet haftalık görünüm & sıfırlama
+  viewWeekly: "Weekly View",
+  viewRecentDays: "Recent Days",
+  weeklyTotal: "Weekly Total",
+  weeklyDailyAvg: "Daily Avg (Week)",
+  weeklyDaysWorked: (days) => `${days}/7 days worked`,
+  resetAllData: "Reset All Data",
+  resetConfirmTitle: "Reset all data?",
+  resetConfirmDesc:
+    "All session history, days, and distraction records will be permanently erased. This cannot be undone.",
+  resetConfirmYes: "Yes, Reset All",
+  dataResetSuccess: "All data has been reset.",
 };
 
 export const translations: Record<ActiveLang, Translations> = { tr, en };

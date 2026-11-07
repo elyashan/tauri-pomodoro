@@ -11,6 +11,9 @@ import {
   DistractionFrequency,
   ThemeSettings,
   LangCode,
+  TagItem,
+  WeekDayStat,
+  WeeklySummary,
   DEFAULT_THEME,
   DEFAULT_WORK_SEC,
   DEFAULT_BREAK_SEC,
@@ -25,6 +28,12 @@ import {
   recordWorkSession,
   recordDistraction,
   getDaysSummary,
+  getWeeklySummary,
+  clearAllData,
+  getTags,
+  addTag,
+  updateTag,
+  deleteTag,
   getReasonChoices,
   getDistractionFrequencies,
 } from "./db";
@@ -119,6 +128,12 @@ export default function App() {
   const [distractReason, setDistractReason] = useState("");
   const [reasonChoices, setReasonChoices] = useState<string[]>([]);
 
+  // Erken durdurma & Tag yönetimi
+  const [showStopBox, setShowStopBox] = useState(false);
+  const [tags, setTags] = useState<TagItem[]>([]);
+  const [newTagText, setNewTagText] = useState("");
+  const [isEditingTags, setIsEditingTags] = useState(false);
+
   // İstatistikler ve Özet verisi
   const [dayStats, setDayStats] = useState<ActiveDayStats>({
     dayId: 1,
@@ -128,7 +143,11 @@ export default function App() {
     avgSec: 0,
   });
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
+  const [summaryTab, setSummaryTab] = useState<"weekly" | "recent">("weekly");
   const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
+  const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [freqOnlyToday, setFreqOnlyToday] = useState(false);
   const [distractFreqs, setDistractFreqs] = useState<DistractionFrequency[]>(
     [],
@@ -168,9 +187,12 @@ export default function App() {
         const active = resolveLanguage(savedLang);
         const currentT = translations[active];
 
-        const stats = await getActiveDayStats(active === "tr" ? "tr-TR" : "en-US");
+        const locale = active === "tr" ? "tr-TR" : "en-US";
+        const stats = await getActiveDayStats(locale);
         const days = await getDaysSummary();
+        const weekly = await getWeeklySummary(locale);
         const choices = await getReasonChoices(currentT.defaultReasons);
+        const initialTags = await getTags(currentT.defaultTags);
         const freqs = await getDistractionFrequencies(false);
         const savedTheme = await loadThemeSettings();
 
@@ -181,7 +203,9 @@ export default function App() {
         setBreakSecondsLeft(saved.break_seconds_left);
         setDayStats(stats);
         setSummaryDays(days);
+        setWeeklySummary(weekly);
         setReasonChoices(choices);
+        setTags(initialTags);
         setDistractFreqs(freqs);
         setTheme(savedTheme);
       } catch (err) {
@@ -201,7 +225,6 @@ export default function App() {
             await enable();
             localStorage.setItem("autostart_initialized", "1");
           } else if (await isEnabled()) {
-            // Exe taşındıysa veya güncellemeyle yeri değiştiyse kayıttaki yolu tazele
             await enable();
           }
         }
@@ -224,17 +247,19 @@ export default function App() {
         updateStatus.kind === "downloading";
       win.setSize(new LogicalSize(310, hasBanner ? 346 : 312));
     } else if (page === "summary") {
-      win.setSize(new LogicalSize(360, 390));
+      win.setSize(new LogicalSize(360, 440));
     } else if (page === "settings") {
       win.setSize(new LogicalSize(310, 420));
+    } else if (showStopBox) {
+      win.setSize(new LogicalSize(300, 270));
     } else if (showDistractBox) {
       win.setSize(new LogicalSize(285, 235));
     } else {
       win.setSize(new LogicalSize(240, 124));
     }
-  }, [page, showDistractBox, loaded, updateStatus.kind]);
+  }, [page, showDistractBox, showStopBox, loaded, updateStatus.kind]);
 
-  // Renk ayarları değişince kaydet (renk seçici sürüklenirken her an yazmamak için gecikmeli)
+  // Renk ayarları değişince kaydet
   useEffect(() => {
     if (!loaded || !themeDirtyRef.current) return;
     const t = setTimeout(() => {
@@ -245,12 +270,11 @@ export default function App() {
     return () => clearTimeout(t);
   }, [theme, loaded]);
 
-  // Açılışta ve 6 saatte bir sessizce güncelleme kontrolü (geliştirme modunda kapalı)
+  // Açılışta ve 6 saatte bir sessizce güncelleme kontrolü
   useEffect(() => {
     if (!loaded || import.meta.env.DEV) return;
     const runCheck = async () => {
       const result = await checkForUpdate();
-      // Arka plan kontrolünde hata/güncel durumunu gösterme; sadece yeni sürüm varsa bildir
       if (result.kind === "available") setUpdateStatus(result);
     };
     const first = setTimeout(runCheck, 10_000);
@@ -261,8 +285,7 @@ export default function App() {
     };
   }, [loaded]);
 
-  // Durum kaydı: sayaç durmuşken her değişiklikte (süre düzenleme, durdur,
-  // sayfa değişimi vb.) hemen kaydet
+  // Durum kaydı
   useEffect(() => {
     if (!loaded || isRunning) return;
     persistState(stateRef.current);
@@ -275,7 +298,7 @@ export default function App() {
     breakSecondsLeft,
   ]);
 
-  // Sayaç çalışırken 5 saniyede bir yedekle (ref sayesinde interval sıfırlanmaz)
+  // Sayaç çalışırken 5 saniyede bir yedekle
   useEffect(() => {
     if (!loaded || !isRunning) return;
     persistState(stateRef.current);
@@ -283,7 +306,7 @@ export default function App() {
     return () => clearInterval(backup);
   }, [loaded, isRunning]);
 
-  // Sistem saatine dayalı kaymaz sayaç döngüsü
+  // Sistem saatine dayalı sayaç döngüsü
   useEffect(() => {
     if (!isRunning) return;
     lastTickRef.current = Date.now();
@@ -315,7 +338,9 @@ export default function App() {
         await recordWorkSession(workElapsedSec);
         setWorkSecondsLeft(DEFAULT_WORK_SEC);
         setWorkElapsedSec(0);
-        setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
+        const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+        setDayStats(await getActiveDayStats(locale));
+        setWeeklySummary(await getWeeklySummary(locale));
       })();
     } else if (page === "break" && breakSecondsLeft === 0) {
       setIsRunning(false);
@@ -366,17 +391,60 @@ export default function App() {
     setIsEditing(false);
   };
 
+  // Erken durdurma tıklandığında
   const handleStopSession = async () => {
     setIsRunning(false);
     if (page === "work") {
-      if (workElapsedSec >= 60) {
-        await recordWorkSession(workElapsedSec);
-        setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
+      if (workElapsedSec >= 15) {
+        // Erken durdurma neden/tag kutusunu aç
+        const loadedTags = await getTags(t.defaultTags);
+        setTags(loadedTags);
+        setShowStopBox(true);
+        return;
       }
       setWorkSecondsLeft(DEFAULT_WORK_SEC);
       setWorkElapsedSec(0);
     } else {
       setBreakSecondsLeft(DEFAULT_BREAK_SEC);
+    }
+  };
+
+  const handleFinishWithTag = async (tagName?: string) => {
+    if (workElapsedSec >= 15) {
+      await recordWorkSession(workElapsedSec, tagName);
+      const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+      setDayStats(await getActiveDayStats(locale));
+      setWeeklySummary(await getWeeklySummary(locale));
+    }
+    setWorkSecondsLeft(DEFAULT_WORK_SEC);
+    setWorkElapsedSec(0);
+    setShowStopBox(false);
+    setIsEditingTags(false);
+    setNewTagText("");
+  };
+
+  const handleAddAndFinishTag = async () => {
+    const text = newTagText.trim();
+    if (!text) {
+      await handleFinishWithTag();
+      return;
+    }
+    const created = await addTag(text);
+    await handleFinishWithTag(created?.name ?? text);
+  };
+
+  const handleDeleteTag = async (tagId: number, tagName: string) => {
+    if (window.confirm(t.deleteTagConfirm(tagName))) {
+      await deleteTag(tagId);
+      setTags(await getTags(t.defaultTags));
+    }
+  };
+
+  const handleEditTag = async (tagId: number, currentName: string) => {
+    const newName = window.prompt(t.editTagPrompt(currentName), currentName);
+    if (newName && newName.trim() && newName.trim() !== currentName) {
+      await updateTag(tagId, newName.trim());
+      setTags(await getTags(t.defaultTags));
     }
   };
 
@@ -396,18 +464,43 @@ export default function App() {
   const openMenu = async () => {
     setIsRunning(false);
     setShowDistractBox(false);
+    setShowStopBox(false);
     setDayStats(await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"));
     setPage("menu");
   };
 
   const openSummary = async () => {
     setIsRunning(false);
+    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const days = await getDaysSummary();
+    const weekly = await getWeeklySummary(locale);
     const freqs = await getDistractionFrequencies(freqOnlyToday);
     setSummaryDays(days);
+    setWeeklySummary(weekly);
     setHoveredDay(days[days.length - 1] ?? null);
+    const todayWeekDay =
+      weekly.days.find((d) => d.is_today) ?? weekly.days[weekly.days.length - 1] ?? null;
+    setHoveredWeekDay(todayWeekDay);
     setDistractFreqs(freqs);
+    setShowResetConfirm(false);
     setPage("summary");
+  };
+
+  const handleResetAllData = async () => {
+    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+    await clearAllData(locale);
+    const freshStats = await getActiveDayStats(locale);
+    const freshDays = await getDaysSummary();
+    const freshWeekly = await getWeeklySummary(locale);
+    const freshFreqs = await getDistractionFrequencies(false);
+
+    setDayStats(freshStats);
+    setSummaryDays(freshDays);
+    setWeeklySummary(freshWeekly);
+    setDistractFreqs(freshFreqs);
+    setHoveredDay(null);
+    setHoveredWeekDay(null);
+    setShowResetConfirm(false);
   };
 
   const toggleFreqFilter = async () => {
@@ -424,8 +517,10 @@ export default function App() {
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
     setBreakSecondsLeft(DEFAULT_BREAK_SEC);
-    const freshStats = await startNewDay(activeLang === "tr" ? "tr-TR" : "en-US");
+    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+    const freshStats = await startNewDay(locale);
     setDayStats(freshStats);
+    setWeeklySummary(await getWeeklySummary(locale));
   };
 
   const updateTheme = (patch: Partial<ThemeSettings>) => {
@@ -439,6 +534,7 @@ export default function App() {
     const newActive = resolveLanguage(newPref);
     const newT = translations[newActive];
     setReasonChoices(await getReasonChoices(newT.defaultReasons));
+    setTags(await getTags(newT.defaultTags));
   };
 
   const openSettings = () => {
@@ -454,7 +550,6 @@ export default function App() {
   const handleInstallUpdate = async () => {
     setIsRunning(false);
     await installUpdate(setUpdateStatus, async () => {
-      // Kurulum uygulamayı kapatacağı için son durumu ve renkleri kaydet
       await saveAppState(stateRef.current).catch(() => {});
       await saveThemeSettings(theme).catch(() => {});
     });
@@ -480,10 +575,15 @@ export default function App() {
 
   const activeSeconds = page === "work" ? workSecondsLeft : breakSecondsLeft;
   const hasPausedProgress = !isRunning && page === "work" && workElapsedSec > 0;
-  const maxSummaryHours = Math.max(
+  const maxRecentHours = Math.max(
     1,
     ...summaryDays.map((d) => d.total_sec / 3600),
   );
+  const maxWeeklyHours = Math.max(
+    1,
+    ...(weeklySummary?.days.map((d) => d.total_sec / 3600) ?? [1]),
+  );
+
   const totalDistractions = distractFreqs.reduce(
     (acc, item) => acc + item.count,
     0,
@@ -501,7 +601,8 @@ export default function App() {
         page === "menu" ||
         page === "summary" ||
         page === "settings" ||
-        showDistractBox
+        showDistractBox ||
+        showStopBox
           ? "solid-bg"
           : ""
       } ${isLightColor(theme.bgColor) ? "light-theme" : ""}`}
@@ -560,14 +661,91 @@ export default function App() {
               </div>
             )}
 
-            {hasPausedProgress && !showDistractBox && (
+            {hasPausedProgress && !showDistractBox && !showStopBox && (
               <div className="resume-hint">
                 {t.resumeHint(Math.floor(workElapsedSec / 60))}
               </div>
             )}
           </div>
 
-          {showDistractBox ? (
+          {/* ERKEN DURDURMA & TAG KUTUSU */}
+          {showStopBox ? (
+            <div className="stop-box">
+              <div className="stop-box-header">
+                <span className="stop-box-title">{t.earlyStopTitle}</span>
+                <button
+                  className="ghost-btn"
+                  onClick={() => setIsEditingTags(!isEditingTags)}
+                >
+                  {isEditingTags ? t.doneEditing : t.editTags}
+                </button>
+              </div>
+              <div className="stop-box-hint">
+                {t.earlyStopWorkedTime(Math.floor(workElapsedSec / 60))}
+              </div>
+              <div className="reason-chips stop-chips">
+                {tags.map((tag) => (
+                  <div key={tag.id} className="tag-chip-wrap">
+                    <button
+                      className="tag-chip-btn"
+                      onClick={() => {
+                        if (!isEditingTags) handleFinishWithTag(tag.name);
+                      }}
+                    >
+                      {tag.name}
+                    </button>
+                    {isEditingTags && (
+                      <span className="tag-actions">
+                        <button
+                          className="tag-icon-btn"
+                          title={t.editTags}
+                          onClick={() => handleEditTag(tag.id, tag.name)}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="tag-icon-btn del-btn"
+                          title="Sil"
+                          onClick={() => handleDeleteTag(tag.id, tag.name)}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="new-reason-row">
+                <input
+                  className="distract-input"
+                  placeholder={t.newTagPlaceholder}
+                  value={newTagText}
+                  autoFocus
+                  onChange={(e) => setNewTagText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newTagText.trim()) {
+                      handleAddAndFinishTag();
+                    }
+                    if (e.key === "Escape") setShowStopBox(false);
+                  }}
+                />
+                <button className="primary-btn" onClick={handleAddAndFinishTag}>
+                  {t.addAndFinish}
+                </button>
+              </div>
+              <div className="stop-box-actions">
+                <button
+                  className="ghost-btn"
+                  onClick={() => handleFinishWithTag()}
+                >
+                  {t.finishWithoutTag}
+                </button>
+                <button onClick={() => setShowStopBox(false)}>
+                  {t.cancelReturn}
+                </button>
+              </div>
+            </div>
+          ) : showDistractBox ? (
             <div className="distract-box">
               <div className="reason-chips">
                 {reasonChoices.map((choice) => (
@@ -863,102 +1041,233 @@ export default function App() {
       {page === "summary" && (
         <>
           <div className="top-bar">
-            <span className="badge">{t.summaryTitle}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className="badge">⠿ {t.summary}</span>
+              <div className="summary-tab-group">
+                <button
+                  className={`tab-btn ${summaryTab === "weekly" ? "active" : ""}`}
+                  onClick={() => setSummaryTab("weekly")}
+                >
+                  {t.viewWeekly}
+                </button>
+                <button
+                  className={`tab-btn ${summaryTab === "recent" ? "active" : ""}`}
+                  onClick={() => setSummaryTab("recent")}
+                >
+                  {t.viewRecentDays}
+                </button>
+              </div>
+            </div>
             <button className="ghost-btn" onClick={openMenu}>
               ← {t.home}
             </button>
           </div>
 
-          <div className="tooltip-banner">
-            {hoveredDay ? (
-              (() => {
-                const hours = (hoveredDay.total_sec / 3600).toFixed(1);
-                const avgMins =
-                  hoveredDay.session_count > 0
-                    ? Math.round(
-                        hoveredDay.total_sec / hoveredDay.session_count / 60,
-                      )
-                    : 0;
-                const details = t.summaryBarDetails(
-                  hoveredDay.label,
-                  hours,
-                  hoveredDay.session_count,
-                  avgMins,
-                );
-                return (
-                  <>
-                    <span>
-                      <b>{details.main}</b>
-                    </span>
-                    <span>{details.sub}</span>
-                  </>
-                );
-              })()
-            ) : (
-              <span>{t.summaryHoverHint}</span>
-            )}
-          </div>
-
-          <div className="chart-area">
-            {summaryDays.map((d) => {
-              const hours = d.total_sec / 3600;
-              const heightPct = Math.max(6, (hours / maxSummaryHours) * 85);
-              return (
-                <div
-                  key={d.id}
-                  className="bar-col"
-                  onMouseEnter={() => setHoveredDay(d)}
-                >
-                  <span className="bar-hours">
-                    {hours.toFixed(1)}{activeLang === "tr" ? "s" : "h"}
-                  </span>
-                  <div
-                    className={`bar-fill ${hoveredDay?.id === d.id ? "active-bar" : ""}`}
-                    style={{ height: `${heightPct}%` }}
-                  />
-                  <span className="bar-label">
-                    {d.is_active ? `${d.label}*` : d.label}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="freq-header">
-            <span>{t.distractionFreqHeader(totalDistractions)}</span>
-            <button className="ghost-btn" onClick={toggleFreqFilter}>
-              {freqOnlyToday ? t.filterToday : t.filterAll}
-            </button>
-          </div>
-
-          <div className="freq-list">
-            {distractFreqs.length > 0 ? (
-              distractFreqs.map((item) => {
-                const pct =
-                  totalDistractions > 0
-                    ? Math.round((item.count / totalDistractions) * 100)
-                    : 0;
-                return (
-                  <div key={item.reason} className="freq-item">
-                    <div className="freq-label-row">
-                      <span>{item.reason}</span>
-                      <span>{t.timesCount(item.count, pct)}</span>
+          {/* SIFIRLAMA ONAY KUTUSU */}
+          {showResetConfirm ? (
+            <div className="reset-confirm-box">
+              <div className="reset-confirm-title">{t.resetConfirmTitle}</div>
+              <div className="reset-confirm-desc">{t.resetConfirmDesc}</div>
+              <div className="btn-row" style={{ marginTop: "8px" }}>
+                <button className="warn-btn" onClick={handleResetAllData}>
+                  {t.resetConfirmYes}
+                </button>
+                <button onClick={() => setShowResetConfirm(false)}>
+                  {t.cancel}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* HAFTALIK ÖZET GÖRÜNÜMÜ */}
+              {summaryTab === "weekly" && (
+                <>
+                  <div className="weekly-stats-grid">
+                    <div className="stat-card">
+                      <div className="stat-val">
+                        {t.formatDuration(weeklySummary?.totalSec ?? 0)}
+                      </div>
+                      <div className="stat-lbl">{t.weeklyTotal}</div>
                     </div>
-                    <div className="freq-bar-bg">
-                      <div
-                        className="freq-bar-fill"
-                        style={{ width: `${pct}%` }}
-                      />
+                    <div className="stat-card">
+                      <div className="stat-val">
+                        {t.formatDuration(weeklySummary?.dailyAvgSec ?? 0)}
+                      </div>
+                      <div className="stat-lbl">{t.weeklyDailyAvg}</div>
+                    </div>
+                    <div className="stat-card">
+                      <div className="stat-val">
+                        {weeklySummary?.activeDaysCount ?? 0}/7
+                      </div>
+                      <div className="stat-lbl">
+                        {t.weeklyDaysWorked(weeklySummary?.activeDaysCount ?? 0)}
+                      </div>
                     </div>
                   </div>
-                );
-              })
-            ) : (
-              <div style={{ fontSize: "10px", color: "#a1a1aa" }}>
-                {t.noDistractions}
+
+                  <div className="tooltip-banner">
+                    {hoveredWeekDay ? (
+                      <>
+                        <span>
+                          <b>{hoveredWeekDay.shortLabel}</b> ({hoveredWeekDay.dateLabel}):{" "}
+                          {(hoveredWeekDay.total_sec / 3600).toFixed(1)} {activeLang === "tr" ? "sa" : "h"}
+                        </span>
+                        <span>
+                          {hoveredWeekDay.session_count} {t.sessions.toLowerCase()} • {t.formatDuration(hoveredWeekDay.total_sec)}
+                        </span>
+                      </>
+                    ) : (
+                      <span>{t.summaryHoverHint}</span>
+                    )}
+                  </div>
+
+                  <div className="chart-area">
+                    {weeklySummary?.days.map((d) => {
+                      const hours = d.total_sec / 3600;
+                      const heightPct = Math.max(6, (hours / maxWeeklyHours) * 85);
+                      const isHovered = hoveredWeekDay?.dayIndex === d.dayIndex;
+                      return (
+                        <div
+                          key={d.dayIndex}
+                          className="bar-col"
+                          onMouseEnter={() => setHoveredWeekDay(d)}
+                        >
+                          <span className="bar-hours">
+                            {hours.toFixed(1)}{activeLang === "tr" ? "s" : "h"}
+                          </span>
+                          <div
+                            className={`bar-fill ${isHovered ? "active-bar" : ""}`}
+                            style={{
+                              height: `${heightPct}%`,
+                              borderColor: d.is_today ? "#fbbf24" : undefined,
+                              borderWidth: d.is_today ? "1px" : "0",
+                              borderStyle: "solid",
+                            }}
+                          />
+                          <span
+                            className="bar-label"
+                            style={{
+                              color: d.is_today ? "#fbbf24" : undefined,
+                              fontWeight: d.is_today ? 700 : undefined,
+                            }}
+                          >
+                            {d.shortLabel}{d.is_today ? "•" : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* SON GÜNLER GÖRÜNÜMÜ */}
+              {summaryTab === "recent" && (
+                <>
+                  <div className="tooltip-banner" style={{ marginTop: "6px" }}>
+                    {hoveredDay ? (
+                      (() => {
+                        const hours = (hoveredDay.total_sec / 3600).toFixed(1);
+                        const avgMins =
+                          hoveredDay.session_count > 0
+                            ? Math.round(
+                                hoveredDay.total_sec / hoveredDay.session_count / 60,
+                              )
+                            : 0;
+                        const details = t.summaryBarDetails(
+                          hoveredDay.label,
+                          hours,
+                          hoveredDay.session_count,
+                          avgMins,
+                        );
+                        return (
+                          <>
+                            <span>
+                              <b>{details.main}</b>
+                            </span>
+                            <span>{details.sub}</span>
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <span>{t.summaryHoverHint}</span>
+                    )}
+                  </div>
+
+                  <div className="chart-area">
+                    {summaryDays.map((d) => {
+                      const hours = d.total_sec / 3600;
+                      const heightPct = Math.max(6, (hours / maxRecentHours) * 85);
+                      return (
+                        <div
+                          key={d.id}
+                          className="bar-col"
+                          onMouseEnter={() => setHoveredDay(d)}
+                        >
+                          <span className="bar-hours">
+                            {hours.toFixed(1)}{activeLang === "tr" ? "s" : "h"}
+                          </span>
+                          <div
+                            className={`bar-fill ${hoveredDay?.id === d.id ? "active-bar" : ""}`}
+                            style={{ height: `${heightPct}%` }}
+                          />
+                          <span className="bar-label">
+                            {d.is_active ? `${d.label}*` : d.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* DİKKAT DAĞILMA LİSTESİ */}
+              <div className="freq-header">
+                <span>{t.distractionFreqHeader(totalDistractions)}</span>
+                <button className="ghost-btn" onClick={toggleFreqFilter}>
+                  {freqOnlyToday ? t.filterToday : t.filterAll}
+                </button>
               </div>
-            )}
-          </div>
+
+              <div className="freq-list">
+                {distractFreqs.length > 0 ? (
+                  distractFreqs.map((item) => {
+                    const pct =
+                      totalDistractions > 0
+                        ? Math.round((item.count / totalDistractions) * 100)
+                        : 0;
+                    return (
+                      <div key={item.reason} className="freq-item">
+                        <div className="freq-label-row">
+                          <span>{item.reason}</span>
+                          <span>{t.timesCount(item.count, pct)}</span>
+                        </div>
+                        <div className="freq-bar-bg">
+                          <div
+                            className="freq-bar-fill"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div style={{ fontSize: "10px", color: "#a1a1aa" }}>
+                    {t.noDistractions}
+                  </div>
+                )}
+              </div>
+
+              {/* VERİLERİ SIFIRLAMA BUTONU */}
+              <div className="summary-bottom-row">
+                <button
+                  className="ghost-btn reset-data-btn"
+                  onClick={() => setShowResetConfirm(true)}
+                >
+                  🗑 {t.resetAllData}
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>
