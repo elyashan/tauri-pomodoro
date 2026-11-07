@@ -100,6 +100,7 @@ export interface Translations {
   distractionReasonsTab: string;
   endingReasonsTab: string;
   noEndingReasons: string;
+  sessionCompleted: string;
 
   defaultDistractionTags: string[];
   defaultEndingTags: string[];
@@ -119,7 +120,7 @@ const tr: Translations = {
   pause: "Duraklat",
   resume: "Devam Et",
   stop: "Durdur",
-  distractedBtnText: (mins) => `+${mins}dk Dağıldım`,
+  distractedBtnText: (mins) => (mins > 0 ? `+${mins}dk Dağıldım` : "Dağıldım"),
   orNewReason: "Veya yeni neden yaz...",
   add: "Ekle",
   cancel: "İptal",
@@ -190,7 +191,7 @@ const tr: Translations = {
   previousReasons: "Önceki açıklamalar:",
   distractExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
   endingExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
-  saveAndAddMin: (mins) => `Kaydet (+${mins}dk)`,
+  saveAndAddMin: (mins) => (mins > 0 ? `Kaydet (+${mins}dk)` : "Kaydet"),
   distractPenaltySetting: "Dikkat Dağılma Ekleme Süresi",
 
   // Özet haftalık görünüm, etiket kırılımı & sıfırlama
@@ -209,6 +210,7 @@ const tr: Translations = {
   distractionReasonsTab: "Dikkat Dağılmaları",
   endingReasonsTab: "Erken Bitirmeler",
   noEndingReasons: "Henüz kayıtlı erken bitirme nedeni yok.",
+  sessionCompleted: "Seans Tamamlandı! 🎉",
 
   defaultDistractionTags: [
     "Telefon",
@@ -243,7 +245,7 @@ const en: Translations = {
   pause: "Pause",
   resume: "Resume",
   stop: "Stop",
-  distractedBtnText: (mins) => `+${mins}m Distracted`,
+  distractedBtnText: (mins) => (mins > 0 ? `+${mins}m Distracted` : "Distracted"),
   orNewReason: "Or enter a new reason...",
   add: "Add",
   cancel: "Cancel",
@@ -314,7 +316,7 @@ const en: Translations = {
   previousReasons: "Recent explanations:",
   distractExplanationPlaceholder: "Type explanation (or select above)...",
   endingExplanationPlaceholder: "Type explanation (or select above)...",
-  saveAndAddMin: (mins) => `Save (+${mins}m)`,
+  saveAndAddMin: (mins) => (mins > 0 ? `Save (+${mins}m)` : "Save"),
   distractPenaltySetting: "Distraction Added Time",
 
   // Özet haftalık görünüm, etiket kırılımı & sıfırlama
@@ -333,6 +335,7 @@ const en: Translations = {
   distractionReasonsTab: "Distractions",
   endingReasonsTab: "Early Stops",
   noEndingReasons: "No early stop reasons recorded yet.",
+  sessionCompleted: "Session Completed! 🎉",
 
   defaultDistractionTags: [
     "Phone",

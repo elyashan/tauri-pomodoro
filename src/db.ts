@@ -806,8 +806,9 @@ export async function loadDistractPenalty(): Promise<number> {
   const rows = await db.select<{ value: string }[]>(
     "SELECT value FROM settings WHERE key = 'distractPenaltyMins'",
   );
+  if (rows.length === 0) return 1;
   const n = parseInt(rows[0]?.value, 10);
-  return Number.isFinite(n) && n > 0 && n <= 30 ? n : 1;
+  return Number.isFinite(n) && n >= 0 && n <= 30 ? n : 1;
 }
 
 export async function saveDistractPenalty(mins: number): Promise<void> {

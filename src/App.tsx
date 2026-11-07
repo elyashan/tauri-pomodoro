@@ -42,6 +42,7 @@ import {
 } from "./db";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
+import { ConfettiCanvas } from "./Confetti";
 import "./App.css";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
@@ -65,7 +66,7 @@ const TIMER_PRESETS = [
   "#18181b",
 ];
 
-const PENALTY_OPTIONS = [1, 2, 3, 5];
+const PENALTY_OPTIONS = [0, 1, 2, 3, 5];
 
 function hexToRgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
@@ -89,20 +90,76 @@ function persistState(state: AppState) {
   );
 }
 
-function playBeep() {
+function playCelebrationFanfare() {
   try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 660;
-    gain.gain.value = 0.12;
-    osc.start();
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new AudioCtx();
+
+    // Ascending arpeggio with celebratory harmonic chime: C5, E5, G5, C6, E6
+    const notes = [
+      { freq: 523.25, time: 0.0, dur: 0.16 }, // C5
+      { freq: 659.25, time: 0.13, dur: 0.16 }, // E5
+      { freq: 783.99, time: 0.26, dur: 0.2 }, // G5
+      { freq: 1046.5, time: 0.42, dur: 0.45 }, // C6
+      { freq: 1318.51, time: 0.58, dur: 0.7 }, // E6 sparkle finish
+    ];
+
+    notes.forEach(({ freq, time, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
+
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + time + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(ctx.currentTime + time);
+      osc.stop(ctx.currentTime + time + dur + 0.05);
+    });
+
     setTimeout(() => {
-      osc.stop();
-      ctx.close();
-    }, 350);
+      ctx.close().catch(() => {});
+    }, 1500);
+  } catch {
+    // Ses cihazı meşgulse sessizce geç
+  }
+}
+
+function playBreakChime() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new AudioCtx();
+    const notes = [
+      { freq: 587.33, time: 0.0, dur: 0.22 }, // D5
+      { freq: 880.0, time: 0.16, dur: 0.4 }, // A5
+    ];
+    notes.forEach(({ freq, time, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
+      gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + time + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + time);
+      osc.stop(ctx.currentTime + time + dur + 0.05);
+    });
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 800);
   } catch {
     // Ses cihazı meşgulse sessizce geç
   }
@@ -122,6 +179,7 @@ export default function App() {
   const [breakSecondsLeft, setBreakSecondsLeft] = useState(DEFAULT_BREAK_SEC);
 
   const [isRunning, setIsRunning] = useState(false);
+  const [isCelebrating, setIsCelebrating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editMinutes, setEditMinutes] = useState("50");
   const [autoStartOn, setAutoStartOn] = useState(false);
@@ -347,7 +405,8 @@ export default function App() {
     if (!isRunning) return;
     if (page === "work" && workSecondsLeft === 0) {
       setIsRunning(false);
-      playBeep();
+      setIsCelebrating(true);
+      playCelebrationFanfare();
       (async () => {
         await recordWorkSession(workElapsedSec);
         setWorkSecondsLeft(DEFAULT_WORK_SEC);
@@ -359,7 +418,7 @@ export default function App() {
       })();
     } else if (page === "break" && breakSecondsLeft === 0) {
       setIsRunning(false);
-      playBeep();
+      playBreakChime();
       setBreakSecondsLeft(DEFAULT_BREAK_SEC);
     }
   }, [isRunning, page, workSecondsLeft, breakSecondsLeft, workElapsedSec, activeLang]);
@@ -410,8 +469,10 @@ export default function App() {
   // DİKKAT DAĞILMASI İŞLEMLERİ
   // ---------------------------------------------------------------------------
   const handleDistractedClick = async () => {
-    // Süreye ayarlanan ceza süresini ekle
-    setWorkSecondsLeft((prev) => prev + distractPenaltyMins * 60);
+    // Süreye ayarlanan ceza süresini ekle (0 ise ekleme yapma)
+    if (distractPenaltyMins > 0) {
+      setWorkSecondsLeft((prev) => prev + distractPenaltyMins * 60);
+    }
     setCurrentSessionDistractions((prev) => prev + 1);
 
     const loadedTags = await getTags("distraction", t.defaultDistractionTags);
@@ -534,6 +595,7 @@ export default function App() {
   // MENÜ VE ÖZET SAYFASI
   // ---------------------------------------------------------------------------
   const openMenu = async () => {
+    setIsCelebrating(false);
     setIsRunning(false);
     setShowDistractBox(false);
     setShowStopBox(false);
@@ -542,6 +604,7 @@ export default function App() {
   };
 
   const openSummary = async () => {
+    setIsCelebrating(false);
     setIsRunning(false);
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const days = await getDaysSummary();
@@ -684,10 +747,22 @@ export default function App() {
         showStopBox
           ? "solid-bg"
           : ""
-      } ${isLightColor(theme.bgColor) ? "light-theme" : ""}`}
+      } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${
+        isCelebrating ? "celebrating-shell" : ""
+      }`}
       style={shellStyle}
       onMouseDown={handleMouseDown}
     >
+      {isCelebrating && (
+        <>
+          <ConfettiCanvas
+            durationMs={4500}
+            onComplete={() => setIsCelebrating(false)}
+          />
+          <div className="celebration-badge">{t.sessionCompleted}</div>
+        </>
+      )}
+
       {/* ÇALIŞMA VE MOLA EKRANI */}
       {(page === "work" || page === "break") && (
         <>
@@ -972,7 +1047,10 @@ export default function App() {
             <div className="btn-row hover-reveal">
               <button
                 className="primary-btn"
-                onClick={() => setIsRunning(!isRunning)}
+                onClick={() => {
+                  setIsCelebrating(false);
+                  setIsRunning(!isRunning);
+                }}
               >
                 {isRunning
                   ? t.pause
@@ -1059,10 +1137,23 @@ export default function App() {
           )}
 
           <div className="menu-actions">
-            <button className="primary-btn" onClick={() => setPage("work")}>
+            <button
+              className="primary-btn"
+              onClick={() => {
+                setIsCelebrating(false);
+                setPage("work");
+              }}
+            >
               {t.switchToWork}
             </button>
-            <button onClick={() => setPage("break")}>{t.switchToBreak}</button>
+            <button
+              onClick={() => {
+                setIsCelebrating(false);
+                setPage("break");
+              }}
+            >
+              {t.switchToBreak}
+            </button>
             <button className="warn-btn full-width" onClick={handleStartNewDay}>
               {t.startNewDay}
             </button>
@@ -1119,7 +1210,11 @@ export default function App() {
                   className={`penalty-btn ${distractPenaltyMins === mins ? "active" : ""}`}
                   onClick={() => handlePenaltyChange(mins)}
                 >
-                  +{mins} {activeLang === "tr" ? "dk" : "m"}
+                  {mins === 0
+                    ? activeLang === "tr"
+                      ? "0 dk (Ekleme)"
+                      : "0 m (None)"
+                    : `+${mins} ${activeLang === "tr" ? "dk" : "m"}`}
                 </button>
               ))}
             </div>
