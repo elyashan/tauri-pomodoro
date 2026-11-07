@@ -99,11 +99,41 @@ export interface Translations {
   avgDistractionsPerSession: string;
   distractionReasonsTab: string;
   endingReasonsTab: string;
+  workTagsTab: string;
+  breakOvertimeTab: string;
+  timelineTab: string;
+  timelineTitle: string;
+  noTimelineSessions: string;
   noEndingReasons: string;
   sessionCompleted: string;
 
+  // Always on top & Export & Break presets
+  alwaysOnTop: string;
+  alwaysOnTopTooltip: (on: boolean) => string;
+  exportDataBtn: string;
+  exportDataSuccess: string;
+  breakPreset7: string;
+  breakPreset10: string;
+  breakPreset20: string;
+  breakPresetSetting: string;
+  breakOverdueBadge: (time: string) => string;
+  breakOverdueTitle: string;
+  breakOverdueDesc: (time: string) => string;
+  saveAndStartWork: string;
+  skipAndStartWork: string;
+  extendBreak5m: string;
+  startWorkBtn: string;
+
+  // Çalışma konusu (What are you working on)
+  whatAreYouWorkingOn: string;
+  workTopicPlaceholder: string;
+  selectWorkTopic: string;
+  changeWorkTopic: string;
+
   defaultDistractionTags: string[];
   defaultEndingTags: string[];
+  defaultWorkTags: string[];
+  defaultBreakOvertimeTags: string[];
 }
 
 const tr: Translations = {
@@ -131,7 +161,7 @@ const tr: Translations = {
   lastState: (w, b) => `Son durum: Çalışma ${w} • Mola ${b}`,
   switchToWork: "Çalışmaya Geç",
   switchToBreak: "Molaya Geç",
-  startNewDay: "Yeni Günü Başlat (Eski Günü Bitir)",
+  startNewDay: "Seansı Bitir (Yeni Seans)",
   summaryTitle: "⠿ Çalışma ve Odak Özeti",
   summaryHoverHint: "Detay görmek için gün çubuklarının üzerine gel",
   summaryBarDetails: (label, hours, sessions, avgMins) => ({
@@ -209,8 +239,40 @@ const tr: Translations = {
   avgDistractionsPerSession: "Seans Başı Ort. Dikkat",
   distractionReasonsTab: "Dikkat Dağılmaları",
   endingReasonsTab: "Erken Bitirmeler",
+  workTagsTab: "Çalışma Konuları",
+  breakOvertimeTab: "Mola Gecikmeleri",
+  timelineTab: "24s Çizelge",
+  timelineTitle: "24 Saatlik Zaman Çizelgesi",
+  noTimelineSessions: "Henüz kayıtlı zaman dilimi yok.",
   noEndingReasons: "Henüz kayıtlı erken bitirme nedeni yok.",
   sessionCompleted: "Seans Tamamlandı! 🎉",
+
+  // Always on top & Export & Break
+  alwaysOnTop: "Her Zaman Üstte",
+  alwaysOnTopTooltip: (on: boolean) =>
+    on
+      ? "Her Zaman Üstte: Açık (Kapatmak için tıkla)"
+      : "Her Zaman Üstte: Kapalı (Sabitlemek için tıkla)",
+  exportDataBtn: "📥 Verileri İndir (JSON)",
+  exportDataSuccess: "Veriler başarıyla dışa aktarıldı.",
+  breakPreset7: "7 dk (Kısa)",
+  breakPreset10: "10 dk (Standart)",
+  breakPreset20: "20 dk (Uzun)",
+  breakPresetSetting: "Varsayılan Mola Süresi",
+  breakOverdueBadge: (time: string) => `Mola Bitti! (+${time})`,
+  breakOverdueTitle: "Mola Uzatma / Gecikme Sebebi",
+  breakOverdueDesc: (time: string) =>
+    `Molayı ${time} uzattın. Sebebini seçebilir veya not ekleyebilirsin:`,
+  saveAndStartWork: "Kaydet & Çalışmaya Başla",
+  skipAndStartWork: "Sebebi Geç & Başla",
+  extendBreak5m: "+5 dk Molayı Uzat",
+  startWorkBtn: "Çalışmaya Başla",
+
+  // Çalışma Konusu
+  whatAreYouWorkingOn: "Ne Çalışıyorsun?",
+  workTopicPlaceholder: "Ders, konu veya görev yaz (örn: Matematik, Rust)...",
+  selectWorkTopic: "Konu Seç",
+  changeWorkTopic: "Çalışma Konusunu Değiştir",
 
   defaultDistractionTags: [
     "Telefon",
@@ -227,6 +289,24 @@ const tr: Translations = {
     "Acil İş",
     "Ders Bitti",
     "Yorgunluk",
+    "Diğer",
+  ],
+  defaultWorkTags: [
+    "Ders",
+    "Kodlama",
+    "Proje",
+    "Kitap",
+    "Matematik",
+    "Sınav Hazırlık",
+    "Diğer",
+  ],
+  defaultBreakOvertimeTags: [
+    "Telefon",
+    "Sohbet",
+    "Yemek / İçecek",
+    "Dizi / Video",
+    "Dinlenme İhtiyacı",
+    "İş Araya Girdi",
     "Diğer",
   ],
 };
@@ -256,7 +336,7 @@ const en: Translations = {
   lastState: (w, b) => `Last state: Work ${w} • Break ${b}`,
   switchToWork: "Switch to Work",
   switchToBreak: "Switch to Break",
-  startNewDay: "Start New Day (Finish Current)",
+  startNewDay: "Finish Session (Start New)",
   summaryTitle: "⠿ Work & Focus Summary",
   summaryHoverHint: "Hover over day bars to view details",
   summaryBarDetails: (label, hours, sessions, avgMins) => ({
@@ -334,8 +414,40 @@ const en: Translations = {
   avgDistractionsPerSession: "Avg Distractions/Session",
   distractionReasonsTab: "Distractions",
   endingReasonsTab: "Early Stops",
+  workTagsTab: "Work Topics",
+  breakOvertimeTab: "Break Delays",
+  timelineTab: "24h Timeline",
+  timelineTitle: "24-Hour Timeline",
+  noTimelineSessions: "No session intervals recorded yet.",
   noEndingReasons: "No early stop reasons recorded yet.",
   sessionCompleted: "Session Completed! 🎉",
+
+  // Always on top & Export & Break
+  alwaysOnTop: "Always on Top",
+  alwaysOnTopTooltip: (on: boolean) =>
+    on
+      ? "Always on Top: On (Click to unpin)"
+      : "Always on Top: Off (Click to pin)",
+  exportDataBtn: "📥 Export Data (JSON)",
+  exportDataSuccess: "Data exported successfully.",
+  breakPreset7: "7 m (Short)",
+  breakPreset10: "10 m (Standard)",
+  breakPreset20: "20 m (Long)",
+  breakPresetSetting: "Default Break Duration",
+  breakOverdueBadge: (time: string) => `Break Over! (+${time})`,
+  breakOverdueTitle: "Break Overdue Reason",
+  breakOverdueDesc: (time: string) =>
+    `Break exceeded by ${time}. Select reason or enter a note:`,
+  saveAndStartWork: "Save & Start Work",
+  skipAndStartWork: "Skip Reason & Start",
+  extendBreak5m: "+5 m Extend Break",
+  startWorkBtn: "Start Work",
+
+  // Study Topic
+  whatAreYouWorkingOn: "What are you working on?",
+  workTopicPlaceholder: "Enter topic or task (e.g. Math, Rust, Study)...",
+  selectWorkTopic: "Select Topic",
+  changeWorkTopic: "Change Work Topic",
 
   defaultDistractionTags: [
     "Phone",
@@ -352,6 +464,24 @@ const en: Translations = {
     "Urgent Task",
     "Topic Finished",
     "Fatigue",
+    "Other",
+  ],
+  defaultWorkTags: [
+    "Study",
+    "Coding",
+    "Project",
+    "Reading",
+    "Math",
+    "Exam Prep",
+    "Other",
+  ],
+  defaultBreakOvertimeTags: [
+    "Phone",
+    "Chatting",
+    "Meal / Drink",
+    "Video / TV",
+    "Needed Rest",
+    "Interruption",
     "Other",
   ],
 };

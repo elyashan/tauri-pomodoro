@@ -29,6 +29,14 @@ import {
   getActiveDayStats,
   startNewDay,
   recordWorkSession,
+  recordBreakSession,
+  getTimelineSessions,
+  TimelineSessionItem,
+  exportAllData,
+  loadAlwaysOnTop,
+  saveAlwaysOnTop,
+  loadDefaultBreakMins,
+  saveDefaultBreakMins,
   recordDistraction,
   getDaysSummary,
   getWeeklySummary,
@@ -165,9 +173,44 @@ function playBreakChime() {
   }
 }
 
+function playAlarmChime() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new AudioCtx();
+    const notes = [
+      { freq: 880.0, time: 0.0, dur: 0.12 },
+      { freq: 880.0, time: 0.15, dur: 0.18 },
+    ];
+    notes.forEach(({ freq, time, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
+      gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + time + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + time);
+      osc.stop(ctx.currentTime + time + dur + 0.04);
+    });
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 450);
+  } catch {
+    // Ses cihazı meşgulse sessizce geç
+  }
+}
+
 export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [page, setPage] = useState<PageType>("work");
+
+  // Her zaman üstte kalma (Always on Top)
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
 
   // Dil durumu
   const [langPref, setLangPref] = useState<LangCode>("auto");
@@ -177,6 +220,27 @@ export default function App() {
   const [workSecondsLeft, setWorkSecondsLeft] = useState(DEFAULT_WORK_SEC);
   const [workElapsedSec, setWorkElapsedSec] = useState(0);
   const [breakSecondsLeft, setBreakSecondsLeft] = useState(DEFAULT_BREAK_SEC);
+
+  // Mola ayarları ve gecikme (overtime) takibi
+  const [defaultBreakMins, setDefaultBreakMins] = useState(10);
+  const [breakTotalSec, setBreakTotalSec] = useState(10 * 60);
+  const [breakOverdueSec, setBreakOverdueSec] = useState(0);
+  const [showBreakOverdueBox, setShowBreakOverdueBox] = useState(false);
+  const [breakOverdueTags, setBreakOverdueTags] = useState<TagItem[]>([]);
+  const [selectedBreakOverdueTag, setSelectedBreakOverdueTag] = useState<string>("Telefon");
+  const [breakOverduePrevReasons, setBreakOverduePrevReasons] = useState<string[]>([]);
+  const [breakOverdueReasonText, setBreakOverdueReasonText] = useState("");
+  const [isEditingBreakOverdueTags, setIsEditingBreakOverdueTags] = useState(false);
+
+  // Çalışma Konusu (Subject / Task)
+  const [currentWorkTag, setCurrentWorkTag] = useState<string>("Ders");
+  const [currentWorkReason, setCurrentWorkReason] = useState<string>("");
+  const [showWorkTopicBox, setShowWorkTopicBox] = useState(false);
+  const [workTags, setWorkTags] = useState<TagItem[]>([]);
+  const [selectedWorkTopicTag, setSelectedWorkTopicTag] = useState<string>("Ders");
+  const [workTopicReasonText, setWorkTopicReasonText] = useState("");
+  const [workPrevReasons, setWorkPrevReasons] = useState<string[]>([]);
+  const [isEditingWorkTags, setIsEditingWorkTags] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [isCelebrating, setIsCelebrating] = useState(false);
@@ -204,6 +268,11 @@ export default function App() {
   const [endingReasonText, setEndingReasonText] = useState("");
   const [isEditingEndingTags, setIsEditingEndingTags] = useState(false);
 
+  // Zaman Damgası Referansları (24s Çizelge için)
+  const workStartedAtRef = useRef<string>(new Date().toISOString());
+  const breakStartedAtRef = useRef<string>(new Date().toISOString());
+  const lastAlarmPlayRef = useRef<number>(0);
+
   // İstatistikler ve Özet verisi
   const [dayStats, setDayStats] = useState<ActiveDayStats>({
     dayId: 1,
@@ -214,13 +283,15 @@ export default function App() {
   });
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
-  const [summaryTab, setSummaryTab] = useState<"weekly" | "recent">("weekly");
-  const [summaryReasonsTab, setSummaryReasonsTab] = useState<"distractions" | "endings">(
-    "distractions",
-  );
+  const [summaryTab, setSummaryTab] = useState<"timeline" | "weekly" | "recent">("timeline");
+  const [summaryReasonsTab, setSummaryReasonsTab] = useState<
+    "work" | "overtime" | "distractions" | "endings"
+  >("work");
   const [summaryReasonsData, setSummaryReasonsData] = useState<SummaryReasonsData | null>(
     null,
   );
+  const [timelineSessions, setTimelineSessions] = useState<TimelineSessionItem[]>([]);
+  const [hoveredTimelineItem, setHoveredTimelineItem] = useState<TimelineSessionItem | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
   const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
   const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(null);
@@ -281,8 +352,25 @@ export default function App() {
         // Varsayılan tag'leri yükle
         const dTags = await getTags("distraction", currentT.defaultDistractionTags);
         const eTags = await getTags("ending", currentT.defaultEndingTags);
+        const wTags = await getTags("work", currentT.defaultWorkTags);
+        const boTags = await getTags("break_overtime", currentT.defaultBreakOvertimeTags);
         setDistractTags(dTags);
         setEndingTags(eTags);
+        setWorkTags(wTags);
+        setBreakOverdueTags(boTags);
+        if (wTags.length > 0) setSelectedWorkTopicTag(wTags[0].name);
+        if (boTags.length > 0) setSelectedBreakOverdueTag(boTags[0].name);
+
+        const savedAlwaysOnTop = await loadAlwaysOnTop();
+        setAlwaysOnTop(savedAlwaysOnTop);
+        await getCurrentWindow().setAlwaysOnTop(savedAlwaysOnTop).catch(() => {});
+
+        const savedBreakMins = await loadDefaultBreakMins();
+        setDefaultBreakMins(savedBreakMins);
+        setBreakTotalSec(savedBreakMins * 60);
+
+        const timeline = await getTimelineSessions(stats.dayId);
+        setTimelineSessions(timeline);
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
         setLoadError(String(err));
@@ -321,15 +409,28 @@ export default function App() {
         updateStatus.kind === "downloading";
       win.setSize(new LogicalSize(310, hasBanner ? 346 : 312));
     } else if (page === "summary") {
-      win.setSize(new LogicalSize(360, 450));
+      win.setSize(new LogicalSize(380, 480));
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(310, 450));
-    } else if (showStopBox || showDistractBox) {
-      win.setSize(new LogicalSize(310, 310));
+      win.setSize(new LogicalSize(310, 470));
+    } else if (
+      showStopBox ||
+      showDistractBox ||
+      showBreakOverdueBox ||
+      showWorkTopicBox
+    ) {
+      win.setSize(new LogicalSize(310, 330));
     } else {
-      win.setSize(new LogicalSize(240, 124));
+      win.setSize(new LogicalSize(240, 126));
     }
-  }, [page, showDistractBox, showStopBox, loaded, updateStatus.kind]);
+  }, [
+    page,
+    showDistractBox,
+    showStopBox,
+    showBreakOverdueBox,
+    showWorkTopicBox,
+    loaded,
+    updateStatus.kind,
+  ]);
 
   // Renk ayarları değişince kaydet
   useEffect(() => {
@@ -392,7 +493,27 @@ export default function App() {
           setWorkSecondsLeft((prev) => Math.max(0, prev - delta));
           setWorkElapsedSec((prev) => prev + delta);
         } else if (page === "break") {
-          setBreakSecondsLeft((prev) => Math.max(0, prev - delta));
+          setBreakSecondsLeft((prev) => {
+            if (prev > 0) {
+              const next = prev - delta;
+              if (next <= 0) {
+                // Mola süresi doldu! Gecikme sayacını başlat ve alarm çal
+                setBreakOverdueSec(Math.abs(next));
+                playAlarmChime();
+                lastAlarmPlayRef.current = Date.now();
+                return 0;
+              }
+              return next;
+            } else {
+              // Mola aşımı devam ediyor (alarm durumu)
+              setBreakOverdueSec((o) => o + delta);
+              if (Date.now() - lastAlarmPlayRef.current >= 12000) {
+                playAlarmChime();
+                lastAlarmPlayRef.current = Date.now();
+              }
+              return 0;
+            }
+          });
         }
       }
     }, 500);
@@ -404,24 +525,46 @@ export default function App() {
   useEffect(() => {
     if (!isRunning) return;
     if (page === "work" && workSecondsLeft === 0) {
-      setIsRunning(false);
       setIsCelebrating(true);
       playCelebrationFanfare();
       (async () => {
-        await recordWorkSession(workElapsedSec);
+        await recordWorkSession(
+          workElapsedSec,
+          currentWorkTag,
+          currentWorkReason,
+          workStartedAtRef.current,
+          new Date().toISOString(),
+        );
         setWorkSecondsLeft(DEFAULT_WORK_SEC);
         setWorkElapsedSec(0);
         setCurrentSessionDistractions(0);
         const locale = activeLang === "tr" ? "tr-TR" : "en-US";
         setDayStats(await getActiveDayStats(locale));
         setWeeklySummary(await getWeeklySummary(locale));
+        setTimelineSessions(await getTimelineSessions());
       })();
-    } else if (page === "break" && breakSecondsLeft === 0) {
-      setIsRunning(false);
+
+      // Çalışma bitince otomatik olarak molaya geç ve başlat
+      const bSec = defaultBreakMins * 60;
+      setPage("break");
+      setBreakSecondsLeft(bSec);
+      setBreakTotalSec(bSec);
+      setBreakOverdueSec(0);
+      setIsRunning(true);
       playBreakChime();
-      setBreakSecondsLeft(DEFAULT_BREAK_SEC);
+      breakStartedAtRef.current = new Date().toISOString();
+      workStartedAtRef.current = new Date().toISOString();
     }
-  }, [isRunning, page, workSecondsLeft, breakSecondsLeft, workElapsedSec, activeLang]);
+  }, [
+    isRunning,
+    page,
+    workSecondsLeft,
+    workElapsedSec,
+    activeLang,
+    currentWorkTag,
+    currentWorkReason,
+    defaultBreakMins,
+  ]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -522,7 +665,12 @@ export default function App() {
       setWorkElapsedSec(0);
       setCurrentSessionDistractions(0);
     } else {
-      setBreakSecondsLeft(DEFAULT_BREAK_SEC);
+      if (breakOverdueSec >= 10) {
+        await handleOpenBreakOverdueBox();
+        return;
+      }
+      setBreakSecondsLeft(defaultBreakMins * 60);
+      setBreakOverdueSec(0);
     }
   };
 
@@ -534,12 +682,21 @@ export default function App() {
 
   const submitEnding = async (withTag = true) => {
     if (workElapsedSec >= 15) {
-      const tag = withTag ? selectedEndingTag : undefined;
-      const reason = withTag ? (endingReasonText.trim() || selectedEndingTag) : undefined;
-      await recordWorkSession(workElapsedSec, tag, reason);
+      const tag = withTag ? selectedEndingTag : currentWorkTag;
+      const reason = withTag
+        ? endingReasonText.trim() || selectedEndingTag
+        : currentWorkReason;
+      await recordWorkSession(
+        workElapsedSec,
+        tag,
+        reason,
+        workStartedAtRef.current,
+        new Date().toISOString(),
+      );
       const locale = activeLang === "tr" ? "tr-TR" : "en-US";
       setDayStats(await getActiveDayStats(locale));
       setWeeklySummary(await getWeeklySummary(locale));
+      setTimelineSessions(await getTimelineSessions());
     }
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
@@ -547,6 +704,117 @@ export default function App() {
     setShowStopBox(false);
     setEndingReasonText("");
     setIsEditingEndingTags(false);
+  };
+
+  // ---------------------------------------------------------------------------
+  // MOLA AŞIMI (OVERDUE) & ÇALIŞMA KONUSU & ALWAYS ON TOP & EXPORT
+  // ---------------------------------------------------------------------------
+  const toggleAlwaysOnTop = async () => {
+    const next = !alwaysOnTop;
+    setAlwaysOnTop(next);
+    await saveAlwaysOnTop(next);
+    await getCurrentWindow().setAlwaysOnTop(next).catch(() => {});
+  };
+
+  const handleSelectBreakPreset = async (mins: 7 | 10 | 20) => {
+    setDefaultBreakMins(mins);
+    await saveDefaultBreakMins(mins);
+    const sec = mins * 60;
+    setBreakTotalSec(sec);
+    setBreakSecondsLeft(sec);
+    setBreakOverdueSec(0);
+  };
+
+  const handleOpenBreakOverdueBox = async () => {
+    const loadedTags = await getTags("break_overtime", t.defaultBreakOvertimeTags);
+    setBreakOverdueTags(loadedTags);
+    const initial = loadedTags[0]?.name || "Telefon";
+    setSelectedBreakOverdueTag(initial);
+    const prev = await getPreviousReasons("break_overtime", initial);
+    setBreakOverduePrevReasons(prev);
+    setBreakOverdueReasonText("");
+    setShowBreakOverdueBox(true);
+  };
+
+  const handleSelectBreakOverdueTag = async (tagName: string) => {
+    setSelectedBreakOverdueTag(tagName);
+    const prev = await getPreviousReasons("break_overtime", tagName);
+    setBreakOverduePrevReasons(prev);
+  };
+
+  const submitBreakOverdue = async (skipReason = false) => {
+    const totalBreakSec = breakTotalSec + breakOverdueSec;
+    const tag = skipReason ? undefined : selectedBreakOverdueTag;
+    const reason = skipReason
+      ? undefined
+      : breakOverdueReasonText.trim() || selectedBreakOverdueTag;
+
+    await recordBreakSession(
+      totalBreakSec,
+      tag,
+      reason,
+      breakOverdueSec,
+      breakStartedAtRef.current,
+      new Date().toISOString(),
+    );
+
+    setShowBreakOverdueBox(false);
+    setBreakOverdueSec(0);
+    setBreakSecondsLeft(defaultBreakMins * 60);
+
+    // Çalışmaya geç
+    setPage("work");
+    workStartedAtRef.current = new Date().toISOString();
+    setIsRunning(true);
+  };
+
+  const handleStartWorkFromBreak = async () => {
+    if (breakOverdueSec >= 10) {
+      await handleOpenBreakOverdueBox();
+    } else {
+      await submitBreakOverdue(true);
+    }
+  };
+
+  const handleOpenWorkTopicBox = async () => {
+    const loadedTags = await getTags("work", t.defaultWorkTags);
+    setWorkTags(loadedTags);
+    const initial = currentWorkTag || loadedTags[0]?.name || "Ders";
+    setSelectedWorkTopicTag(initial);
+    const prev = await getPreviousReasons("work", initial);
+    setWorkPrevReasons(prev);
+    setWorkTopicReasonText(currentWorkReason);
+    setShowWorkTopicBox(true);
+  };
+
+  const handleSelectWorkTopicTag = async (tagName: string) => {
+    setSelectedWorkTopicTag(tagName);
+    const prev = await getPreviousReasons("work", tagName);
+    setWorkPrevReasons(prev);
+  };
+
+  const submitWorkTopic = async () => {
+    setCurrentWorkTag(selectedWorkTopicTag);
+    setCurrentWorkReason(workTopicReasonText.trim());
+    setShowWorkTopicBox(false);
+  };
+
+  const handleExportData = async () => {
+    try {
+      const jsonStr = await exportAllData();
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const d = new Date().toISOString().slice(0, 10);
+      a.download = `pomodoro-backup-${d}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Dışa aktarma hatası:", err);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -560,10 +828,18 @@ export default function App() {
         const updated = await getTags("distraction", t.defaultDistractionTags);
         setDistractTags(updated);
         setSelectedDistractTag(newName.trim());
-      } else {
+      } else if (kind === "ending") {
         const updated = await getTags("ending", t.defaultEndingTags);
         setEndingTags(updated);
         setSelectedEndingTag(newName.trim());
+      } else if (kind === "work") {
+        const updated = await getTags("work", t.defaultWorkTags);
+        setWorkTags(updated);
+        setSelectedWorkTopicTag(newName.trim());
+      } else if (kind === "break_overtime") {
+        const updated = await getTags("break_overtime", t.defaultBreakOvertimeTags);
+        setBreakOverdueTags(updated);
+        setSelectedBreakOverdueTag(newName.trim());
       }
     }
   };
@@ -574,8 +850,12 @@ export default function App() {
       await updateTag(tagId, newName.trim(), kind);
       if (kind === "distraction") {
         setDistractTags(await getTags("distraction", t.defaultDistractionTags));
-      } else {
+      } else if (kind === "ending") {
         setEndingTags(await getTags("ending", t.defaultEndingTags));
+      } else if (kind === "work") {
+        setWorkTags(await getTags("work", t.defaultWorkTags));
+      } else if (kind === "break_overtime") {
+        setBreakOverdueTags(await getTags("break_overtime", t.defaultBreakOvertimeTags));
       }
     }
   };
@@ -585,8 +865,12 @@ export default function App() {
       await deleteTag(tagId);
       if (kind === "distraction") {
         setDistractTags(await getTags("distraction", t.defaultDistractionTags));
-      } else {
+      } else if (kind === "ending") {
         setEndingTags(await getTags("ending", t.defaultEndingTags));
+      } else if (kind === "work") {
+        setWorkTags(await getTags("work", t.defaultWorkTags));
+      } else if (kind === "break_overtime") {
+        setBreakOverdueTags(await getTags("break_overtime", t.defaultBreakOvertimeTags));
       }
     }
   };
@@ -610,10 +894,12 @@ export default function App() {
     const days = await getDaysSummary();
     const weekly = await getWeeklySummary(locale);
     const reasonsData = await getSummaryReasonsData(freqOnlyToday);
+    const timeline = await getTimelineSessions();
 
     setSummaryDays(days);
     setWeeklySummary(weekly);
     setSummaryReasonsData(reasonsData);
+    setTimelineSessions(timeline);
     setHoveredDay(days[days.length - 1] ?? null);
     const todayWeekDay =
       weekly.days.find((d) => d.is_today) ?? weekly.days[weekly.days.length - 1] ?? null;
@@ -639,29 +925,40 @@ export default function App() {
     const freshDays = await getDaysSummary();
     const freshWeekly = await getWeeklySummary(locale);
     const freshReasons = await getSummaryReasonsData(false);
+    const freshTimeline = await getTimelineSessions(freshStats.dayId);
 
     setDayStats(freshStats);
     setSummaryDays(freshDays);
     setWeeklySummary(freshWeekly);
     setSummaryReasonsData(freshReasons);
+    setTimelineSessions(freshTimeline);
     setHoveredDay(null);
     setHoveredWeekDay(null);
+    setHoveredTimelineItem(null);
     setShowResetConfirm(false);
   };
 
   const handleStartNewDay = async () => {
     setIsRunning(false);
     if (workElapsedSec >= 60) {
-      await recordWorkSession(workElapsedSec);
+      await recordWorkSession(
+        workElapsedSec,
+        currentWorkTag,
+        currentWorkReason,
+        workStartedAtRef.current,
+        new Date().toISOString(),
+      );
     }
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
-    setBreakSecondsLeft(DEFAULT_BREAK_SEC);
+    setBreakSecondsLeft(defaultBreakMins * 60);
+    setBreakOverdueSec(0);
     setCurrentSessionDistractions(0);
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const freshStats = await startNewDay(locale);
     setDayStats(freshStats);
     setWeeklySummary(await getWeeklySummary(locale));
+    setTimelineSessions(await getTimelineSessions(freshStats.dayId));
   };
 
   const updateTheme = (patch: Partial<ThemeSettings>) => {
@@ -676,6 +973,8 @@ export default function App() {
     const newT = translations[newActive];
     setDistractTags(await getTags("distraction", newT.defaultDistractionTags));
     setEndingTags(await getTags("ending", newT.defaultEndingTags));
+    setWorkTags(await getTags("work", newT.defaultWorkTags));
+    setBreakOverdueTags(await getTags("break_overtime", newT.defaultBreakOvertimeTags));
   };
 
   const handlePenaltyChange = async (mins: number) => {
@@ -719,6 +1018,26 @@ export default function App() {
     );
   }
 
+  const isAlarm = page === "break" && breakOverdueSec > 0;
+  const progressPct =
+    isAlarm
+      ? 100
+      : page === "work"
+        ? Math.min(
+            100,
+            Math.max(
+              0,
+              (workElapsedSec / Math.max(1, workElapsedSec + workSecondsLeft)) * 100,
+            ),
+          )
+        : Math.min(
+            100,
+            Math.max(
+              0,
+              ((breakTotalSec - breakSecondsLeft) / Math.max(1, breakTotalSec)) * 100,
+            ),
+          );
+
   const activeSeconds = page === "work" ? workSecondsLeft : breakSecondsLeft;
   const hasPausedProgress = !isRunning && page === "work" && workElapsedSec > 0;
   const maxRecentHours = Math.max(
@@ -744,12 +1063,14 @@ export default function App() {
         page === "summary" ||
         page === "settings" ||
         showDistractBox ||
-        showStopBox
+        showStopBox ||
+        showBreakOverdueBox ||
+        showWorkTopicBox
           ? "solid-bg"
           : ""
       } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${
         isCelebrating ? "celebrating-shell" : ""
-      }`}
+      } ${isAlarm ? "alarm-shell" : ""}`}
       style={shellStyle}
       onMouseDown={handleMouseDown}
     >
@@ -763,19 +1084,62 @@ export default function App() {
         </>
       )}
 
+      {isAlarm && (
+        <div className="alarm-badge">
+          {t.breakOverdueBadge(formatClock(breakOverdueSec))}
+        </div>
+      )}
+
+      {/* İnce İlerleme Çizgisi (Progress Bar) */}
+      <div className="progress-bar-container">
+        <div
+          className="progress-bar-fill"
+          style={{
+            width: `${progressPct}%`,
+            backgroundColor:
+              isAlarm
+                ? "#ef4444"
+                : page === "work"
+                  ? "var(--timer-color, #fbbf24)"
+                  : "#38bdf8",
+          }}
+        />
+      </div>
+
       {/* ÇALIŞMA VE MOLA EKRANI */}
       {(page === "work" || page === "break") && (
         <>
           <div className="top-bar hover-reveal">
-            <span className="badge">
-              ⠿ {page === "work" ? t.work : t.break}
-              {page === "work" && currentSessionDistractions > 0 && (
-                <span style={{ fontSize: "9px", color: "#fbbf24", marginLeft: "4px" }}>
-                  ({currentSessionDistractions}x)
-                </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <span className="badge">
+                ⠿ {page === "work" ? t.work : t.break}
+                {page === "work" && currentSessionDistractions > 0 && (
+                  <span style={{ fontSize: "9px", color: "#fbbf24", marginLeft: "4px" }}>
+                    ({currentSessionDistractions}x)
+                  </span>
+                )}
+              </span>
+
+              {page === "work" && (
+                <button
+                  className="work-topic-badge"
+                  onClick={handleOpenWorkTopicBox}
+                  title={t.changeWorkTopic}
+                >
+                  🏷️ {currentWorkTag || t.selectWorkTopic}
+                  {currentWorkReason ? `: ${currentWorkReason}` : ""}
+                </button>
               )}
-            </span>
-            <div style={{ display: "flex", gap: "4px" }}>
+            </div>
+
+            <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              <button
+                className={`ghost-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
+                title={t.alwaysOnTopTooltip(alwaysOnTop)}
+                onClick={toggleAlwaysOnTop}
+              >
+                📌
+              </button>
               <button
                 className="ghost-btn"
                 onClick={openMenu}
@@ -805,6 +1169,10 @@ export default function App() {
                 onBlur={handleSaveEditedTime}
                 onKeyDown={(e) => e.key === "Enter" && handleSaveEditedTime()}
               />
+            ) : isAlarm ? (
+              <div className="timer-display alarm-timer">
+                -{formatClock(breakOverdueSec)}
+              </div>
             ) : (
               <div
                 className={`timer-display ${!isRunning ? "clickable-timer" : ""}`}
@@ -820,11 +1188,38 @@ export default function App() {
               </div>
             )}
 
-            {hasPausedProgress && !showDistractBox && !showStopBox && (
-              <div className="resume-hint">
-                {t.resumeHint(Math.floor(workElapsedSec / 60))}
+            {page === "break" && !showBreakOverdueBox && !isAlarm && (
+              <div className="break-presets-row">
+                <button
+                  className={`break-chip-btn ${breakTotalSec === 7 * 60 ? "active" : ""}`}
+                  onClick={() => handleSelectBreakPreset(7)}
+                >
+                  {t.breakPreset7}
+                </button>
+                <button
+                  className={`break-chip-btn ${breakTotalSec === 10 * 60 ? "active" : ""}`}
+                  onClick={() => handleSelectBreakPreset(10)}
+                >
+                  {t.breakPreset10}
+                </button>
+                <button
+                  className={`break-chip-btn ${breakTotalSec === 20 * 60 ? "active" : ""}`}
+                  onClick={() => handleSelectBreakPreset(20)}
+                >
+                  {t.breakPreset20}
+                </button>
               </div>
             )}
+
+            {hasPausedProgress &&
+              !showDistractBox &&
+              !showStopBox &&
+              !showBreakOverdueBox &&
+              !showWorkTopicBox && (
+                <div className="resume-hint">
+                  {t.resumeHint(Math.floor(workElapsedSec / 60))}
+                </div>
+              )}
           </div>
 
           {/* DİKKAT DAĞILMASI DİYALOĞU */}
@@ -1043,6 +1438,238 @@ export default function App() {
                 </button>
               </div>
             </div>
+          ) : showBreakOverdueBox ? (
+            <div className="stop-box">
+              <div className="stop-box-header">
+                <span className="stop-box-title">{t.breakOverdueTitle}</span>
+                <div style={{ display: "flex", gap: "3px" }}>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => handleAddNewTag("break_overtime")}
+                    title="+ Tag Ekle"
+                  >
+                    + Tag
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() =>
+                      setIsEditingBreakOverdueTags(!isEditingBreakOverdueTags)
+                    }
+                  >
+                    {isEditingBreakOverdueTags ? t.doneEditing : t.editTags}
+                  </button>
+                </div>
+              </div>
+
+              <div className="stop-box-hint">
+                {t.breakOverdueDesc(formatClock(breakOverdueSec))}
+              </div>
+
+              {/* Overtime Tag Seçimi */}
+              <div className="reason-chips stop-chips">
+                {breakOverdueTags.map((tag) => {
+                  const isSelected = selectedBreakOverdueTag === tag.name;
+                  return (
+                    <div
+                      key={tag.id}
+                      className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
+                    >
+                      <button
+                        className="tag-chip-btn"
+                        onClick={() => handleSelectBreakOverdueTag(tag.name)}
+                      >
+                        {tag.name}
+                      </button>
+                      {isEditingBreakOverdueTags && (
+                        <span className="tag-actions">
+                          <button
+                            className="tag-icon-btn"
+                            onClick={() =>
+                              handleEditTagItem(tag.id, tag.name, "break_overtime")
+                            }
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className="tag-icon-btn del-btn"
+                            onClick={() =>
+                              handleDeleteTagItem(tag.id, tag.name, "break_overtime")
+                            }
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Önceki Açıklamalar */}
+              {breakOverduePrevReasons.length > 0 && (
+                <div className="previous-reasons-box">
+                  <div className="section-subhead">{t.previousReasons}</div>
+                  <div className="previous-reasons-chips">
+                    {breakOverduePrevReasons.map((r) => (
+                      <button
+                        key={r}
+                        className="reason-suggestion-chip"
+                        onClick={() => setBreakOverdueReasonText(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Açıklama Inputu */}
+              <div className="new-reason-row">
+                <input
+                  className="distract-input"
+                  placeholder={t.workTopicPlaceholder}
+                  value={breakOverdueReasonText}
+                  autoFocus
+                  onChange={(e) => setBreakOverdueReasonText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitBreakOverdue(false);
+                    if (e.key === "Escape") submitBreakOverdue(true);
+                  }}
+                />
+              </div>
+
+              <div className="stop-box-actions">
+                <button
+                  className="primary-btn"
+                  onClick={() => submitBreakOverdue(false)}
+                >
+                  {t.saveAndStartWork}
+                </button>
+                <button onClick={() => submitBreakOverdue(true)}>
+                  {t.skipAndStartWork}
+                </button>
+              </div>
+            </div>
+          ) : showWorkTopicBox ? (
+            <div className="stop-box">
+              <div className="stop-box-header">
+                <span className="stop-box-title">{t.whatAreYouWorkingOn}</span>
+                <div style={{ display: "flex", gap: "3px" }}>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => handleAddNewTag("work")}
+                    title="+ Tag Ekle"
+                  >
+                    + Tag
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => setIsEditingWorkTags(!isEditingWorkTags)}
+                  >
+                    {isEditingWorkTags ? t.doneEditing : t.editTags}
+                  </button>
+                </div>
+              </div>
+
+              <div className="section-subhead">{t.selectTagHint}</div>
+              <div className="reason-chips stop-chips">
+                {workTags.map((tag) => {
+                  const isSelected = selectedWorkTopicTag === tag.name;
+                  return (
+                    <div
+                      key={tag.id}
+                      className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
+                    >
+                      <button
+                        className="tag-chip-btn"
+                        onClick={() => handleSelectWorkTopicTag(tag.name)}
+                      >
+                        {tag.name}
+                      </button>
+                      {isEditingWorkTags && (
+                        <span className="tag-actions">
+                          <button
+                            className="tag-icon-btn"
+                            onClick={() =>
+                              handleEditTagItem(tag.id, tag.name, "work")
+                            }
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className="tag-icon-btn del-btn"
+                            onClick={() =>
+                              handleDeleteTagItem(tag.id, tag.name, "work")
+                            }
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {workPrevReasons.length > 0 && (
+                <div className="previous-reasons-box">
+                  <div className="section-subhead">{t.previousReasons}</div>
+                  <div className="previous-reasons-chips">
+                    {workPrevReasons.map((r) => (
+                      <button
+                        key={r}
+                        className="reason-suggestion-chip"
+                        onClick={() => setWorkTopicReasonText(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="new-reason-row">
+                <input
+                  className="distract-input"
+                  placeholder={t.workTopicPlaceholder}
+                  value={workTopicReasonText}
+                  autoFocus
+                  onChange={(e) => setWorkTopicReasonText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitWorkTopic();
+                    if (e.key === "Escape") setShowWorkTopicBox(false);
+                  }}
+                />
+                <button className="primary-btn" onClick={submitWorkTopic}>
+                  {t.add}
+                </button>
+              </div>
+
+              <div className="stop-box-actions">
+                <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
+                  Tag: <b>{selectedWorkTopicTag}</b>
+                </span>
+                <button onClick={() => setShowWorkTopicBox(false)}>
+                  {t.cancel}
+                </button>
+              </div>
+            </div>
+          ) : isAlarm ? (
+            <div className="btn-row hover-reveal">
+              <button className="primary-btn" onClick={handleStartWorkFromBreak}>
+                🟢 {t.startWorkBtn}
+              </button>
+              <button
+                onClick={() => {
+                  setBreakSecondsLeft(5 * 60);
+                  setBreakTotalSec((prev) => prev + 5 * 60);
+                  setBreakOverdueSec(0);
+                }}
+              >
+                {t.extendBreak5m}
+              </button>
+              <button onClick={handleStopSession}>{t.stop}</button>
+            </div>
           ) : (
             <div className="btn-row hover-reveal">
               <button
@@ -1077,6 +1704,13 @@ export default function App() {
               ⠿ {t.menu} • {dayStats.label}
             </span>
             <div style={{ display: "flex", gap: "4px" }}>
+              <button
+                className={`ghost-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
+                title={t.alwaysOnTopTooltip(alwaysOnTop)}
+                onClick={toggleAlwaysOnTop}
+              >
+                📌
+              </button>
               <button
                 className="ghost-btn"
                 title={t.settings}
@@ -1220,6 +1854,47 @@ export default function App() {
             </div>
           </div>
 
+          {/* HER ZAMAN ÜSTTE (ALWAYS ON TOP) */}
+          <div className="settings-section">
+            <div className="settings-label">{t.alwaysOnTop}</div>
+            <button
+              className={`penalty-btn ${alwaysOnTop ? "active" : ""}`}
+              onClick={toggleAlwaysOnTop}
+            >
+              {alwaysOnTop
+                ? activeLang === "tr"
+                  ? "Açık (📌 Üstte)"
+                  : "Enabled (📌 On Top)"
+                : activeLang === "tr"
+                  ? "Kapalı"
+                  : "Disabled"}
+            </button>
+          </div>
+
+          {/* VARSAYILAN MOLA SÜRESİ */}
+          <div className="settings-section">
+            <div className="settings-label">
+              {activeLang === "tr"
+                ? "Varsayılan Mola Süresi"
+                : "Default Break Duration"}
+            </div>
+            <div className="penalty-selector">
+              {([7, 10, 20] as const).map((mins) => (
+                <button
+                  key={mins}
+                  className={`penalty-btn ${defaultBreakMins === mins ? "active" : ""}`}
+                  onClick={() => handleSelectBreakPreset(mins)}
+                >
+                  {mins === 7
+                    ? t.breakPreset7
+                    : mins === 10
+                      ? t.breakPreset10
+                      : t.breakPreset20}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* ARKA PLAN RENK & OPAKLIK */}
           <div className="settings-section">
             <div className="settings-label">{t.bgColorLabel}</div>
@@ -1339,6 +2014,12 @@ export default function App() {
               <span className="badge">⠿ {t.summary}</span>
               <div className="summary-tab-group">
                 <button
+                  className={`tab-btn ${summaryTab === "timeline" ? "active" : ""}`}
+                  onClick={() => setSummaryTab("timeline")}
+                >
+                  {t.timelineTab}
+                </button>
+                <button
                   className={`tab-btn ${summaryTab === "weekly" ? "active" : ""}`}
                   onClick={() => setSummaryTab("weekly")}
                 >
@@ -1373,6 +2054,144 @@ export default function App() {
             </div>
           ) : (
             <>
+              {/* 24 SAATLİK ÇİZELGE GÖRÜNÜMÜ */}
+              {summaryTab === "timeline" && (
+                <>
+                  <div className="tooltip-banner">
+                    {hoveredTimelineItem ? (
+                      <>
+                        <span>
+                          <b>
+                            {hoveredTimelineItem.mode === "work"
+                              ? activeLang === "tr"
+                                ? "Çalışma"
+                                : "Work"
+                              : activeLang === "tr"
+                                ? "Mola"
+                                : "Break"}
+                          </b>
+                          :{" "}
+                          {hoveredTimelineItem.tag ||
+                            (hoveredTimelineItem.mode === "work"
+                              ? "Ders"
+                              : "Mola")}
+                          {hoveredTimelineItem.reason
+                            ? ` (${hoveredTimelineItem.reason})`
+                            : ""}
+                        </span>
+                        <span>
+                          {hoveredTimelineItem.timeRangeLabel} •{" "}
+                          {t.formatDuration(hoveredTimelineItem.durationSec)}
+                          {hoveredTimelineItem.overtimeSec > 0
+                            ? ` (+${Math.round(hoveredTimelineItem.overtimeSec / 60)} dk ${activeLang === "tr" ? "gecikme" : "overdue"})`
+                            : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <span>{t.summaryHoverHint}</span>
+                    )}
+                  </div>
+
+                  <div className="timeline-container">
+                    <div className="timeline-24h-wrapper">
+                      <div className="timeline-24h-track">
+                        {timelineSessions.map((s) => {
+                          const leftPct = (s.startHour / 24) * 100;
+                          const widthPct = Math.max(
+                            0.8,
+                            ((s.endHour - s.startHour) / 24) * 100,
+                          );
+                          return (
+                            <div
+                              key={s.id}
+                              className={`timeline-block ${s.mode} ${hoveredTimelineItem?.id === s.id ? "active-bar" : ""}`}
+                              style={{
+                                left: `${leftPct}%`,
+                                width: `${widthPct}%`,
+                              }}
+                              onMouseEnter={() => setHoveredTimelineItem(s)}
+                              title={`${s.mode === "work" ? "Çalışma" : "Mola"}: ${s.timeRangeLabel}`}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="timeline-hours-axis">
+                        <span>00:00</span>
+                        <span>04:00</span>
+                        <span>08:00</span>
+                        <span>12:00</span>
+                        <span>16:00</span>
+                        <span>20:00</span>
+                        <span>24:00</span>
+                      </div>
+                    </div>
+
+                    <div className="timeline-session-list">
+                      {timelineSessions.length > 0 ? (
+                        timelineSessions.map((s) => (
+                          <div
+                            key={s.id}
+                            className={`timeline-session-row ${s.mode}`}
+                            onMouseEnter={() => setHoveredTimelineItem(s)}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                            >
+                              <span className="timeline-session-time">
+                                {s.timeRangeLabel}
+                              </span>
+                              <span className="timeline-session-tag">
+                                {s.mode === "work" ? "💼" : "☕"}{" "}
+                                {s.tag ||
+                                  (s.mode === "work" ? "Ders" : "Mola")}
+                              </span>
+                              {s.reason && (
+                                <span
+                                  style={{
+                                    color: "#a1a1aa",
+                                    fontSize: "8px",
+                                  }}
+                                >
+                                  ({s.reason})
+                                </span>
+                              )}
+                              {s.overtimeSec > 0 ? (
+                                <span className="overtime-badge">
+                                  +{Math.round(s.overtimeSec / 60)} dk
+                                </span>
+                              ) : null}
+                            </div>
+                            <span
+                              style={{
+                                color: "#71717a",
+                                fontFamily: "monospace",
+                              }}
+                            >
+                              {t.formatDuration(s.durationSec)}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "#a1a1aa",
+                            padding: "8px",
+                            textAlign: "center",
+                          }}
+                        >
+                          {t.noTimelineSessions}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
               {/* HAFTALIK ÖZET GÖRÜNÜMÜ */}
               {summaryTab === "weekly" && (
                 <>
@@ -1512,8 +2331,20 @@ export default function App() {
                 </>
               )}
 
-              {/* DİKKAT DAĞILMA & ERKEN BİTİRME KATEGORİ KIRILIMI */}
+              {/* KATEGORİ KIRILIMI */}
               <div className="summary-subtabs">
+                <button
+                  className={`subtab-btn ${summaryReasonsTab === "work" ? "active" : ""}`}
+                  onClick={() => setSummaryReasonsTab("work")}
+                >
+                  {t.workTagsTab} ({summaryReasonsData?.totalWorkSubjects ?? 0})
+                </button>
+                <button
+                  className={`subtab-btn ${summaryReasonsTab === "overtime" ? "active" : ""}`}
+                  onClick={() => setSummaryReasonsTab("overtime")}
+                >
+                  {t.breakOvertimeTab} ({summaryReasonsData?.totalBreakOvertimes ?? 0})
+                </button>
                 <button
                   className={`subtab-btn ${summaryReasonsTab === "distractions" ? "active" : ""}`}
                   onClick={() => setSummaryReasonsTab("distractions")}
@@ -1532,12 +2363,15 @@ export default function App() {
               </div>
 
               <div className="accordion-list">
-                {summaryReasonsTab === "distractions" ? (
-                  (summaryReasonsData?.distractionTags.length ?? 0) > 0 ? (
-                    summaryReasonsData?.distractionTags.map((item) => {
+                {summaryReasonsTab === "work" ? (
+                  (summaryReasonsData?.workTags.length ?? 0) > 0 ? (
+                    summaryReasonsData?.workTags.map((item) => {
                       const isExpanded = !!expandedTags[item.tag];
-                      const total = summaryReasonsData.totalDistractions;
-                      const pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                      const total = summaryReasonsData.totalWorkSubjects;
+                      const pct =
+                        total > 0
+                          ? Math.round((item.count / total) * 100)
+                          : 0;
                       return (
                         <div key={item.tag} className="accordion-card">
                           <div
@@ -1551,7 +2385,10 @@ export default function App() {
                               <span>{item.tag}</span>
                             </div>
                             <span className="accordion-count">
-                              {item.count} {t.timesCount(item.count, pct).split(" ")[1] || "kez"} (%{pct})
+                              {item.count}{" "}
+                              {t.timesCount(item.count, pct).split(" ")[1] ||
+                                "kez"}{" "}
+                              (%{pct})
                             </span>
                           </div>
                           {isExpanded && (
@@ -1562,7 +2399,9 @@ export default function App() {
                                     <span className="explanation-bullet">•</span>
                                     {exp.reason}
                                   </span>
-                                  <span className="explanation-badge">{exp.count}x</span>
+                                  <span className="explanation-badge">
+                                    {exp.count}x
+                                  </span>
                                 </div>
                               ))}
                             </div>
@@ -1571,7 +2410,131 @@ export default function App() {
                       );
                     })
                   ) : (
-                    <div style={{ fontSize: "10px", color: "#a1a1aa", padding: "6px" }}>
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#a1a1aa",
+                        padding: "6px",
+                      }}
+                    >
+                      {activeLang === "tr"
+                        ? "Henüz çalışma konusu kaydedilmedi."
+                        : "No work topics recorded yet."}
+                    </div>
+                  )
+                ) : summaryReasonsTab === "overtime" ? (
+                  (summaryReasonsData?.breakOvertimeTags.length ?? 0) > 0 ? (
+                    summaryReasonsData?.breakOvertimeTags.map((item) => {
+                      const isExpanded = !!expandedTags[item.tag];
+                      const total = summaryReasonsData.totalBreakOvertimes;
+                      const pct =
+                        total > 0
+                          ? Math.round((item.count / total) * 100)
+                          : 0;
+                      return (
+                        <div key={item.tag} className="accordion-card">
+                          <div
+                            className="accordion-header"
+                            onClick={() => toggleAccordionTag(item.tag)}
+                          >
+                            <div className="accordion-title">
+                              <span className="accordion-arrow">
+                                {isExpanded ? "▼" : "▶"}
+                              </span>
+                              <span>{item.tag}</span>
+                            </div>
+                            <span className="accordion-count">
+                              {item.count}{" "}
+                              {t.timesCount(item.count, pct).split(" ")[1] ||
+                                "kez"}{" "}
+                              (%{pct})
+                            </span>
+                          </div>
+                          {isExpanded && (
+                            <div className="accordion-body">
+                              {item.explanations.map((exp, idx) => (
+                                <div key={idx} className="explanation-row">
+                                  <span>
+                                    <span className="explanation-bullet">•</span>
+                                    {exp.reason}
+                                  </span>
+                                  <span className="explanation-badge">
+                                    {exp.count}x
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#a1a1aa",
+                        padding: "6px",
+                      }}
+                    >
+                      {activeLang === "tr"
+                        ? "Henüz mola gecikmesi kaydedilmedi."
+                        : "No break overtime recorded yet."}
+                    </div>
+                  )
+                ) : summaryReasonsTab === "distractions" ? (
+                  (summaryReasonsData?.distractionTags.length ?? 0) > 0 ? (
+                    summaryReasonsData?.distractionTags.map((item) => {
+                      const isExpanded = !!expandedTags[item.tag];
+                      const total = summaryReasonsData.totalDistractions;
+                      const pct =
+                        total > 0
+                          ? Math.round((item.count / total) * 100)
+                          : 0;
+                      return (
+                        <div key={item.tag} className="accordion-card">
+                          <div
+                            className="accordion-header"
+                            onClick={() => toggleAccordionTag(item.tag)}
+                          >
+                            <div className="accordion-title">
+                              <span className="accordion-arrow">
+                                {isExpanded ? "▼" : "▶"}
+                              </span>
+                              <span>{item.tag}</span>
+                            </div>
+                            <span className="accordion-count">
+                              {item.count}{" "}
+                              {t.timesCount(item.count, pct).split(" ")[1] ||
+                                "kez"}{" "}
+                              (%{pct})
+                            </span>
+                          </div>
+                          {isExpanded && (
+                            <div className="accordion-body">
+                              {item.explanations.map((exp, idx) => (
+                                <div key={idx} className="explanation-row">
+                                  <span>
+                                    <span className="explanation-bullet">•</span>
+                                    {exp.reason}
+                                  </span>
+                                  <span className="explanation-badge">
+                                    {exp.count}x
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: "10px",
+                        color: "#a1a1aa",
+                        padding: "6px",
+                      }}
+                    >
                       {t.noDistractions}
                     </div>
                   )
@@ -1579,7 +2542,8 @@ export default function App() {
                   summaryReasonsData?.endingTags.map((item) => {
                     const isExpanded = !!expandedTags[item.tag];
                     const total = summaryReasonsData.totalEndings;
-                    const pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                    const pct =
+                      total > 0 ? Math.round((item.count / total) * 100) : 0;
                     return (
                       <div key={item.tag} className="accordion-card">
                         <div
@@ -1604,7 +2568,9 @@ export default function App() {
                                   <span className="explanation-bullet">•</span>
                                   {exp.reason}
                                 </span>
-                                <span className="explanation-badge">{exp.count}x</span>
+                                <span className="explanation-badge">
+                                  {exp.count}x
+                                </span>
                               </div>
                             ))}
                           </div>
@@ -1613,14 +2579,27 @@ export default function App() {
                     );
                   })
                 ) : (
-                  <div style={{ fontSize: "10px", color: "#a1a1aa", padding: "6px" }}>
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "#a1a1aa",
+                      padding: "6px",
+                    }}
+                  >
                     {t.noEndingReasons}
                   </div>
                 )}
               </div>
 
-              {/* VERİLERİ SIFIRLAMA BUTONU */}
+              {/* VERİLERİ SIFIRLAMA & DIŞA AKTARMA BUTONLARI */}
               <div className="summary-bottom-row">
+                <button
+                  className="ghost-btn"
+                  onClick={handleExportData}
+                  title={t.exportDataBtn}
+                >
+                  📥 {t.exportDataBtn}
+                </button>
                 <button
                   className="ghost-btn reset-data-btn"
                   onClick={() => setShowResetConfirm(true)}
