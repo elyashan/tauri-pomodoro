@@ -4,7 +4,19 @@ import Database from "@tauri-apps/plugin-sql";
 // Tipler
 // ---------------------------------------------------------------------------
 
-export type PageType = "menu" | "work" | "break" | "summary";
+export type PageType = "menu" | "work" | "break" | "summary" | "settings";
+
+export interface ThemeSettings {
+  bgColor: string; // "#rrggbb"
+  bgOpacity: number; // 30-100 (%)
+  timerColor: string; // "#rrggbb"
+}
+
+export const DEFAULT_THEME: ThemeSettings = {
+  bgColor: "#1a1814",
+  bgOpacity: 82,
+  timerColor: "#ffffff",
+};
 
 export interface AppState {
   page: PageType;
@@ -43,7 +55,7 @@ export const DEFAULT_BREAK_SEC = 10 * 60;
 
 const DB_URL = "sqlite:pomodoro.db";
 const SUMMARY_DAY_LIMIT = 7;
-const VALID_PAGES: PageType[] = ["menu", "work", "break", "summary"];
+const VALID_PAGES: PageType[] = ["menu", "work", "break", "summary", "settings"];
 
 const DEFAULT_REASONS = [
   "Telefon",
@@ -96,6 +108,12 @@ async function initDb(): Promise<Database> {
       work_seconds_left INTEGER NOT NULL,
       work_elapsed_sec INTEGER NOT NULL,
       break_seconds_left INTEGER NOT NULL
+    )
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     )
   `);
 
@@ -345,4 +363,49 @@ export async function getDistractionFrequencies(
   }
 
   return rows.map((r) => ({ reason: r.reason, count: Number(r.count) }));
+}
+
+// ---------------------------------------------------------------------------
+// Tema ayarları (renkler)
+// ---------------------------------------------------------------------------
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+export async function loadThemeSettings(): Promise<ThemeSettings> {
+  const db = await getDb();
+  const rows = await db.select<{ key: string; value: string }[]>(
+    "SELECT key, value FROM settings WHERE key IN ('bgColor', 'bgOpacity', 'timerColor')",
+  );
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+
+  const bgColor = map.get("bgColor") ?? "";
+  const timerColor = map.get("timerColor") ?? "";
+  const opacity = Number(map.get("bgOpacity"));
+
+  return {
+    bgColor: HEX_COLOR.test(bgColor) ? bgColor : DEFAULT_THEME.bgColor,
+    timerColor: HEX_COLOR.test(timerColor)
+      ? timerColor
+      : DEFAULT_THEME.timerColor,
+    bgOpacity:
+      Number.isFinite(opacity) && opacity >= 30 && opacity <= 100
+        ? Math.round(opacity)
+        : DEFAULT_THEME.bgOpacity,
+  };
+}
+
+export async function saveThemeSettings(theme: ThemeSettings): Promise<void> {
+  const db = await getDb();
+  const entries: [string, string][] = [
+    ["bgColor", theme.bgColor],
+    ["bgOpacity", String(theme.bgOpacity)],
+    ["timerColor", theme.timerColor],
+  ];
+  for (const [key, value] of entries) {
+    await db.execute(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, value],
+    );
+  }
 }

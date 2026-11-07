@@ -1,28 +1,50 @@
 name: "Tauri Build"
+
+# Yeni sürüm yayınlamak için:
+#   1) src-tauri/tauri.conf.json içindeki "version" değerini artır (örn. 0.1.1)
+#   2) git commit + git tag v0.1.1 + git push --follow-tags
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # Release oluşturup dosya yükleyebilmek için gerekli
+
 jobs:
   build:
-    strategy:
-      matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Node.js Kur
         uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with:
+          node-version: "22"
+          cache: "npm"
+
       - name: Rust Kur
         uses: dtolnay/rust-toolchain@stable
-      - name: Linux Bağımlılıklarını Yükle
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - run: npm install
-      - name: Tauri Uygulamasını Derle
+
+      - name: Rust Önbelleği
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - name: Tauri Uygulamasını Derle ve Yayınla
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Güncelleme paketlerini imzalamak için (GitHub > Settings > Secrets)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__ # tauri.conf.json'daki sürümden üretilir
+          releaseName: "Pomodoro v__VERSION__"
+          releaseBody: "Yeni sürüm. Uygulama açıkken otomatik güncellenir."
+          releaseDraft: false # Taslak release'ler /releases/latest altında görünmez
+          prerelease: false
+          includeUpdaterJson: true # latest.json dosyasını release'e ekler

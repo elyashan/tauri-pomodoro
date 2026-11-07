@@ -19,11 +19,11 @@ body,
   overflow: hidden;
 }
 
-/* Hafif saydam koyu pencere */
+/* Hafif saydam pencere (renkler Ayarlar sayfasından CSS değişkenleriyle gelir) */
 .widget-shell {
   width: 100%;
   height: 100%;
-  background: rgba(26, 24, 20, 0.82);
+  background: var(--shell-bg, rgba(26, 24, 20, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 14px;
   padding: 10px 12px;
@@ -39,7 +39,7 @@ body,
 
 .widget-shell:hover,
 .widget-shell.solid-bg {
-  background: rgba(20, 20, 26, 0.93);
+  background: var(--shell-bg-solid, rgba(20, 20, 26, 0.93));
   border-color: rgba(255, 255, 255, 0.16);
 }
 
@@ -85,7 +85,7 @@ body,
   font-weight: 700;
   letter-spacing: 1px;
   line-height: 1;
-  color: #ffffff;
+  color: var(--timer-color, #ffffff);
 }
 
 .timer-display.clickable-timer {
@@ -93,7 +93,7 @@ body,
 }
 
 .timer-display.clickable-timer:hover {
-  color: #93c5fd;
+  opacity: 0.75;
 }
 
 .resume-hint {
@@ -380,4 +380,194 @@ button.ghost-btn {
   background: #f87171;
   border-radius: 4px;
   transition: width 0.2s ease;
+}
+
+/* Güncelleme bildirimi */
+.update-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #4ade80;
+  vertical-align: middle;
+}
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 7px;
+  background: rgba(74, 222, 128, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  font-size: 11px;
+  color: #bbf7d0;
+}
+
+/* Ayarlar sayfası */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.settings-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #d4d4d8;
+}
+
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.timer-preview {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--timer-color, #fff);
+}
+
+.swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+button.swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease;
+}
+
+button.swatch:hover {
+  transform: scale(1.12);
+}
+
+button.swatch.selected {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.35);
+}
+
+.color-input {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range-input {
+  width: 100%;
+  accent-color: #60a5fa;
+  cursor: pointer;
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #a1a1aa;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-error {
+  font-size: 9px;
+  color: #fca5a5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Açık renkli arka plan seçildiğinde yazılar koyulaşır */
+.widget-shell.light-theme {
+  color: #18181b;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.light-theme .badge,
+.light-theme .settings-label,
+.light-theme .stat-val,
+.light-theme .freq-header,
+.light-theme .freq-label-row,
+.light-theme .tooltip-banner {
+  color: #27272a;
+}
+
+.light-theme .top-bar,
+.light-theme .stat-lbl,
+.light-theme .bar-hours,
+.light-theme .bar-label,
+.light-theme .update-row,
+.light-theme .last-pos-bar {
+  color: #52525b;
+}
+
+.light-theme button {
+  background: rgba(0, 0, 0, 0.07);
+  color: #18181b;
+}
+
+.light-theme button:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.light-theme button.primary-btn {
+  background: rgba(59, 130, 246, 0.25);
+  color: #1e3a8a;
+}
+
+.light-theme button.warn-btn {
+  background: rgba(239, 68, 68, 0.2);
+  color: #7f1d1d;
+}
+
+.light-theme .stat-card,
+.light-theme .last-pos-bar,
+.light-theme .settings-section,
+.light-theme .tooltip-banner {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.light-theme .resume-hint {
+  color: #b45309;
+}
+
+.light-theme .update-banner {
+  color: #14532d;
+}
+
+.light-theme .distract-input,
+.light-theme .timer-input {
+  background: rgba(255, 255, 255, 0.7);
+  color: #18181b;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.light-theme button.swatch {
+  border-color: rgba(0, 0, 0, 0.2);
 }

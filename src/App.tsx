@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getVersion } from "@tauri-apps/api/app";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import {
   PageType,
@@ -8,10 +9,14 @@ import {
   ActiveDayStats,
   DaySummary,
   DistractionFrequency,
+  ThemeSettings,
+  DEFAULT_THEME,
   DEFAULT_WORK_SEC,
   DEFAULT_BREAK_SEC,
   loadAppState,
   saveAppState,
+  loadThemeSettings,
+  saveThemeSettings,
   getActiveDayStats,
   startNewDay,
   recordWorkSession,
@@ -20,7 +25,47 @@ import {
   getReasonChoices,
   getDistractionFrequencies,
 } from "./db";
+import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import "./App.css";
+
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
+
+const BG_PRESETS = [
+  "#1a1814",
+  "#0f172a",
+  "#1e1b4b",
+  "#052e16",
+  "#3f0d12",
+  "#27272a",
+  "#e7e5e4",
+];
+const TIMER_PRESETS = [
+  "#ffffff",
+  "#fbbf24",
+  "#60a5fa",
+  "#4ade80",
+  "#f87171",
+  "#c084fc",
+  "#18181b",
+];
+
+// "#rrggbb" + saydamlık(%) -> "rgba(r, g, b, a)"
+function hexToRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${Math.min(1, Math.max(0, alpha))})`;
+}
+
+// Açık renkli arka planlarda yazıların okunabilmesi için
+function isLightColor(hex: string): boolean {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150;
+}
 
 function persistState(state: AppState) {
   saveAppState(state).catch((err) =>
@@ -84,6 +129,14 @@ export default function App() {
   const lastTickRef = useRef<number>(Date.now());
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Renk ayarları ve uzaktan güncelleme
+  const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
+  const themeDirtyRef = useRef(false);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
+    kind: "idle",
+  });
+
   // Periyodik yedekleme her saniye yeniden kurulmasın diye güncel durumu ref'te tut
   const stateRef = useRef<AppState>({
     page: "work",
@@ -106,6 +159,7 @@ export default function App() {
         const days = await getDaysSummary();
         const choices = await getReasonChoices();
         const freqs = await getDistractionFrequencies(false);
+        const savedTheme = await loadThemeSettings();
 
         setPage(saved.page);
         setWorkSecondsLeft(saved.work_seconds_left);
@@ -115,10 +169,15 @@ export default function App() {
         setSummaryDays(days);
         setReasonChoices(choices);
         setDistractFreqs(freqs);
+        setTheme(savedTheme);
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
         setLoadError(String(err));
       }
+
+      getVersion()
+        .then(setAppVersion)
+        .catch(() => {});
 
       // Otomatik başlatma hatası uygulamanın açılmasını engellemesin
       try {
@@ -127,6 +186,9 @@ export default function App() {
           if (!firstRunDone) {
             await enable();
             localStorage.setItem("autostart_initialized", "1");
+          } else if (await isEnabled()) {
+            // Exe taşındıysa veya güncellemeyle yeri değiştiyse kayıttaki yolu tazele
+            await enable();
           }
         }
         setAutoStartOn(await isEnabled());
@@ -143,15 +205,47 @@ export default function App() {
     if (!loaded) return;
     const win = getCurrentWindow();
     if (page === "menu") {
-      win.setSize(new LogicalSize(310, 290));
+      const hasBanner =
+        updateStatus.kind === "available" ||
+        updateStatus.kind === "downloading";
+      win.setSize(new LogicalSize(310, hasBanner ? 326 : 290));
     } else if (page === "summary") {
       win.setSize(new LogicalSize(360, 390));
+    } else if (page === "settings") {
+      win.setSize(new LogicalSize(310, 330));
     } else if (showDistractBox) {
       win.setSize(new LogicalSize(285, 235));
     } else {
       win.setSize(new LogicalSize(240, 124));
     }
-  }, [page, showDistractBox, loaded]);
+  }, [page, showDistractBox, loaded, updateStatus.kind]);
+
+  // Renk ayarları değişince kaydet (renk seçici sürüklenirken her an yazmamak için gecikmeli)
+  useEffect(() => {
+    if (!loaded || !themeDirtyRef.current) return;
+    const t = setTimeout(() => {
+      saveThemeSettings(theme).catch((err) =>
+        console.error("Renk ayarları kaydedilemedi:", err),
+      );
+    }, 400);
+    return () => clearTimeout(t);
+  }, [theme, loaded]);
+
+  // Açılışta ve 6 saatte bir sessizce güncelleme kontrolü (geliştirme modunda kapalı)
+  useEffect(() => {
+    if (!loaded || import.meta.env.DEV) return;
+    const runCheck = async () => {
+      const result = await checkForUpdate();
+      // Arka plan kontrolünde hata/güncel durumunu gösterme; sadece yeni sürüm varsa bildir
+      if (result.kind === "available") setUpdateStatus(result);
+    };
+    const first = setTimeout(runCheck, 10_000);
+    const interval = setInterval(runCheck, UPDATE_CHECK_INTERVAL_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(interval);
+    };
+  }, [loaded]);
 
   // Durum kaydı: sayaç durmuşken her değişiklikte (süre düzenleme, durdur,
   // sayfa değişimi vb.) hemen kaydet
@@ -327,6 +421,30 @@ export default function App() {
     setDayStats(freshStats);
   };
 
+  const updateTheme = (patch: Partial<ThemeSettings>) => {
+    themeDirtyRef.current = true;
+    setTheme((prev) => ({ ...prev, ...patch }));
+  };
+
+  const openSettings = () => {
+    setIsRunning(false);
+    setPage("settings");
+  };
+
+  const handleCheckUpdate = async () => {
+    setUpdateStatus({ kind: "checking" });
+    setUpdateStatus(await checkForUpdate());
+  };
+
+  const handleInstallUpdate = async () => {
+    setIsRunning(false);
+    await installUpdate(setUpdateStatus, async () => {
+      // Kurulum uygulamayı kapatacağı için son durumu ve renkleri kaydet
+      await saveAppState(stateRef.current).catch(() => {});
+      await saveThemeSettings(theme).catch(() => {});
+    });
+  };
+
   if (!loaded) return null;
 
   if (loadError) {
@@ -355,14 +473,24 @@ export default function App() {
     (acc, item) => acc + item.count,
     0,
   );
+  const updateAvailable = updateStatus.kind === "available";
+  const shellStyle = {
+    "--shell-bg": hexToRgba(theme.bgColor, theme.bgOpacity / 100),
+    "--shell-bg-solid": hexToRgba(theme.bgColor, theme.bgOpacity / 100 + 0.11),
+    "--timer-color": theme.timerColor,
+  } as React.CSSProperties;
 
   return (
     <div
       className={`widget-shell ${
-        page === "menu" || page === "summary" || showDistractBox
+        page === "menu" ||
+        page === "summary" ||
+        page === "settings" ||
+        showDistractBox
           ? "solid-bg"
           : ""
-      }`}
+      } ${isLightColor(theme.bgColor) ? "light-theme" : ""}`}
+      style={shellStyle}
       onMouseDown={handleMouseDown}
     >
       {/* ÇALIŞMA VE MOLA EKRANI */}
@@ -373,8 +501,12 @@ export default function App() {
               ⠿ {page === "work" ? "Çalışma" : "Mola"}
             </span>
             <div style={{ display: "flex", gap: "4px" }}>
-              <button className="ghost-btn" onClick={openMenu}>
-                Menü
+              <button
+                className="ghost-btn"
+                onClick={openMenu}
+                title={updateAvailable ? "Yeni sürüm mevcut" : ""}
+              >
+                Menü{updateAvailable && <span className="update-dot" />}
               </button>
               <button
                 className="ghost-btn"
@@ -488,10 +620,10 @@ export default function App() {
             <div style={{ display: "flex", gap: "4px" }}>
               <button
                 className="ghost-btn"
-                title="Bilgisayar açıldığında otomatik başlat"
-                onClick={toggleAutoStart}
+                title="Renkler, otomatik başlatma ve güncellemeler"
+                onClick={openSettings}
               >
-                {autoStartOn ? "Oto: Açık" : "Oto: Kapalı"}
+                ⚙ Ayarlar
               </button>
               <button className="ghost-btn" onClick={openSummary}>
                 Özet →
@@ -530,6 +662,27 @@ export default function App() {
             <b>{formatClock(breakSecondsLeft)}</b>
           </div>
 
+          {(updateStatus.kind === "available" ||
+            updateStatus.kind === "downloading") && (
+            <div className="update-banner">
+              {updateStatus.kind === "available" ? (
+                <>
+                  <span>Yeni sürüm hazır: v{updateStatus.version}</span>
+                  <button className="primary-btn" onClick={handleInstallUpdate}>
+                    Güncelle
+                  </button>
+                </>
+              ) : (
+                <span>
+                  Güncelleme indiriliyor
+                  {updateStatus.percent !== null
+                    ? ` %${updateStatus.percent}`
+                    : "..."}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="menu-actions">
             <button className="primary-btn" onClick={() => setPage("work")}>
               Çalışmaya Geç
@@ -539,6 +692,126 @@ export default function App() {
               Yeni Günü Başlat (Eski Günü Bitir)
             </button>
           </div>
+        </>
+      )}
+
+      {/* AYARLAR SAYFASI */}
+      {page === "settings" && (
+        <>
+          <div className="top-bar">
+            <span className="badge">⠿ Ayarlar</span>
+            <button className="ghost-btn" onClick={openMenu}>
+              ← Ana Sayfa
+            </button>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-label">Arka plan rengi</div>
+            <div className="swatch-row">
+              {BG_PRESETS.map((c) => (
+                <button
+                  key={c}
+                  className={`swatch ${theme.bgColor === c ? "selected" : ""}`}
+                  style={{ background: c }}
+                  title={c}
+                  onClick={() => updateTheme({ bgColor: c })}
+                />
+              ))}
+              <input
+                type="color"
+                className="color-input"
+                title="Özel renk seç"
+                value={theme.bgColor}
+                onChange={(e) => updateTheme({ bgColor: e.target.value })}
+              />
+            </div>
+            <div className="settings-label slider-label">
+              <span>Opaklık</span>
+              <span>%{theme.bgOpacity}</span>
+            </div>
+            <input
+              type="range"
+              className="range-input"
+              min={30}
+              max={100}
+              value={theme.bgOpacity}
+              onChange={(e) =>
+                updateTheme({ bgOpacity: Number(e.target.value) })
+              }
+            />
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-label slider-label">
+              <span>Sayaç rengi</span>
+              <span className="timer-preview">50:00</span>
+            </div>
+            <div className="swatch-row">
+              {TIMER_PRESETS.map((c) => (
+                <button
+                  key={c}
+                  className={`swatch ${theme.timerColor === c ? "selected" : ""}`}
+                  style={{ background: c }}
+                  title={c}
+                  onClick={() => updateTheme({ timerColor: c })}
+                />
+              ))}
+              <input
+                type="color"
+                className="color-input"
+                title="Özel renk seç"
+                value={theme.timerColor}
+                onChange={(e) => updateTheme({ timerColor: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="settings-actions">
+            <button
+              title="Bilgisayar açıldığında otomatik başlat"
+              onClick={toggleAutoStart}
+            >
+              Açılışta başlat: {autoStartOn ? "Açık" : "Kapalı"}
+            </button>
+            <button onClick={() => updateTheme({ ...DEFAULT_THEME })}>
+              Varsayılan renkler
+            </button>
+          </div>
+
+          <div className="update-row">
+            <span>Sürüm v{appVersion || "?"}</span>
+            {updateStatus.kind === "available" ? (
+              <button className="primary-btn" onClick={handleInstallUpdate}>
+                v{updateStatus.version} yükle
+              </button>
+            ) : updateStatus.kind === "downloading" ? (
+              <span>
+                İndiriliyor
+                {updateStatus.percent !== null
+                  ? ` %${updateStatus.percent}`
+                  : "..."}
+              </span>
+            ) : (
+              <button
+                className="ghost-btn"
+                disabled={updateStatus.kind === "checking"}
+                onClick={handleCheckUpdate}
+              >
+                {updateStatus.kind === "checking"
+                  ? "Denetleniyor..."
+                  : updateStatus.kind === "up-to-date"
+                    ? "Güncel ✓"
+                    : updateStatus.kind === "error"
+                      ? "Hata, tekrar dene"
+                      : "Güncellemeleri denetle"}
+              </button>
+            )}
+          </div>
+          {updateStatus.kind === "error" && (
+            <div className="update-error" title={updateStatus.message}>
+              {updateStatus.message}
+            </div>
+          )}
         </>
       )}
 
