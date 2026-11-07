@@ -8,10 +8,11 @@ import {
   AppState,
   ActiveDayStats,
   DaySummary,
-  DistractionFrequency,
   ThemeSettings,
   LangCode,
+  TagKind,
   TagItem,
+  SummaryReasonsData,
   WeekDayStat,
   WeeklySummary,
   DEFAULT_THEME,
@@ -23,6 +24,8 @@ import {
   saveThemeSettings,
   loadLanguagePreference,
   saveLanguagePreference,
+  loadDistractPenalty,
+  saveDistractPenalty,
   getActiveDayStats,
   startNewDay,
   recordWorkSession,
@@ -34,8 +37,8 @@ import {
   addTag,
   updateTag,
   deleteTag,
-  getReasonChoices,
-  getDistractionFrequencies,
+  getPreviousReasons,
+  getSummaryReasonsData,
 } from "./db";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
@@ -62,7 +65,8 @@ const TIMER_PRESETS = [
   "#18181b",
 ];
 
-// "#rrggbb" + saydamlık(%) -> "rgba(r, g, b, a)"
+const PENALTY_OPTIONS = [1, 2, 3, 5];
+
 function hexToRgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   const r = (n >> 16) & 255;
@@ -71,7 +75,6 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${Math.min(1, Math.max(0, alpha))})`;
 }
 
-// Açık renkli arka planlarda yazıların okunabilmesi için
 function isLightColor(hex: string): boolean {
   const n = parseInt(hex.slice(1), 16);
   const r = (n >> 16) & 255;
@@ -123,16 +126,25 @@ export default function App() {
   const [editMinutes, setEditMinutes] = useState("50");
   const [autoStartOn, setAutoStartOn] = useState(false);
 
-  // Dikkatim dağıldı şıkları ve yeni neden girişi
-  const [showDistractBox, setShowDistractBox] = useState(false);
-  const [distractReason, setDistractReason] = useState("");
-  const [reasonChoices, setReasonChoices] = useState<string[]>([]);
+  // Dikkat Dağılma Ek Süresi (Dakika) ve Seans İçi Dağılma Sayacı
+  const [distractPenaltyMins, setDistractPenaltyMins] = useState(1);
+  const [currentSessionDistractions, setCurrentSessionDistractions] = useState(0);
 
-  // Erken durdurma & Tag yönetimi
+  // Dikkatim Dağıldı Kutusu
+  const [showDistractBox, setShowDistractBox] = useState(false);
+  const [distractTags, setDistractTags] = useState<TagItem[]>([]);
+  const [selectedDistractTag, setSelectedDistractTag] = useState<string>("Diğer");
+  const [distractPreviousReasons, setDistractPreviousReasons] = useState<string[]>([]);
+  const [distractReasonText, setDistractReasonText] = useState("");
+  const [isEditingDistractTags, setIsEditingDistractTags] = useState(false);
+
+  // Erken Durdurma Kutusu
   const [showStopBox, setShowStopBox] = useState(false);
-  const [tags, setTags] = useState<TagItem[]>([]);
-  const [newTagText, setNewTagText] = useState("");
-  const [isEditingTags, setIsEditingTags] = useState(false);
+  const [endingTags, setEndingTags] = useState<TagItem[]>([]);
+  const [selectedEndingTag, setSelectedEndingTag] = useState<string>("Diğer");
+  const [endingPreviousReasons, setEndingPreviousReasons] = useState<string[]>([]);
+  const [endingReasonText, setEndingReasonText] = useState("");
+  const [isEditingEndingTags, setIsEditingEndingTags] = useState(false);
 
   // İstatistikler ve Özet verisi
   const [dayStats, setDayStats] = useState<ActiveDayStats>({
@@ -145,13 +157,17 @@ export default function App() {
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [summaryTab, setSummaryTab] = useState<"weekly" | "recent">("weekly");
+  const [summaryReasonsTab, setSummaryReasonsTab] = useState<"distractions" | "endings">(
+    "distractions",
+  );
+  const [summaryReasonsData, setSummaryReasonsData] = useState<SummaryReasonsData | null>(
+    null,
+  );
+  const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
   const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
   const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [freqOnlyToday, setFreqOnlyToday] = useState(false);
-  const [distractFreqs, setDistractFreqs] = useState<DistractionFrequency[]>(
-    [],
-  );
 
   // Arka planda gizliyken bile sürenin şaşmaması için zaman referansı
   const lastTickRef = useRef<number>(Date.now());
@@ -165,7 +181,6 @@ export default function App() {
     kind: "idle",
   });
 
-  // Periyodik yedekleme her saniye yeniden kurulmasın diye güncel durumu ref'te tut
   const stateRef = useRef<AppState>({
     page: "work",
     work_seconds_left: DEFAULT_WORK_SEC,
@@ -191,9 +206,7 @@ export default function App() {
         const stats = await getActiveDayStats(locale);
         const days = await getDaysSummary();
         const weekly = await getWeeklySummary(locale);
-        const choices = await getReasonChoices(currentT.defaultReasons);
-        const initialTags = await getTags(currentT.defaultTags);
-        const freqs = await getDistractionFrequencies(false);
+        const penalty = await loadDistractPenalty();
         const savedTheme = await loadThemeSettings();
 
         setLangPref(savedLang);
@@ -204,10 +217,14 @@ export default function App() {
         setDayStats(stats);
         setSummaryDays(days);
         setWeeklySummary(weekly);
-        setReasonChoices(choices);
-        setTags(initialTags);
-        setDistractFreqs(freqs);
+        setDistractPenaltyMins(penalty);
         setTheme(savedTheme);
+
+        // Varsayılan tag'leri yükle
+        const dTags = await getTags("distraction", currentT.defaultDistractionTags);
+        const eTags = await getTags("ending", currentT.defaultEndingTags);
+        setDistractTags(dTags);
+        setEndingTags(eTags);
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
         setLoadError(String(err));
@@ -217,7 +234,6 @@ export default function App() {
         .then(setAppVersion)
         .catch(() => {});
 
-      // Otomatik başlatma hatası uygulamanın açılmasını engellemesin
       try {
         if (!import.meta.env.DEV) {
           const firstRunDone = localStorage.getItem("autostart_initialized");
@@ -237,7 +253,7 @@ export default function App() {
     })();
   }, []);
 
-  // Sayfaya göre pencere boyutunu ayarla
+  // Sayfaya ve diyaloglara göre pencere boyutunu ayarla
   useEffect(() => {
     if (!loaded) return;
     const win = getCurrentWindow();
@@ -247,13 +263,11 @@ export default function App() {
         updateStatus.kind === "downloading";
       win.setSize(new LogicalSize(310, hasBanner ? 346 : 312));
     } else if (page === "summary") {
-      win.setSize(new LogicalSize(360, 440));
+      win.setSize(new LogicalSize(360, 450));
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(310, 420));
-    } else if (showStopBox) {
-      win.setSize(new LogicalSize(300, 270));
-    } else if (showDistractBox) {
-      win.setSize(new LogicalSize(285, 235));
+      win.setSize(new LogicalSize(310, 450));
+    } else if (showStopBox || showDistractBox) {
+      win.setSize(new LogicalSize(310, 310));
     } else {
       win.setSize(new LogicalSize(240, 124));
     }
@@ -262,15 +276,15 @@ export default function App() {
   // Renk ayarları değişince kaydet
   useEffect(() => {
     if (!loaded || !themeDirtyRef.current) return;
-    const t = setTimeout(() => {
+    const tTimer = setTimeout(() => {
       saveThemeSettings(theme).catch((err) =>
         console.error("Renk ayarları kaydedilemedi:", err),
       );
     }, 400);
-    return () => clearTimeout(t);
+    return () => clearTimeout(tTimer);
   }, [theme, loaded]);
 
-  // Açılışta ve 6 saatte bir sessizce güncelleme kontrolü
+  // Güncelleme kontrolü
   useEffect(() => {
     if (!loaded || import.meta.env.DEV) return;
     const runCheck = async () => {
@@ -338,6 +352,7 @@ export default function App() {
         await recordWorkSession(workElapsedSec);
         setWorkSecondsLeft(DEFAULT_WORK_SEC);
         setWorkElapsedSec(0);
+        setCurrentSessionDistractions(0);
         const locale = activeLang === "tr" ? "tr-TR" : "en-US";
         setDayStats(await getActiveDayStats(locale));
         setWeeklySummary(await getWeeklySummary(locale));
@@ -352,7 +367,7 @@ export default function App() {
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
-    if (target.closest("button, input, .clickable-timer, .bar-col")) return;
+    if (target.closest("button, input, .clickable-timer, .bar-col, .accordion-header")) return;
     getCurrentWindow().startDragging();
   };
 
@@ -391,76 +406,133 @@ export default function App() {
     setIsEditing(false);
   };
 
-  // Erken durdurma tıklandığında
+  // ---------------------------------------------------------------------------
+  // DİKKAT DAĞILMASI İŞLEMLERİ
+  // ---------------------------------------------------------------------------
+  const handleDistractedClick = async () => {
+    // Süreye ayarlanan ceza süresini ekle
+    setWorkSecondsLeft((prev) => prev + distractPenaltyMins * 60);
+    setCurrentSessionDistractions((prev) => prev + 1);
+
+    const loadedTags = await getTags("distraction", t.defaultDistractionTags);
+    setDistractTags(loadedTags);
+    const initialTag = loadedTags[0]?.name || "Diğer";
+    setSelectedDistractTag(initialTag);
+
+    const prevReasons = await getPreviousReasons("distraction", initialTag);
+    setDistractPreviousReasons(prevReasons);
+    setDistractReasonText("");
+    setShowDistractBox(true);
+  };
+
+  const handleSelectDistractTag = async (tagName: string) => {
+    setSelectedDistractTag(tagName);
+    const prevReasons = await getPreviousReasons("distraction", tagName);
+    setDistractPreviousReasons(prevReasons);
+  };
+
+  const submitDistraction = async () => {
+    const reason = distractReasonText.trim() || selectedDistractTag;
+    await recordDistraction(reason, selectedDistractTag);
+    setShowDistractBox(false);
+    setDistractReasonText("");
+    setIsEditingDistractTags(false);
+  };
+
+  // ---------------------------------------------------------------------------
+  // ERKEN BİTİRME (STOP) İŞLEMLERİ
+  // ---------------------------------------------------------------------------
   const handleStopSession = async () => {
     setIsRunning(false);
     if (page === "work") {
       if (workElapsedSec >= 15) {
-        // Erken durdurma neden/tag kutusunu aç
-        const loadedTags = await getTags(t.defaultTags);
-        setTags(loadedTags);
+        const loadedTags = await getTags("ending", t.defaultEndingTags);
+        setEndingTags(loadedTags);
+        const initialTag = loadedTags[0]?.name || "Diğer";
+        setSelectedEndingTag(initialTag);
+
+        const prevReasons = await getPreviousReasons("ending", initialTag);
+        setEndingPreviousReasons(prevReasons);
+        setEndingReasonText("");
         setShowStopBox(true);
         return;
       }
       setWorkSecondsLeft(DEFAULT_WORK_SEC);
       setWorkElapsedSec(0);
+      setCurrentSessionDistractions(0);
     } else {
       setBreakSecondsLeft(DEFAULT_BREAK_SEC);
     }
   };
 
-  const handleFinishWithTag = async (tagName?: string) => {
+  const handleSelectEndingTag = async (tagName: string) => {
+    setSelectedEndingTag(tagName);
+    const prevReasons = await getPreviousReasons("ending", tagName);
+    setEndingPreviousReasons(prevReasons);
+  };
+
+  const submitEnding = async (withTag = true) => {
     if (workElapsedSec >= 15) {
-      await recordWorkSession(workElapsedSec, tagName);
+      const tag = withTag ? selectedEndingTag : undefined;
+      const reason = withTag ? (endingReasonText.trim() || selectedEndingTag) : undefined;
+      await recordWorkSession(workElapsedSec, tag, reason);
       const locale = activeLang === "tr" ? "tr-TR" : "en-US";
       setDayStats(await getActiveDayStats(locale));
       setWeeklySummary(await getWeeklySummary(locale));
     }
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
+    setCurrentSessionDistractions(0);
     setShowStopBox(false);
-    setIsEditingTags(false);
-    setNewTagText("");
+    setEndingReasonText("");
+    setIsEditingEndingTags(false);
   };
 
-  const handleAddAndFinishTag = async () => {
-    const text = newTagText.trim();
-    if (!text) {
-      await handleFinishWithTag();
-      return;
+  // ---------------------------------------------------------------------------
+  // TAG YÖNETİMİ (EKLE, DÜZENLE, SİL)
+  // ---------------------------------------------------------------------------
+  const handleAddNewTag = async (kind: TagKind) => {
+    const newName = window.prompt(t.newTagPrompt);
+    if (newName && newName.trim()) {
+      await addTag(newName.trim(), kind);
+      if (kind === "distraction") {
+        const updated = await getTags("distraction", t.defaultDistractionTags);
+        setDistractTags(updated);
+        setSelectedDistractTag(newName.trim());
+      } else {
+        const updated = await getTags("ending", t.defaultEndingTags);
+        setEndingTags(updated);
+        setSelectedEndingTag(newName.trim());
+      }
     }
-    const created = await addTag(text);
-    await handleFinishWithTag(created?.name ?? text);
   };
 
-  const handleDeleteTag = async (tagId: number, tagName: string) => {
-    if (window.confirm(t.deleteTagConfirm(tagName))) {
-      await deleteTag(tagId);
-      setTags(await getTags(t.defaultTags));
-    }
-  };
-
-  const handleEditTag = async (tagId: number, currentName: string) => {
+  const handleEditTagItem = async (tagId: number, currentName: string, kind: TagKind) => {
     const newName = window.prompt(t.editTagPrompt(currentName), currentName);
     if (newName && newName.trim() && newName.trim() !== currentName) {
-      await updateTag(tagId, newName.trim());
-      setTags(await getTags(t.defaultTags));
+      await updateTag(tagId, newName.trim(), kind);
+      if (kind === "distraction") {
+        setDistractTags(await getTags("distraction", t.defaultDistractionTags));
+      } else {
+        setEndingTags(await getTags("ending", t.defaultEndingTags));
+      }
     }
   };
 
-  const handleDistractedClick = async () => {
-    setWorkSecondsLeft((prev) => prev + 60);
-    setReasonChoices(await getReasonChoices(t.defaultReasons));
-    setShowDistractBox(true);
+  const handleDeleteTagItem = async (tagId: number, name: string, kind: TagKind) => {
+    if (window.confirm(t.deleteTagConfirm(name))) {
+      await deleteTag(tagId);
+      if (kind === "distraction") {
+        setDistractTags(await getTags("distraction", t.defaultDistractionTags));
+      } else {
+        setEndingTags(await getTags("ending", t.defaultEndingTags));
+      }
+    }
   };
 
-  const submitDistractionReason = async (reasonText: string) => {
-    await recordDistraction(reasonText);
-    setDistractReason("");
-    setShowDistractBox(false);
-    setReasonChoices(await getReasonChoices(t.defaultReasons));
-  };
-
+  // ---------------------------------------------------------------------------
+  // MENÜ VE ÖZET SAYFASI
+  // ---------------------------------------------------------------------------
   const openMenu = async () => {
     setIsRunning(false);
     setShowDistractBox(false);
@@ -474,16 +546,27 @@ export default function App() {
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const days = await getDaysSummary();
     const weekly = await getWeeklySummary(locale);
-    const freqs = await getDistractionFrequencies(freqOnlyToday);
+    const reasonsData = await getSummaryReasonsData(freqOnlyToday);
+
     setSummaryDays(days);
     setWeeklySummary(weekly);
+    setSummaryReasonsData(reasonsData);
     setHoveredDay(days[days.length - 1] ?? null);
     const todayWeekDay =
       weekly.days.find((d) => d.is_today) ?? weekly.days[weekly.days.length - 1] ?? null;
     setHoveredWeekDay(todayWeekDay);
-    setDistractFreqs(freqs);
     setShowResetConfirm(false);
     setPage("summary");
+  };
+
+  const toggleFreqFilter = async () => {
+    const nextVal = !freqOnlyToday;
+    setFreqOnlyToday(nextVal);
+    setSummaryReasonsData(await getSummaryReasonsData(nextVal));
+  };
+
+  const toggleAccordionTag = (tagName: string) => {
+    setExpandedTags((prev) => ({ ...prev, [tagName]: !prev[tagName] }));
   };
 
   const handleResetAllData = async () => {
@@ -492,21 +575,15 @@ export default function App() {
     const freshStats = await getActiveDayStats(locale);
     const freshDays = await getDaysSummary();
     const freshWeekly = await getWeeklySummary(locale);
-    const freshFreqs = await getDistractionFrequencies(false);
+    const freshReasons = await getSummaryReasonsData(false);
 
     setDayStats(freshStats);
     setSummaryDays(freshDays);
     setWeeklySummary(freshWeekly);
-    setDistractFreqs(freshFreqs);
+    setSummaryReasonsData(freshReasons);
     setHoveredDay(null);
     setHoveredWeekDay(null);
     setShowResetConfirm(false);
-  };
-
-  const toggleFreqFilter = async () => {
-    const nextVal = !freqOnlyToday;
-    setFreqOnlyToday(nextVal);
-    setDistractFreqs(await getDistractionFrequencies(nextVal));
   };
 
   const handleStartNewDay = async () => {
@@ -517,6 +594,7 @@ export default function App() {
     setWorkSecondsLeft(DEFAULT_WORK_SEC);
     setWorkElapsedSec(0);
     setBreakSecondsLeft(DEFAULT_BREAK_SEC);
+    setCurrentSessionDistractions(0);
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const freshStats = await startNewDay(locale);
     setDayStats(freshStats);
@@ -533,8 +611,13 @@ export default function App() {
     await saveLanguagePreference(newPref);
     const newActive = resolveLanguage(newPref);
     const newT = translations[newActive];
-    setReasonChoices(await getReasonChoices(newT.defaultReasons));
-    setTags(await getTags(newT.defaultTags));
+    setDistractTags(await getTags("distraction", newT.defaultDistractionTags));
+    setEndingTags(await getTags("ending", newT.defaultEndingTags));
+  };
+
+  const handlePenaltyChange = async (mins: number) => {
+    setDistractPenaltyMins(mins);
+    await saveDistractPenalty(mins);
   };
 
   const openSettings = () => {
@@ -584,10 +667,6 @@ export default function App() {
     ...(weeklySummary?.days.map((d) => d.total_sec / 3600) ?? [1]),
   );
 
-  const totalDistractions = distractFreqs.reduce(
-    (acc, item) => acc + item.count,
-    0,
-  );
   const updateAvailable = updateStatus.kind === "available";
   const shellStyle = {
     "--shell-bg": hexToRgba(theme.bgColor, theme.bgOpacity / 100),
@@ -615,6 +694,11 @@ export default function App() {
           <div className="top-bar hover-reveal">
             <span className="badge">
               ⠿ {page === "work" ? t.work : t.break}
+              {page === "work" && currentSessionDistractions > 0 && (
+                <span style={{ fontSize: "9px", color: "#fbbf24", marginLeft: "4px" }}>
+                  ({currentSessionDistractions}x)
+                </span>
+              )}
             </span>
             <div style={{ display: "flex", gap: "4px" }}>
               <button
@@ -668,120 +752,219 @@ export default function App() {
             )}
           </div>
 
-          {/* ERKEN DURDURMA & TAG KUTUSU */}
-          {showStopBox ? (
+          {/* DİKKAT DAĞILMASI DİYALOĞU */}
+          {showDistractBox ? (
+            <div className="stop-box">
+              <div className="stop-box-header">
+                <span className="stop-box-title">{t.distractionTitle}</span>
+                <div style={{ display: "flex", gap: "3px" }}>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => handleAddNewTag("distraction")}
+                    title="+ Tag Ekle"
+                  >
+                    + Tag
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => setIsEditingDistractTags(!isEditingDistractTags)}
+                  >
+                    {isEditingDistractTags ? t.doneEditing : t.editTags}
+                  </button>
+                </div>
+              </div>
+
+              {/* Tag Seçimi */}
+              <div className="section-subhead">{t.selectTagHint}</div>
+              <div className="reason-chips stop-chips">
+                {distractTags.map((tag) => {
+                  const isSelected = selectedDistractTag === tag.name;
+                  return (
+                    <div
+                      key={tag.id}
+                      className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
+                    >
+                      <button
+                        className="tag-chip-btn"
+                        onClick={() => handleSelectDistractTag(tag.name)}
+                      >
+                        {tag.name}
+                      </button>
+                      {isEditingDistractTags && (
+                        <span className="tag-actions">
+                          <button
+                            className="tag-icon-btn"
+                            onClick={() =>
+                              handleEditTagItem(tag.id, tag.name, "distraction")
+                            }
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className="tag-icon-btn del-btn"
+                            onClick={() =>
+                              handleDeleteTagItem(tag.id, tag.name, "distraction")
+                            }
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Önceki Açıklamalar */}
+              {distractPreviousReasons.length > 0 && (
+                <div className="previous-reasons-box">
+                  <div className="section-subhead">{t.previousReasons}</div>
+                  <div className="previous-reasons-chips">
+                    {distractPreviousReasons.map((r) => (
+                      <button
+                        key={r}
+                        className="reason-suggestion-chip"
+                        onClick={() => setDistractReasonText(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Açıklama Inputu */}
+              <div className="new-reason-row">
+                <input
+                  className="distract-input"
+                  placeholder={t.distractExplanationPlaceholder}
+                  value={distractReasonText}
+                  autoFocus
+                  onChange={(e) => setDistractReasonText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitDistraction();
+                    if (e.key === "Escape") setShowDistractBox(false);
+                  }}
+                />
+                <button className="primary-btn" onClick={submitDistraction}>
+                  {t.saveAndAddMin(distractPenaltyMins)}
+                </button>
+              </div>
+
+              <div className="stop-box-actions">
+                <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
+                  Tag: <b>{selectedDistractTag}</b>
+                </span>
+                <button onClick={() => setShowDistractBox(false)}>{t.cancel}</button>
+              </div>
+            </div>
+          ) : showStopBox ? (
+            /* ERKEN DURDURMA DİYALOĞU */
             <div className="stop-box">
               <div className="stop-box-header">
                 <span className="stop-box-title">{t.earlyStopTitle}</span>
-                <button
-                  className="ghost-btn"
-                  onClick={() => setIsEditingTags(!isEditingTags)}
-                >
-                  {isEditingTags ? t.doneEditing : t.editTags}
-                </button>
+                <div style={{ display: "flex", gap: "3px" }}>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => handleAddNewTag("ending")}
+                    title="+ Tag Ekle"
+                  >
+                    + Tag
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={() => setIsEditingEndingTags(!isEditingEndingTags)}
+                  >
+                    {isEditingEndingTags ? t.doneEditing : t.editTags}
+                  </button>
+                </div>
               </div>
               <div className="stop-box-hint">
                 {t.earlyStopWorkedTime(Math.floor(workElapsedSec / 60))}
               </div>
+
+              {/* Ending Tag Seçimi */}
               <div className="reason-chips stop-chips">
-                {tags.map((tag) => (
-                  <div key={tag.id} className="tag-chip-wrap">
-                    <button
-                      className="tag-chip-btn"
-                      onClick={() => {
-                        if (!isEditingTags) handleFinishWithTag(tag.name);
-                      }}
+                {endingTags.map((tag) => {
+                  const isSelected = selectedEndingTag === tag.name;
+                  return (
+                    <div
+                      key={tag.id}
+                      className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
                     >
-                      {tag.name}
-                    </button>
-                    {isEditingTags && (
-                      <span className="tag-actions">
-                        <button
-                          className="tag-icon-btn"
-                          title={t.editTags}
-                          onClick={() => handleEditTag(tag.id, tag.name)}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          className="tag-icon-btn del-btn"
-                          title="Sil"
-                          onClick={() => handleDeleteTag(tag.id, tag.name)}
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                ))}
+                      <button
+                        className="tag-chip-btn"
+                        onClick={() => handleSelectEndingTag(tag.name)}
+                      >
+                        {tag.name}
+                      </button>
+                      {isEditingEndingTags && (
+                        <span className="tag-actions">
+                          <button
+                            className="tag-icon-btn"
+                            onClick={() =>
+                              handleEditTagItem(tag.id, tag.name, "ending")
+                            }
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className="tag-icon-btn del-btn"
+                            onClick={() =>
+                              handleDeleteTagItem(tag.id, tag.name, "ending")
+                            }
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
+
+              {/* Önceki Açıklamalar */}
+              {endingPreviousReasons.length > 0 && (
+                <div className="previous-reasons-box">
+                  <div className="section-subhead">{t.previousReasons}</div>
+                  <div className="previous-reasons-chips">
+                    {endingPreviousReasons.map((r) => (
+                      <button
+                        key={r}
+                        className="reason-suggestion-chip"
+                        onClick={() => setEndingReasonText(r)}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Açıklama Inputu */}
               <div className="new-reason-row">
                 <input
                   className="distract-input"
-                  placeholder={t.newTagPlaceholder}
-                  value={newTagText}
+                  placeholder={t.endingExplanationPlaceholder}
+                  value={endingReasonText}
                   autoFocus
-                  onChange={(e) => setNewTagText(e.target.value)}
+                  onChange={(e) => setEndingReasonText(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && newTagText.trim()) {
-                      handleAddAndFinishTag();
-                    }
+                    if (e.key === "Enter") submitEnding(true);
                     if (e.key === "Escape") setShowStopBox(false);
                   }}
                 />
-                <button className="primary-btn" onClick={handleAddAndFinishTag}>
+                <button className="primary-btn" onClick={() => submitEnding(true)}>
                   {t.addAndFinish}
                 </button>
               </div>
+
               <div className="stop-box-actions">
-                <button
-                  className="ghost-btn"
-                  onClick={() => handleFinishWithTag()}
-                >
+                <button className="ghost-btn" onClick={() => submitEnding(false)}>
                   {t.finishWithoutTag}
                 </button>
                 <button onClick={() => setShowStopBox(false)}>
                   {t.cancelReturn}
-                </button>
-              </div>
-            </div>
-          ) : showDistractBox ? (
-            <div className="distract-box">
-              <div className="reason-chips">
-                {reasonChoices.map((choice) => (
-                  <button
-                    key={choice}
-                    className="reason-chip"
-                    onClick={() => submitDistractionReason(choice)}
-                  >
-                    {choice}
-                  </button>
-                ))}
-              </div>
-              <div className="new-reason-row">
-                <input
-                  className="distract-input"
-                  placeholder={t.orNewReason}
-                  value={distractReason}
-                  autoFocus
-                  onChange={(e) => setDistractReason(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && distractReason.trim()) {
-                      submitDistractionReason(distractReason);
-                    }
-                    if (e.key === "Escape") setShowDistractBox(false);
-                  }}
-                />
-                <button
-                  className="primary-btn"
-                  onClick={() =>
-                    submitDistractionReason(distractReason || t.other)
-                  }
-                >
-                  {t.add}
-                </button>
-                <button onClick={() => setShowDistractBox(false)}>
-                  {t.cancel}
                 </button>
               </div>
             </div>
@@ -800,7 +983,7 @@ export default function App() {
               <button onClick={handleStopSession}>{t.stop}</button>
               {page === "work" && (
                 <button className="warn-btn" onClick={handleDistractedClick}>
-                  {t.distractedBtn}
+                  {t.distractedBtnText(distractPenaltyMins)}
                 </button>
               )}
             </div>
@@ -923,6 +1106,22 @@ export default function App() {
               >
                 {t.langEn}
               </button>
+            </div>
+          </div>
+
+          {/* DİKKAT DAĞILMA CEZA SÜRESİ */}
+          <div className="settings-section">
+            <div className="settings-label">{t.distractPenaltySetting}</div>
+            <div className="penalty-selector">
+              {PENALTY_OPTIONS.map((mins) => (
+                <button
+                  key={mins}
+                  className={`penalty-btn ${distractPenaltyMins === mins ? "active" : ""}`}
+                  onClick={() => handlePenaltyChange(mins)}
+                >
+                  +{mins} {activeLang === "tr" ? "dk" : "m"}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -1097,11 +1296,9 @@ export default function App() {
                     </div>
                     <div className="stat-card">
                       <div className="stat-val">
-                        {weeklySummary?.activeDaysCount ?? 0}/7
+                        {summaryReasonsData?.avgDistractionsPerSession ?? 0}
                       </div>
-                      <div className="stat-lbl">
-                        {t.weeklyDaysWorked(weeklySummary?.activeDaysCount ?? 0)}
-                      </div>
+                      <div className="stat-lbl">{t.avgDistractionsPerSession}</div>
                     </div>
                   </div>
 
@@ -1220,39 +1417,109 @@ export default function App() {
                 </>
               )}
 
-              {/* DİKKAT DAĞILMA LİSTESİ */}
-              <div className="freq-header">
-                <span>{t.distractionFreqHeader(totalDistractions)}</span>
+              {/* DİKKAT DAĞILMA & ERKEN BİTİRME KATEGORİ KIRILIMI */}
+              <div className="summary-subtabs">
+                <button
+                  className={`subtab-btn ${summaryReasonsTab === "distractions" ? "active" : ""}`}
+                  onClick={() => setSummaryReasonsTab("distractions")}
+                >
+                  {t.distractionReasonsTab} ({summaryReasonsData?.totalDistractions ?? 0})
+                </button>
+                <button
+                  className={`subtab-btn ${summaryReasonsTab === "endings" ? "active" : ""}`}
+                  onClick={() => setSummaryReasonsTab("endings")}
+                >
+                  {t.endingReasonsTab} ({summaryReasonsData?.totalEndings ?? 0})
+                </button>
                 <button className="ghost-btn" onClick={toggleFreqFilter}>
                   {freqOnlyToday ? t.filterToday : t.filterAll}
                 </button>
               </div>
 
-              <div className="freq-list">
-                {distractFreqs.length > 0 ? (
-                  distractFreqs.map((item) => {
-                    const pct =
-                      totalDistractions > 0
-                        ? Math.round((item.count / totalDistractions) * 100)
-                        : 0;
-                    return (
-                      <div key={item.reason} className="freq-item">
-                        <div className="freq-label-row">
-                          <span>{item.reason}</span>
-                          <span>{t.timesCount(item.count, pct)}</span>
-                        </div>
-                        <div className="freq-bar-bg">
+              <div className="accordion-list">
+                {summaryReasonsTab === "distractions" ? (
+                  (summaryReasonsData?.distractionTags.length ?? 0) > 0 ? (
+                    summaryReasonsData?.distractionTags.map((item) => {
+                      const isExpanded = !!expandedTags[item.tag];
+                      const total = summaryReasonsData.totalDistractions;
+                      const pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                      return (
+                        <div key={item.tag} className="accordion-card">
                           <div
-                            className="freq-bar-fill"
-                            style={{ width: `${pct}%` }}
-                          />
+                            className="accordion-header"
+                            onClick={() => toggleAccordionTag(item.tag)}
+                          >
+                            <div className="accordion-title">
+                              <span className="accordion-arrow">
+                                {isExpanded ? "▼" : "▶"}
+                              </span>
+                              <span>{item.tag}</span>
+                            </div>
+                            <span className="accordion-count">
+                              {item.count} {t.timesCount(item.count, pct).split(" ")[1] || "kez"} (%{pct})
+                            </span>
+                          </div>
+                          {isExpanded && (
+                            <div className="accordion-body">
+                              {item.explanations.map((exp, idx) => (
+                                <div key={idx} className="explanation-row">
+                                  <span>
+                                    <span className="explanation-bullet">•</span>
+                                    {exp.reason}
+                                  </span>
+                                  <span className="explanation-badge">{exp.count}x</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ fontSize: "10px", color: "#a1a1aa", padding: "6px" }}>
+                      {t.noDistractions}
+                    </div>
+                  )
+                ) : (summaryReasonsData?.endingTags.length ?? 0) > 0 ? (
+                  summaryReasonsData?.endingTags.map((item) => {
+                    const isExpanded = !!expandedTags[item.tag];
+                    const total = summaryReasonsData.totalEndings;
+                    const pct = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                    return (
+                      <div key={item.tag} className="accordion-card">
+                        <div
+                          className="accordion-header"
+                          onClick={() => toggleAccordionTag(item.tag)}
+                        >
+                          <div className="accordion-title">
+                            <span className="accordion-arrow">
+                              {isExpanded ? "▼" : "▶"}
+                            </span>
+                            <span>{item.tag}</span>
+                          </div>
+                          <span className="accordion-count">
+                            {item.count} kez (%{pct})
+                          </span>
+                        </div>
+                        {isExpanded && (
+                          <div className="accordion-body">
+                            {item.explanations.map((exp, idx) => (
+                              <div key={idx} className="explanation-row">
+                                <span>
+                                  <span className="explanation-bullet">•</span>
+                                  {exp.reason}
+                                </span>
+                                <span className="explanation-badge">{exp.count}x</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })
                 ) : (
-                  <div style={{ fontSize: "10px", color: "#a1a1aa" }}>
-                    {t.noDistractions}
+                  <div style={{ fontSize: "10px", color: "#a1a1aa", padding: "6px" }}>
+                    {t.noEndingReasons}
                   </div>
                 )}
               </div>

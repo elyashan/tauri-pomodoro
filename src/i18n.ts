@@ -15,7 +15,7 @@ export interface Translations {
   pause: string;
   resume: string;
   stop: string;
-  distractedBtn: string;
+  distractedBtnText: (mins: number) => string;
   orNewReason: string;
   add: string;
   cancel: string;
@@ -62,7 +62,6 @@ export interface Translations {
   updateAvailableHint: string;
   todayLabel: string;
   formatDuration: (sec: number) => string;
-  defaultReasons: string[];
 
   // Erken durdurma & Taglar
   earlyStopTitle: string;
@@ -73,11 +72,20 @@ export interface Translations {
   newTagPlaceholder: string;
   editTags: string;
   doneEditing: string;
-  defaultTags: string[];
   deleteTagConfirm: (name: string) => string;
   editTagPrompt: (name: string) => string;
+  newTagPrompt: string;
 
-  // Özet haftalık görünüm & sıfırlama
+  // Dikkat Dağılması pop-up & Ek süre
+  distractionTitle: string;
+  selectTagHint: string;
+  previousReasons: string;
+  distractExplanationPlaceholder: string;
+  endingExplanationPlaceholder: string;
+  saveAndAddMin: (mins: number) => string;
+  distractPenaltySetting: string;
+
+  // Özet haftalık görünüm, etiket kırılımı & sıfırlama
   viewWeekly: string;
   viewRecentDays: string;
   weeklyTotal: string;
@@ -88,6 +96,13 @@ export interface Translations {
   resetConfirmDesc: string;
   resetConfirmYes: string;
   dataResetSuccess: string;
+  avgDistractionsPerSession: string;
+  distractionReasonsTab: string;
+  endingReasonsTab: string;
+  noEndingReasons: string;
+
+  defaultDistractionTags: string[];
+  defaultEndingTags: string[];
 }
 
 const tr: Translations = {
@@ -104,7 +119,7 @@ const tr: Translations = {
   pause: "Duraklat",
   resume: "Devam Et",
   stop: "Durdur",
-  distractedBtn: "+1dk Dağıldım",
+  distractedBtnText: (mins) => `+${mins}dk Dağıldım`,
   orNewReason: "Veya yeni neden yaz...",
   add: "Ekle",
   cancel: "İptal",
@@ -155,34 +170,30 @@ const tr: Translations = {
     if (hrs === 0) return `${mins} dk`;
     return `${hrs}s ${mins}dk`;
   },
-  defaultReasons: [
-    "Telefon",
-    "Sosyal Medya",
-    "Mesaj / Bildirim",
-    "Dış Gürültü",
-  ],
 
   // Erken durdurma & Taglar
-  earlyStopTitle: "Seansı Bitir (Neden / Tag)",
+  earlyStopTitle: "Seansı Bitir (Neden & Tag)",
   earlyStopWorkedTime: (mins) => `${mins} dakika çalışıldı`,
   finishWithoutTag: "Tag'siz Bitir",
   cancelReturn: "Vazgeç / Devam Et",
-  addAndFinish: "Ekle & Bitir",
-  newTagPlaceholder: "Yeni tag veya neden...",
+  addAndFinish: "Bitir",
+  newTagPlaceholder: "Yeni tag veya açıklama...",
   editTags: "Tagları Düzenle",
   doneEditing: "Tamam",
-  defaultTags: [
-    "Toplantı",
-    "Yemek",
-    "Mola İhtiyacı",
-    "Acil İş",
-    "Ders Bitti",
-    "Yorgunluk",
-  ],
   deleteTagConfirm: (name) => `"${name}" tag'ini silmek istiyor musunuz?`,
   editTagPrompt: (name) => `"${name}" için yeni tag adı:`,
+  newTagPrompt: "Yeni tag adı girin:",
 
-  // Özet haftalık görünüm & sıfırlama
+  // Dikkat Dağılması pop-up & Ek süre
+  distractionTitle: "Dikkat Dağılması Kaydet",
+  selectTagHint: "Tag seç (isteğe bağlı):",
+  previousReasons: "Önceki açıklamalar:",
+  distractExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
+  endingExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
+  saveAndAddMin: (mins) => `Kaydet (+${mins}dk)`,
+  distractPenaltySetting: "Dikkat Dağılma Ekleme Süresi",
+
+  // Özet haftalık görünüm, etiket kırılımı & sıfırlama
   viewWeekly: "Haftalık Görünüm",
   viewRecentDays: "Son Günler",
   weeklyTotal: "Haftalık Toplam",
@@ -194,6 +205,28 @@ const tr: Translations = {
     "Tüm geçmiş çalışma seansları, günler ve dikkat dağılma kayıtları tamamen silinecektir. Bu işlem geri alınamaz.",
   resetConfirmYes: "Evet, Tümünü Sıfırla",
   dataResetSuccess: "Tüm veriler başarıyla sıfırlandı.",
+  avgDistractionsPerSession: "Seans Başı Ort. Dikkat",
+  distractionReasonsTab: "Dikkat Dağılmaları",
+  endingReasonsTab: "Erken Bitirmeler",
+  noEndingReasons: "Henüz kayıtlı erken bitirme nedeni yok.",
+
+  defaultDistractionTags: [
+    "Telefon",
+    "Sosyal Medya",
+    "Çevre / İnsanlar",
+    "Açlık / Mola",
+    "Düşünceler",
+    "Diğer",
+  ],
+  defaultEndingTags: [
+    "Toplantı",
+    "Yemek",
+    "Mola İhtiyacı",
+    "Acil İş",
+    "Ders Bitti",
+    "Yorgunluk",
+    "Diğer",
+  ],
 };
 
 const en: Translations = {
@@ -210,7 +243,7 @@ const en: Translations = {
   pause: "Pause",
   resume: "Resume",
   stop: "Stop",
-  distractedBtn: "+1m Distracted",
+  distractedBtnText: (mins) => `+${mins}m Distracted`,
   orNewReason: "Or enter a new reason...",
   add: "Add",
   cancel: "Cancel",
@@ -261,34 +294,30 @@ const en: Translations = {
     if (hrs === 0) return `${mins} min`;
     return `${hrs}h ${mins}m`;
   },
-  defaultReasons: [
-    "Phone",
-    "Social Media",
-    "Message / Notification",
-    "Noise",
-  ],
 
   // Erken durdurma & Taglar
-  earlyStopTitle: "End Session (Reason / Tag)",
+  earlyStopTitle: "End Session (Reason & Tag)",
   earlyStopWorkedTime: (mins) => `${mins} minutes completed`,
-  finishWithoutTag: "Finish Without Tag",
+  finishWithoutTag: "End Without Tag",
   cancelReturn: "Cancel / Continue",
-  addAndFinish: "Add & Finish",
-  newTagPlaceholder: "New tag or reason...",
+  addAndFinish: "Finish",
+  newTagPlaceholder: "New tag or explanation...",
   editTags: "Edit Tags",
   doneEditing: "Done",
-  defaultTags: [
-    "Meeting",
-    "Meal",
-    "Need a Break",
-    "Urgent Task",
-    "Finished",
-    "Fatigue",
-  ],
   deleteTagConfirm: (name) => `Delete tag "${name}"?`,
   editTagPrompt: (name) => `Enter new name for "${name}":`,
+  newTagPrompt: "Enter new tag name:",
 
-  // Özet haftalık görünüm & sıfırlama
+  // Dikkat Dağılması pop-up & Ek süre
+  distractionTitle: "Record Distraction",
+  selectTagHint: "Select Tag (Optional):",
+  previousReasons: "Recent explanations:",
+  distractExplanationPlaceholder: "Type explanation (or select above)...",
+  endingExplanationPlaceholder: "Type explanation (or select above)...",
+  saveAndAddMin: (mins) => `Save (+${mins}m)`,
+  distractPenaltySetting: "Distraction Added Time",
+
+  // Özet haftalık görünüm, etiket kırılımı & sıfırlama
   viewWeekly: "Weekly View",
   viewRecentDays: "Recent Days",
   weeklyTotal: "Weekly Total",
@@ -300,6 +329,28 @@ const en: Translations = {
     "All session history, days, and distraction records will be permanently erased. This cannot be undone.",
   resetConfirmYes: "Yes, Reset All",
   dataResetSuccess: "All data has been reset.",
+  avgDistractionsPerSession: "Avg Distractions/Session",
+  distractionReasonsTab: "Distractions",
+  endingReasonsTab: "Early Stops",
+  noEndingReasons: "No early stop reasons recorded yet.",
+
+  defaultDistractionTags: [
+    "Phone",
+    "Social Media",
+    "People / Noise",
+    "Hunger / Rest",
+    "Thoughts",
+    "Other",
+  ],
+  defaultEndingTags: [
+    "Meeting",
+    "Meal",
+    "Need a Break",
+    "Urgent Task",
+    "Topic Finished",
+    "Fatigue",
+    "Other",
+  ],
 };
 
 export const translations: Record<ActiveLang, Translations> = { tr, en };

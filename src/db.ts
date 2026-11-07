@@ -46,9 +46,26 @@ export interface DistractionFrequency {
   count: number;
 }
 
+export type TagKind = "distraction" | "ending";
+
 export interface TagItem {
   id: number;
   name: string;
+  kind: TagKind;
+}
+
+export interface TagSummaryItem {
+  tag: string;
+  count: number;
+  explanations: { reason: string; count: number }[];
+}
+
+export interface SummaryReasonsData {
+  distractionTags: TagSummaryItem[];
+  endingTags: TagSummaryItem[];
+  totalDistractions: number;
+  totalEndings: number;
+  avgDistractionsPerSession: number;
 }
 
 export interface WeekDayStat {
@@ -142,13 +159,32 @@ async function initDb(): Promise<Database> {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'distraction',
       created_at TEXT NOT NULL
     )
   `);
 
   try {
+    await db.execute("ALTER TABLE tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'distraction'");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN tag TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
     await db.execute("ALTER TABLE sessions ADD COLUMN tag TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE sessions ADD COLUMN reason TEXT");
   } catch {
     // sütun zaten varsa hata yok sayılır
   }
@@ -286,15 +322,19 @@ export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   return getActiveDayStats(locale);
 }
 
-export async function recordWorkSession(durationSec: number, tag?: string): Promise<void> {
+export async function recordWorkSession(
+  durationSec: number,
+  tag?: string,
+  reason?: string,
+): Promise<void> {
   const sec = Math.round(durationSec);
   if (sec <= 0) return;
 
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
   await db.execute(
-    "INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag) VALUES ($1, 'work', $2, $3, $4)",
-    [day.id, sec, new Date().toISOString(), tag ?? null],
+    "INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason) VALUES ($1, 'work', $2, $3, $4, $5)",
+    [day.id, sec, new Date().toISOString(), tag ?? null, reason ?? null],
   );
 }
 
@@ -333,18 +373,22 @@ export async function getDaysSummary(): Promise<DaySummary[]> {
 // Dikkat dağılmaları
 // ---------------------------------------------------------------------------
 
-export async function recordDistraction(rawReason: string): Promise<void> {
+export async function recordDistraction(
+  rawReason: string,
+  rawTag?: string,
+): Promise<void> {
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
   const trimmed = rawReason.trim();
+  const tag = (rawTag && rawTag.trim()) || "Diğer";
   const normalized =
     trimmed.length > 0
       ? trimmed.charAt(0).toLocaleUpperCase("tr-TR") + trimmed.slice(1)
-      : "Diğer";
+      : tag;
 
   await db.execute(
-    "INSERT INTO distractions (day_id, reason, created_at) VALUES ($1, $2, $3)",
-    [day.id, normalized, new Date().toISOString()],
+    "INSERT INTO distractions (day_id, reason, tag, created_at) VALUES ($1, $2, $3, $4)",
+    [day.id, normalized, tag, new Date().toISOString()],
   );
 }
 
@@ -505,70 +549,274 @@ export async function clearAllData(locale = "tr-TR"): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Tag (Erken Bitirme / Kategori) Yönetimi
+// Tag ve Açıklama Yönetimi
 // ---------------------------------------------------------------------------
 
-const DEFAULT_TAGS_TR = [
+export const DEFAULT_DISTRACTION_TAGS_TR = [
+  "Telefon",
+  "Sosyal Medya",
+  "Çevre / İnsanlar",
+  "Açlık / Mola",
+  "Düşünceler",
+  "Diğer",
+];
+
+export const DEFAULT_ENDING_TAGS_TR = [
   "Toplantı",
   "Yemek",
   "Mola İhtiyacı",
   "Acil İş",
   "Ders Bitti",
   "Yorgunluk",
+  "Diğer",
 ];
 
-export async function getTags(fallbackDefaults?: string[]): Promise<TagItem[]> {
+export async function getTags(
+  kind: TagKind,
+  fallbackDefaults?: string[],
+): Promise<TagItem[]> {
   const db = await getDb();
-  const rows = await db.select<TagItem[]>("SELECT id, name FROM tags ORDER BY id ASC");
+  const rows = await db.select<TagItem[]>(
+    "SELECT id, name, kind FROM tags WHERE kind = $1 ORDER BY id ASC",
+    [kind],
+  );
   if (rows.length > 0) return rows;
 
   const defaults =
-    fallbackDefaults && fallbackDefaults.length > 0 ? fallbackDefaults : DEFAULT_TAGS_TR;
+    fallbackDefaults && fallbackDefaults.length > 0
+      ? fallbackDefaults
+      : kind === "distraction"
+        ? DEFAULT_DISTRACTION_TAGS_TR
+        : DEFAULT_ENDING_TAGS_TR;
+
   const nowIso = new Date().toISOString();
   for (const name of defaults) {
     try {
-      await db.execute("INSERT INTO tags (name, created_at) VALUES ($1, $2)", [name, nowIso]);
+      await db.execute(
+        "INSERT INTO tags (name, kind, created_at) VALUES ($1, $2, $3)",
+        [name, kind, nowIso],
+      );
     } catch {
       // Çift kayıtları yoksay
     }
   }
-  return db.select<TagItem[]>("SELECT id, name FROM tags ORDER BY id ASC");
+  return db.select<TagItem[]>(
+    "SELECT id, name, kind FROM tags WHERE kind = $1 ORDER BY id ASC",
+    [kind],
+  );
 }
 
-export async function addTag(rawName: string): Promise<TagItem | null> {
+export async function addTag(
+  rawName: string,
+  kind: TagKind,
+): Promise<TagItem | null> {
   const name = rawName.trim();
   if (!name) return null;
   const normalized = name.charAt(0).toLocaleUpperCase("tr-TR") + name.slice(1);
   const db = await getDb();
   try {
-    const res = await db.execute("INSERT INTO tags (name, created_at) VALUES ($1, $2)", [
-      normalized,
-      new Date().toISOString(),
-    ]);
-    return { id: Number(res.lastInsertId), name: normalized };
+    const res = await db.execute(
+      "INSERT INTO tags (name, kind, created_at) VALUES ($1, $2, $3)",
+      [normalized, kind, new Date().toISOString()],
+    );
+    return { id: Number(res.lastInsertId), name: normalized, kind };
   } catch {
-    const rows = await db.select<TagItem[]>("SELECT id, name FROM tags WHERE name = $1", [normalized]);
+    const rows = await db.select<TagItem[]>(
+      "SELECT id, name, kind FROM tags WHERE name = $1 AND kind = $2",
+      [normalized, kind],
+    );
     return rows[0] ?? null;
   }
 }
 
-export async function updateTag(id: number, rawName: string): Promise<void> {
+export async function updateTag(
+  id: number,
+  rawName: string,
+  kind: TagKind,
+): Promise<void> {
   const name = rawName.trim();
   if (!name) return;
   const normalized = name.charAt(0).toLocaleUpperCase("tr-TR") + name.slice(1);
   const db = await getDb();
-  const oldRows = await db.select<{ name: string }[]>("SELECT name FROM tags WHERE id = $1", [id]);
+  const oldRows = await db.select<{ name: string }[]>(
+    "SELECT name FROM tags WHERE id = $1",
+    [id],
+  );
   const oldName = oldRows[0]?.name;
 
   await db.execute("UPDATE tags SET name = $1 WHERE id = $2", [normalized, id]);
   if (oldName) {
-    await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2", [normalized, oldName]);
+    if (kind === "distraction") {
+      await db.execute("UPDATE distractions SET tag = $1 WHERE tag = $2", [
+        normalized,
+        oldName,
+      ]);
+    } else {
+      await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2", [
+        normalized,
+        oldName,
+      ]);
+    }
   }
 }
 
 export async function deleteTag(id: number): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM tags WHERE id = $1", [id]);
+}
+
+// Seçilen tag için (veya genel) daha önce girilen açıklamaları getirir
+export async function getPreviousReasons(
+  kind: TagKind,
+  tag?: string,
+): Promise<string[]> {
+  const db = await getDb();
+  if (kind === "distraction") {
+    if (tag && tag.trim()) {
+      const rows = await db.select<{ reason: string; cnt: number }[]>(
+        `SELECT reason, COUNT(id) AS cnt FROM distractions
+         WHERE tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
+         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+        [tag.trim()],
+      );
+      if (rows.length > 0) return rows.map((r) => r.reason);
+    }
+    const rows = await db.select<{ reason: string; cnt: number }[]>(
+      `SELECT reason, COUNT(id) AS cnt FROM distractions
+       WHERE reason IS NOT NULL AND reason != ''
+       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+    );
+    return rows.map((r) => r.reason);
+  } else {
+    if (tag && tag.trim()) {
+      const rows = await db.select<{ reason: string; cnt: number }[]>(
+        `SELECT reason, COUNT(id) AS cnt FROM sessions
+         WHERE tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
+         GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+        [tag.trim()],
+      );
+      if (rows.length > 0) return rows.map((r) => r.reason);
+    }
+    const rows = await db.select<{ reason: string; cnt: number }[]>(
+      `SELECT reason, COUNT(id) AS cnt FROM sessions
+       WHERE reason IS NOT NULL AND reason != ''
+       GROUP BY reason ORDER BY cnt DESC, id DESC LIMIT 8`,
+    );
+    return rows.map((r) => r.reason);
+  }
+}
+
+// Özet için Tag kategorilerine ayrılmış ve açıklamaları içeren detaylı veri
+export async function getSummaryReasonsData(
+  onlyToday: boolean,
+): Promise<SummaryReasonsData> {
+  const db = await getDb();
+  let dayFilter = "";
+  const params: any[] = [];
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    dayFilter = "WHERE day_id = $1";
+    params.push(day.id);
+  }
+
+  // 1. Dikkat Dağılma Kayıtları
+  const distRows = await db.select<{ tag: string | null; reason: string }[]>(
+    `SELECT tag, reason FROM distractions ${dayFilter}`,
+    params,
+  );
+
+  const distTagMap = new Map<string, Map<string, number>>();
+  for (const r of distRows) {
+    const tag = (r.tag && r.tag.trim()) || "Diğer";
+    const reason = (r.reason && r.reason.trim()) || tag;
+    if (!distTagMap.has(tag)) distTagMap.set(tag, new Map());
+    const rMap = distTagMap.get(tag)!;
+    rMap.set(reason, (rMap.get(reason) || 0) + 1);
+  }
+
+  const distractionTags: TagSummaryItem[] = [];
+  for (const [tag, rMap] of distTagMap.entries()) {
+    let tagCount = 0;
+    const explanations: { reason: string; count: number }[] = [];
+    for (const [reason, count] of rMap.entries()) {
+      tagCount += count;
+      explanations.push({ reason, count });
+    }
+    explanations.sort((a, b) => b.count - a.count);
+    distractionTags.push({ tag, count: tagCount, explanations });
+  }
+  distractionTags.sort((a, b) => b.count - a.count);
+
+  // 2. Erken Bitirme Kayıtları (tag veya reason olan sessions)
+  const sessionFilter = onlyToday
+    ? "WHERE day_id = $1 AND (tag IS NOT NULL OR reason IS NOT NULL)"
+    : "WHERE tag IS NOT NULL OR reason IS NOT NULL";
+  const endingRows = await db.select<{ tag: string | null; reason: string | null }[]>(
+    `SELECT tag, reason FROM sessions ${sessionFilter}`,
+    params,
+  );
+
+  const endTagMap = new Map<string, Map<string, number>>();
+  for (const r of endingRows) {
+    const tag = (r.tag && r.tag.trim()) || "Diğer";
+    const reason = (r.reason && r.reason.trim()) || tag;
+    if (!endTagMap.has(tag)) endTagMap.set(tag, new Map());
+    const rMap = endTagMap.get(tag)!;
+    rMap.set(reason, (rMap.get(reason) || 0) + 1);
+  }
+
+  const endingTags: TagSummaryItem[] = [];
+  for (const [tag, rMap] of endTagMap.entries()) {
+    let tagCount = 0;
+    const explanations: { reason: string; count: number }[] = [];
+    for (const [reason, count] of rMap.entries()) {
+      tagCount += count;
+      explanations.push({ reason, count });
+    }
+    explanations.sort((a, b) => b.count - a.count);
+    endingTags.push({ tag, count: tagCount, explanations });
+  }
+  endingTags.sort((a, b) => b.count - a.count);
+
+  // 3. Seans Başı Ortalama Dikkat Dağılması
+  const sessRows = await db.select<{ cnt: number }[]>(
+    `SELECT COUNT(id) AS cnt FROM sessions ${dayFilter}`,
+    params,
+  );
+  const totalSessions = sessRows[0]?.cnt || 0;
+  const totalDistractions = distRows.length;
+  const avgDistractionsPerSession =
+    totalSessions > 0 ? Number((totalDistractions / totalSessions).toFixed(1)) : 0;
+
+  return {
+    distractionTags,
+    endingTags,
+    totalDistractions,
+    totalEndings: endingRows.length,
+    avgDistractionsPerSession,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Dikkat Dağılması Ek Süre Ayarı (Settings)
+// ---------------------------------------------------------------------------
+
+export async function loadDistractPenalty(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'distractPenaltyMins'",
+  );
+  const n = parseInt(rows[0]?.value, 10);
+  return Number.isFinite(n) && n > 0 && n <= 30 ? n : 1;
+}
+
+export async function saveDistractPenalty(mins: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('distractPenaltyMins', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(mins)],
+  );
 }
 
 // ---------------------------------------------------------------------------
