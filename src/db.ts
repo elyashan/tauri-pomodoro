@@ -1315,7 +1315,7 @@ export async function exportAllData(): Promise<string> {
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.10",
+    version: "0.1.11",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,

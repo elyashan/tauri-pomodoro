@@ -480,6 +480,7 @@ export default function App() {
             setWorkSecondsLeft(saved.work_seconds_left || validPlan.workMins * 60);
             setWorkElapsedSec(saved.work_elapsed_sec);
             setBreakSecondsLeft(saved.break_seconds_left);
+            setIsRunning(true);
             const normalizedPage: NavPage =
               saved.page === "timer" || saved.page === "work" || saved.page === "break"
                 ? "timer"
@@ -504,6 +505,7 @@ export default function App() {
             saved.work_elapsed_sec > 0 || saved.page === "break";
           if (hadInProgressSession) {
             setSessionActive(true);
+            setIsRunning(true);
             setTimerMode(saved.page === "break" ? "break" : "work");
             setWorkSecondsLeft(saved.work_seconds_left);
             setWorkElapsedSec(saved.work_elapsed_sec);
@@ -960,16 +962,6 @@ export default function App() {
     setPage("menu");
   };
 
-  // Çalışma sayacını Başlat / Duraklat (yalnızca seans aktifse çalışır)
-  const handleToggleWorkRun = () => {
-    if (!sessionActive) return;
-    setIsCelebrating(false);
-    if (!isRunning && workElapsedSec === 0) {
-      workStartedAtRef.current = new Date().toISOString();
-    }
-    setIsRunning((prev) => !prev);
-  };
-
   // ---------------------------------------------------------------------------
   // DİKKAT DAĞILMASI İŞLEMLERİ
   // ---------------------------------------------------------------------------
@@ -1023,18 +1015,29 @@ export default function App() {
         setShowStopBox(true);
         return;
       }
+      setSessionActive(false);
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
       setCurrentSessionDistractions(0);
       workStartedAtRef.current = null;
+      setPage("menu");
     } else {
       const totalOvertime = breakOvertimeAccumSec + breakOverdueSec;
       if (totalOvertime >= 10) {
-        autoStartAfterBreakRef.current = false;
+        autoStartAfterBreakRef.current = true;
         await handleOpenBreakOverdueBox();
         return;
       }
-      await submitBreakOverdue(true, false);
+      await submitBreakOverdue(true, true);
+    }
+  };
+
+  const cancelStopBox = () => {
+    setShowStopBox(false);
+    setEndingReasonText("");
+    setIsEditingEndingTags(false);
+    if (sessionActive) {
+      setIsRunning(true);
     }
   };
 
@@ -1068,6 +1071,7 @@ export default function App() {
       setWeeklySummary(await getWeeklySummary(locale));
       setTimelineSessions(await getTimelineSessions());
     }
+    setSessionActive(false);
     setWorkSecondsLeft(currentPlan.workMins * 60);
     setWorkElapsedSec(0);
     setCurrentSessionDistractions(0);
@@ -1075,6 +1079,7 @@ export default function App() {
     setShowStopBox(false);
     setEndingReasonText("");
     setIsEditingEndingTags(false);
+    setPage("menu");
   };
 
   // ---------------------------------------------------------------------------
@@ -1375,6 +1380,9 @@ export default function App() {
     setShowStopBox(false);
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
+    if (sessionActive) {
+      setIsRunning(true);
+    }
     setDayStats(
       await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"),
     );
@@ -1931,7 +1939,7 @@ export default function App() {
               onChange={(e) => setEndingReasonText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submitEnding(true);
-                if (e.key === "Escape") setShowStopBox(false);
+                if (e.key === "Escape") cancelStopBox();
               }}
             />
             <button className="primary-btn" onClick={() => submitEnding(true)}>
@@ -1943,7 +1951,7 @@ export default function App() {
             <button className="ghost-btn" onClick={() => submitEnding(false)}>
               {t.finishWithoutTag}
             </button>
-            <button onClick={() => setShowStopBox(false)}>
+            <button onClick={cancelStopBox}>
               {t.cancelReturn}
             </button>
           </div>
@@ -2234,16 +2242,6 @@ export default function App() {
                 </div>
               ) : (
                 <div className="btn-row hover-reveal">
-                  <button
-                    className="primary-btn"
-                    onClick={handleToggleWorkRun}
-                  >
-                    {isRunning
-                      ? t.pause
-                      : hasPausedProgress
-                        ? t.resume
-                        : t.start}
-                  </button>
                   <button
                     className="short-break-btn"
                     onClick={handleTakeShortBreak}
