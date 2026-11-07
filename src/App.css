@@ -1,0 +1,383 @@
+* {
+  box-sizing: border-box;
+  user-select: none;
+  margin: 0;
+  padding: 0;
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+}
+
+/* Hafif saydam koyu pencere */
+.widget-shell {
+  width: 100%;
+  height: 100%;
+  background: rgba(26, 24, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: #f4f4f5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+  cursor: grab;
+}
+
+.widget-shell:hover,
+.widget-shell.solid-bg {
+  background: rgba(20, 20, 26, 0.93);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Çalışma/Mola modunda sadece hover olunca görünen alanlar */
+.hover-reveal {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.widget-shell:hover .hover-reveal {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Üst çubuk */
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #a1a1aa;
+  min-height: 20px;
+}
+
+.badge {
+  font-weight: 600;
+  color: #d4d4d8;
+}
+
+/* Sayaç: Fare dışarıdayken dikeyde ortalı durur, hover'da hafif yukarı kayar */
+.timer-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(2px);
+  transition: transform 0.16s ease;
+}
+
+.timer-display {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.timer-display.clickable-timer {
+  cursor: pointer;
+}
+
+.timer-display.clickable-timer:hover {
+  color: #93c5fd;
+}
+
+.resume-hint {
+  font-size: 10px;
+  color: #fbbf24;
+  margin-top: 3px;
+}
+
+.timer-input {
+  width: 96px;
+  font-size: 32px;
+  font-weight: 700;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  outline: none;
+}
+
+/* Alt kontrol butonları */
+.btn-row {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+button {
+  background: rgba(255, 255, 255, 0.11);
+  color: #f4f4f5;
+  border: none;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+button.primary-btn {
+  background: rgba(59, 130, 246, 0.35);
+  color: #dbeafe;
+}
+
+button.primary-btn:hover {
+  background: rgba(59, 130, 246, 0.55);
+}
+
+button.warn-btn {
+  background: rgba(239, 68, 68, 0.25);
+  color: #fecaca;
+}
+
+button.warn-btn:hover {
+  background: rgba(239, 68, 68, 0.45);
+}
+
+button.ghost-btn {
+  padding: 2px 7px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Dikkat dağılma mini formu */
+.distract-box {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.distract-input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+}
+
+/* Ana Menü */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.stat-lbl {
+  font-size: 10px;
+  color: #a1a1aa;
+  margin-top: 2px;
+}
+
+.last-pos-bar {
+  font-size: 11px;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 6px 8px;
+  border-radius: 7px;
+  text-align: center;
+}
+
+.menu-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.menu-actions .full-width {
+  grid-column: span 2;
+}
+
+/* Özet Sayfası ve Çubuk Grafik */
+.tooltip-banner {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #e4e4e7;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chart-area {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  height: 125px;
+  padding: 14px 4px 4px;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.bar-col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  cursor: pointer;
+}
+
+.bar-hours {
+  font-size: 9px;
+  color: #a1a1aa;
+  margin-bottom: 3px;
+}
+
+.bar-fill {
+  width: 22px;
+  background: rgba(96, 165, 250, 0.55);
+  border-radius: 5px 5px 2px 2px;
+  transition:
+    background 0.15s ease,
+    height 0.2s ease;
+  min-height: 4px;
+}
+
+.bar-col:hover .bar-fill,
+.bar-fill.active-bar {
+  background: #60a5fa;
+}
+
+.bar-label {
+  font-size: 10px;
+  color: #a1a1aa;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+.distract-list {
+  margin-top: 6px;
+  max-height: 58px;
+  overflow-y: auto;
+  font-size: 10px;
+  color: #a1a1aa;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Dikkat dağılma şıkları (Chip yapısı) */
+.reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 76px;
+  overflow-y: auto;
+  margin-bottom: 2px;
+}
+
+.reason-chip {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e4e4e7;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 0.14s,
+    border-color 0.14s;
+}
+
+.reason-chip:hover {
+  background: rgba(59, 130, 246, 0.4);
+  border-color: rgba(96, 165, 250, 0.6);
+  color: #fff;
+}
+
+.new-reason-row {
+  display: flex;
+  gap: 5px;
+}
+
+/* Özet ekranı: Dikkat dağılma sıklığı bölümü */
+.freq-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: #d4d4d8;
+  font-weight: 600;
+}
+
+.freq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 96px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.freq-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.freq-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #d4d4d8;
+}
+
+.freq-bar-bg {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.freq-bar-fill {
+  height: 100%;
+  background: #f87171;
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
