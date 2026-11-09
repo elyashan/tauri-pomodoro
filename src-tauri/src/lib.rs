@@ -1,13 +1,557 @@
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+// ============================================================================
+// Aktif Uygulama & Açık Sekme Yakalama (Cross-Platform)
+// ============================================================================
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveAppInfo {
+    pub app_name: String,
+    pub window_title: String,
+}
+
+fn clean_app_and_tab(raw_exe_stem: &str, raw_title: &str) -> ActiveAppInfo {
+    let lower = raw_exe_stem.trim().to_ascii_lowercase();
+    let app_name = match lower.as_str() {
+        "chrome" => "Chrome".to_string(),
+        "msedge" => "Edge".to_string(),
+        "brave" => "Brave".to_string(),
+        "firefox" => "Firefox".to_string(),
+        "opera" => "Opera".to_string(),
+        "vivaldi" => "Vivaldi".to_string(),
+        "arc" => "Arc".to_string(),
+        "code" => "VS Code".to_string(),
+        "cursor" => "Cursor".to_string(),
+        "windsurf" => "Windsurf".to_string(),
+        "antigravity" => "Antigravity".to_string(),
+        "idea64" | "idea" => "IntelliJ IDEA".to_string(),
+        "pycharm64" | "pycharm" => "PyCharm".to_string(),
+        "webstorm64" | "webstorm" => "WebStorm".to_string(),
+        "obsidian" => "Obsidian".to_string(),
+        "notion" => "Notion".to_string(),
+        "discord" => "Discord".to_string(),
+        "slack" => "Slack".to_string(),
+        "telegram" => "Telegram".to_string(),
+        "whatsapp" => "WhatsApp".to_string(),
+        "spotify" => "Spotify".to_string(),
+        "winword" => "Word".to_string(),
+        "excel" => "Excel".to_string(),
+        "powerpnt" => "PowerPoint".to_string(),
+        "onenote" => "OneNote".to_string(),
+        "acrord32" | "acrobat" => "Adobe PDF".to_string(),
+        "sumatrapdf" => "SumatraPDF".to_string(),
+        "windowsterminal" => "Terminal".to_string(),
+        "powershell" | "pwsh" => "PowerShell".to_string(),
+        "explorer" => "Explorer".to_string(),
+        other if !other.is_empty() => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+        _ => String::new(),
+    };
+
+    let mut title = raw_title.trim().to_string();
+    let suffixes = [
+        " - Google Chrome",
+        " — Google Chrome",
+        " - Microsoft\u{200b} Edge",
+        " - Microsoft Edge",
+        " - Brave",
+        " — Mozilla Firefox",
+        " - Mozilla Firefox",
+        " - Opera",
+        " - Vivaldi",
+        " - Visual Studio Code",
+        " - Cursor",
+        " - Obsidian",
+    ];
+    for suf in suffixes {
+        if let Some(stripped) = title.strip_suffix(suf) {
+            title = stripped.trim().to_string();
+            break;
+        }
+    }
+
+    ActiveAppInfo {
+        app_name,
+        window_title: title,
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod platform_fg {
+    use super::{clean_app_and_tab, ActiveAppInfo};
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::path::Path;
+
+    type HWND = isize;
+    type DWORD = u32;
+    type BOOL = i32;
+    type HANDLE = isize;
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetForegroundWindow() -> HWND;
+        fn GetWindowTextW(hWnd: HWND, lpString: *mut u16, nMaxCount: i32) -> i32;
+        fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
+        fn SetForegroundWindow(hWnd: HWND) -> BOOL;
+        fn IsWindow(hWnd: HWND) -> BOOL;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(
+            dwDesiredAccess: DWORD,
+            bInheritHandle: BOOL,
+            dwProcessId: DWORD,
+        ) -> HANDLE;
+        fn QueryFullProcessImageNameW(
+            hProcess: HANDLE,
+            dwFlags: DWORD,
+            lpExeName: *mut u16,
+            lpdwSize: *mut DWORD,
+        ) -> BOOL;
+        fn CloseHandle(hObject: HANDLE) -> BOOL;
+    }
+
+    pub fn inspect_external_foreground() -> Option<(ActiveAppInfo, isize)> {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd == 0 {
+                return None;
+            }
+            let mut pid: DWORD = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == 0 || pid == std::process::id() {
+                return None;
+            }
+
+            let mut title_buf = [0u16; 512];
+            let title_len = GetWindowTextW(hwnd, title_buf.as_mut_ptr(), title_buf.len() as i32);
+            let raw_title = if title_len > 0 {
+                OsString::from_wide(&title_buf[..title_len as usize])
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                String::new()
+            };
+
+            let trimmed_title = raw_title.trim();
+            if trimmed_title.is_empty()
+                || trimmed_title == "Program Manager"
+                || trimmed_title == "Windows Default Lock Screen"
+            {
+                return None;
+            }
+
+            let mut exe_stem = String::new();
+            let h_proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h_proc != 0 {
+                let mut path_buf = [0u16; 1024];
+                let mut path_len: DWORD = path_buf.len() as DWORD;
+                if QueryFullProcessImageNameW(h_proc, 0, path_buf.as_mut_ptr(), &mut path_len) != 0
+                    && path_len > 0
+                {
+                    let full_path = OsString::from_wide(&path_buf[..path_len as usize])
+                        .to_string_lossy()
+                        .into_owned();
+                    if let Some(stem) = Path::new(&full_path).file_stem() {
+                        exe_stem = stem.to_string_lossy().into_owned();
+                    }
+                }
+                let _ = CloseHandle(h_proc);
+            }
+
+            if exe_stem.eq_ignore_ascii_case("pomodoro-widget") {
+                return None;
+            }
+
+            Some((clean_app_and_tab(&exe_stem, trimmed_title), hwnd))
+        }
+    }
+
+    pub fn restore_hwnd(hwnd: isize) {
+        if hwnd == 0 {
+            return;
+        }
+        unsafe {
+            if IsWindow(hwnd) != 0 {
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod platform_fg {
+    use super::{clean_app_and_tab, ActiveAppInfo};
+    use std::process::Command;
+
+    pub fn inspect_external_foreground() -> Option<(ActiveAppInfo, isize)> {
+        let script = r#"tell application "System Events"
+            set frontApp to first application process whose frontmost is true
+            set appName to name of frontApp
+            set winTitle to ""
+            try
+                set winTitle to name of front window of frontApp
+            end try
+            return appName & "|||" & winTitle
+        end tell"#;
+        let out = Command::new("osascript").arg("-e").arg(script).output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let mut parts = text.splitn(2, "|||");
+        let app_raw = parts.next().unwrap_or("").trim();
+        let title_raw = parts.next().unwrap_or("").trim();
+        if app_raw.is_empty() || app_raw.to_ascii_lowercase().contains("pomodoro") {
+            return None;
+        }
+        Some((clean_app_and_tab(app_raw, title_raw), 0))
+    }
+
+    pub fn restore_hwnd(_hwnd: isize) {}
+}
+
+#[cfg(target_os = "linux")]
+mod platform_fg {
+    use super::{clean_app_and_tab, ActiveAppInfo};
+    use std::process::Command;
+
+    pub fn inspect_external_foreground() -> Option<(ActiveAppInfo, isize)> {
+        let out = Command::new("xdotool")
+            .args(["getactivewindow", "getwindowname"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let title = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if title.is_empty() || title.to_ascii_lowercase().contains("pomodoro") {
+            return None;
+        }
+        Some((clean_app_and_tab("", &title), 0))
+    }
+
+    pub fn restore_hwnd(_hwnd: isize) {}
+}
+
+// ============================================================================
+// Paylaşılan Yakalama Durumu (Main <-> Capture Penceresi Köprüsü)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendContextSnapshot {
+    pub current_context: String,
+    pub work_tag: String,
+    pub work_reason: String,
+    pub session_active: bool,
+    pub timer_mode: String,
+    pub distract_penalty_mins: u32,
+    pub lang: String,
+    pub bg_color: String,
+    pub recent_contexts: Vec<String>,
+}
+
+impl Default for FrontendContextSnapshot {
+    fn default() -> Self {
+        Self {
+            current_context: String::new(),
+            work_tag: "Ders".to_string(),
+            work_reason: String::new(),
+            session_active: false,
+            timer_mode: "work".to_string(),
+            distract_penalty_mins: 1,
+            lang: "tr".to_string(),
+            bg_color: "#1a1814".to_string(),
+            recent_contexts: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureOpenPayload {
+    pub mode: String, // "distraction" | "context"
+    pub open_seq: u64,
+    pub active_app: String,
+    pub active_window: String,
+    pub snapshot: FrontendContextSnapshot,
+}
+
+impl Default for CaptureOpenPayload {
+    fn default() -> Self {
+        Self {
+            mode: "distraction".to_string(),
+            open_seq: 0,
+            active_app: String::new(),
+            active_window: String::new(),
+            snapshot: FrontendContextSnapshot::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutStatus {
+    pub distraction_shortcut: String,
+    pub context_shortcut: String,
+    pub distraction_ok: bool,
+    pub distraction_error: Option<String>,
+    pub context_ok: bool,
+    pub context_error: Option<String>,
+}
+
+struct SharedCaptureState {
+    last_external: ActiveAppInfo,
+    last_external_hwnd: isize,
+    capture_opened_at_ms: u128,
+    open_seq: u64,
+    distraction_shortcut: String,
+    context_shortcut: String,
+    parsed_distraction: Option<Shortcut>,
+    parsed_context: Option<Shortcut>,
+    snapshot: FrontendContextSnapshot,
+    active_payload: CaptureOpenPayload,
+}
+
+impl Default for SharedCaptureState {
+    fn default() -> Self {
+        let d_str = "Ctrl+Shift+D".to_string();
+        let c_str = "Ctrl+Alt+C".to_string();
+        Self {
+            last_external: ActiveAppInfo::default(),
+            last_external_hwnd: 0,
+            capture_opened_at_ms: 0,
+            open_seq: 0,
+            parsed_distraction: Shortcut::from_str(&d_str).ok(),
+            parsed_context: Shortcut::from_str(&c_str).ok(),
+            distraction_shortcut: d_str,
+            context_shortcut: c_str,
+            snapshot: FrontendContextSnapshot::default(),
+            active_payload: CaptureOpenPayload::default(),
+        }
+    }
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn trigger_capture_window(app: &AppHandle, mode: &str) {
+    // Kısayola basıldığı salisede (henüz capture penceresi odak almadan önce!)
+    // o an açık olan dış uygulama ve sekme başlığını yakala.
+    let fresh_fg = platform_fg::inspect_external_foreground();
+
+    let payload = {
+        let state = app.state::<Mutex<SharedCaptureState>>();
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some((info, hwnd)) = fresh_fg {
+            guard.last_external = info;
+            if hwnd != 0 {
+                guard.last_external_hwnd = hwnd;
+            }
+        }
+        guard.open_seq = guard.open_seq.wrapping_add(1);
+        guard.capture_opened_at_ms = now_ms();
+        let p = CaptureOpenPayload {
+            mode: mode.to_string(),
+            open_seq: guard.open_seq,
+            active_app: guard.last_external.app_name.clone(),
+            active_window: guard.last_external.window_title.clone(),
+            snapshot: guard.snapshot.clone(),
+        };
+        guard.active_payload = p.clone();
+        p
+    };
+
+    if let Some(cap_win) = app.get_webview_window("capture") {
+        let _ = cap_win.center();
+        let _ = cap_win.show();
+        let _ = cap_win.unminimize();
+        let _ = cap_win.set_focus();
+        let _ = cap_win.emit("open-capture", payload);
+    }
+}
+
+fn apply_shortcuts_internal(
+    app: &AppHandle,
+    distraction_str: String,
+    context_str: String,
+) -> ShortcutStatus {
+    let _ = app.global_shortcut().unregister_all();
+
+    let d_trimmed = distraction_str.trim().to_string();
+    let c_trimmed = context_str.trim().to_string();
+
+    let mut d_ok = false;
+    let mut d_err = None;
+    let mut parsed_d = None;
+
+    if !d_trimmed.is_empty() {
+        match Shortcut::from_str(&d_trimmed) {
+            Ok(sc) => match app.global_shortcut().register(sc) {
+                Ok(_) => {
+                    d_ok = true;
+                    parsed_d = Some(sc);
+                }
+                Err(e) => d_err = Some(e.to_string()),
+            },
+            Err(e) => d_err = Some(e.to_string()),
+        }
+    }
+
+    let mut c_ok = false;
+    let mut c_err = None;
+    let mut parsed_c = None;
+
+    if !c_trimmed.is_empty() {
+        if c_trimmed.eq_ignore_ascii_case(&d_trimmed) {
+            c_err = Some("İki kısayol aynı olamaz.".to_string());
+        } else {
+            match Shortcut::from_str(&c_trimmed) {
+                Ok(sc) => match app.global_shortcut().register(sc) {
+                    Ok(_) => {
+                        c_ok = true;
+                        parsed_c = Some(sc);
+                    }
+                    Err(e) => c_err = Some(e.to_string()),
+                },
+                Err(e) => c_err = Some(e.to_string()),
+            }
+        }
+    }
+
+    {
+        let state = app.state::<Mutex<SharedCaptureState>>();
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.distraction_shortcut = d_trimmed.clone();
+        guard.context_shortcut = c_trimmed.clone();
+        guard.parsed_distraction = parsed_d;
+        guard.parsed_context = parsed_c;
+    }
+
+    ShortcutStatus {
+        distraction_shortcut: d_trimmed,
+        context_shortcut: c_trimmed,
+        distraction_ok: d_ok,
+        distraction_error: d_err,
+        context_ok: c_ok,
+        context_error: c_err,
+    }
+}
+
+// ============================================================================
+// Tauri Frontend Komutları
+// ============================================================================
+
+#[tauri::command]
+fn get_last_active_window(state: State<'_, Mutex<SharedCaptureState>>) -> ActiveAppInfo {
+    if let Some((fresh, hwnd)) = platform_fg::inspect_external_foreground() {
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.last_external = fresh.clone();
+        if hwnd != 0 {
+            guard.last_external_hwnd = hwnd;
+        }
+        return fresh;
+    }
+    let guard = match state.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    guard.last_external.clone()
+}
+
+#[tauri::command]
+fn sync_capture_snapshot(
+    snapshot: FrontendContextSnapshot,
+    state: State<'_, Mutex<SharedCaptureState>>,
+) {
+    let mut guard = match state.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    guard.snapshot = snapshot;
+}
+
+#[tauri::command]
+fn get_capture_open_payload(state: State<'_, Mutex<SharedCaptureState>>) -> CaptureOpenPayload {
+    let guard = match state.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    guard.active_payload.clone()
+}
+
+#[tauri::command]
+fn open_quick_capture_manual(app: AppHandle, mode: String) {
+    let m = if mode == "context" {
+        "context"
+    } else {
+        "distraction"
+    };
+    trigger_capture_window(&app, m);
+}
+
+#[tauri::command]
+fn close_capture_and_restore_focus(app: AppHandle, state: State<'_, Mutex<SharedCaptureState>>) {
+    if let Some(cap_win) = app.get_webview_window("capture") {
+        let _ = cap_win.hide();
+    }
+    let prev_hwnd = {
+        let guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        guard.last_external_hwnd
+    };
+    platform_fg::restore_hwnd(prev_hwnd);
+}
+
+#[tauri::command]
+fn update_global_shortcuts(
+    app: AppHandle,
+    distraction_shortcut: String,
+    context_shortcut: String,
+) -> ShortcutStatus {
+    apply_shortcuts_internal(&app, distraction_shortcut, context_shortcut)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Mutex::new(SharedCaptureState::default()))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -16,9 +560,84 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    let target_mode = {
+                        let state = app.state::<Mutex<SharedCaptureState>>();
+                        let guard = match state.lock() {
+                            Ok(g) => g,
+                            Err(p) => p.into_inner(),
+                        };
+                        if guard.parsed_distraction.as_ref() == Some(shortcut) {
+                            Some("distraction")
+                        } else if guard.parsed_context.as_ref() == Some(shortcut) {
+                            Some("context")
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(mode) = target_mode {
+                        trigger_capture_window(app, mode);
+                    }
+                })
+                .build(),
+        )
+        .invoke_handler(tauri::generate_handler![
+            get_last_active_window,
+            sync_capture_snapshot,
+            get_capture_open_payload,
+            open_quick_capture_manual,
+            close_capture_and_restore_focus,
+            update_global_shortcuts,
+        ])
         .setup(|app| {
+            // Varsayılan kısayolları başlat (React açılınca kullanıcının kayıtlı kısayollarıyla günceller)
+            let _ = apply_shortcuts_internal(
+                app.handle(),
+                "Ctrl+Shift+D".to_string(),
+                "Ctrl+Alt+C".to_string(),
+            );
+
+            // Windows'ta arka planda son aktif dış pencere/sekme bilgisini hafifçe takip et
+            // (Böylece kullanıcı fareyle widget üzerindeki "Dağıldım" butonuna tıkladığında bile
+            // az önce hangi sekmede olduğu kesin olarak bilinir!)
+            #[cfg(target_os = "windows")]
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(Duration::from_millis(1200));
+                    if let Some((info, hwnd)) = platform_fg::inspect_external_foreground() {
+                        let state = handle.state::<Mutex<SharedCaptureState>>();
+                        if let Ok(mut guard) = state.lock() {
+                            guard.last_external = info;
+                            if hwnd != 0 {
+                                guard.last_external_hwnd = hwnd;
+                            }
+                        };
+                    }
+                });
+            }
+
             let restore_i =
                 MenuItem::with_id(app, "restore", "Pencereyi Aç", true, None::<&str>)?;
+            let quick_dist_i = MenuItem::with_id(
+                app,
+                "quick_distract",
+                "⚡ Hızlı Yakala (Dikkat / Görev)",
+                true,
+                None::<&str>,
+            )?;
+            let quick_ctx_i = MenuItem::with_id(
+                app,
+                "quick_context",
+                "🎯 Meşguliyet (Context) Yaz",
+                true,
+                None::<&str>,
+            )?;
             let minidock_i = MenuItem::with_id(
                 app,
                 "minidock",
@@ -29,7 +648,17 @@ pub fn run() {
             let toggle_i =
                 MenuItem::with_id(app, "toggle", "Tepsiye Gizle / Göster", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Tamamen Çık", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&restore_i, &minidock_i, &toggle_i, &quit_i])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &restore_i,
+                    &quick_dist_i,
+                    &quick_ctx_i,
+                    &minidock_i,
+                    &toggle_i,
+                    &quit_i,
+                ],
+            )?;
 
             let mut tray_builder = TrayIconBuilder::new()
                 .tooltip("Pomodoro Zamanlayıcı")
@@ -43,6 +672,12 @@ pub fn run() {
                             let _ = win.set_focus();
                             let _ = win.emit("tray-restore", ());
                         }
+                    }
+                    "quick_distract" => {
+                        trigger_capture_window(app, "distraction");
+                    }
+                    "quick_context" => {
+                        trigger_capture_window(app, "context");
                     }
                     "minidock" => {
                         if let Some(win) = app.get_webview_window("main") {
@@ -92,8 +727,32 @@ pub fn run() {
             tray_builder.build(app)?;
             Ok(())
         })
-        // Çarpıya veya Alt+F4'e basıldığında uygulamayı kapatma; sağ alt mini sayaç moduna geçir
         .on_window_event(|window, event| {
+            let label = window.label();
+            if label == "capture" {
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                    WindowEvent::Focused(false) => {
+                        let elapsed = {
+                            let state = window.app_handle().state::<Mutex<SharedCaptureState>>();
+                            state
+                                .lock()
+                                .map(|g| now_ms().saturating_sub(g.capture_opened_at_ms))
+                                .unwrap_or(1000)
+                        };
+                        if elapsed > 350 {
+                            let _ = window.hide();
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+
+            // Ana pencere: Çarpıya veya Alt+F4'e basıldığında uygulamayı kapatma; sağ alt mini sayaç moduna geçir
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.show();

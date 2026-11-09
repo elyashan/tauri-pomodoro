@@ -246,6 +246,75 @@ export interface Translations {
   defaultEndingTags: string[];
   defaultWorkTags: string[];
   defaultBreakOvertimeTags: string[];
+
+  // v0.1.13: 5 Dikkat Kategorisi, Global Hızlı Yakalama, Otopark, Kısa Mola Notu & Bağlam (Context)
+  catImpulsiveTask: string;
+  catIdea: string;
+  catInternal: string;
+  catExternal: string;
+  catEscape: string;
+  catKeyHints: {
+    impulsive_task: string;
+    idea: string;
+    internal: string;
+    external: string;
+    escape: string;
+  };
+  noPenaltyParkingBadge: string;
+  addsPenaltyBadge: (mins: number) => string;
+
+  qcDistractHeader: string;
+  qcSelectKeyHint: string;
+  qcInputPlaceholders: {
+    impulsive_task: string;
+    idea: string;
+    internal: string;
+    external: string;
+    escape: string;
+  };
+  qcSwitchCatHint: string;
+  qcActiveTabLabel: string;
+  qcCurrentContextLabel: string;
+  qcContextNone: string;
+  qcReminderTitle: string;
+  qcReminderCloseHint: string;
+  qcContextHeader: string;
+  qcContextPlaceholder: string;
+  qcRecentContextsLabel: string;
+
+  parkingBreakBannerTitle: string;
+  parkingToggleBtn: (cnt: number) => string;
+  parkingTab: string;
+  parkingPendingTasks: string;
+  parkingDoneTasks: string;
+  parkingUnratedIdeas: string;
+  parkingImportantIdeas: string;
+  parkingUnimportantIdeas: string;
+  parkingMarkImportant: string;
+  parkingMarkUnimportant: string;
+  parkingEmpty: string;
+
+  shortBreakPromptTitle: string;
+  shortBreakPromptHint: string;
+  shortBreakPromptPlaceholder: string;
+  shortBreakStartBtn: string;
+  shortBreakReminderPrefix: string;
+  contextReminderPrefix: string;
+  setContextBadgePlaceholder: string;
+
+  contextShortTab: string;
+  contextFullTab: string;
+  appsShortTab: string;
+  appsFullTab: string;
+  noContextStats: string;
+  noAppDistractions: string;
+
+  shortcutsSectionTitle: string;
+  shortcutDistractLabel: string;
+  shortcutContextLabel: string;
+  shortcutRecordPressKeys: string;
+  shortcutResetBtn: string;
+  shortcutTestBtn: string;
 }
 
 const tr: Translations = {
@@ -576,6 +645,83 @@ const tr: Translations = {
     "İş Araya Girdi",
     "Diğer",
   ],
+
+  // v0.1.13
+  catImpulsiveTask: "Dürtüsel Görev",
+  catIdea: "Akla Gelen Fikir",
+  catInternal: "İçsel Tetikleyici",
+  catExternal: "Dışsal Tetikleyici",
+  catEscape: "Zorluktan Kaçış",
+  catKeyHints: {
+    impulsive_task: "1·G",
+    idea: "2·F",
+    internal: "3·İ",
+    external: "4·D",
+    escape: "5·Z",
+  },
+  noPenaltyParkingBadge: "+0dk • Otopark",
+  addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}dk eklenir` : "+0dk"),
+
+  qcDistractHeader: "⚡ Hızlı Yakala",
+  qcSelectKeyHint:
+    "1–5 veya harfe (G: Görev, F: Fikir, İ: İçsel, D: Dışsal, Z: Kaçış) bas • Esc kapat",
+  qcInputPlaceholders: {
+    impulsive_task:
+      "Molada yapılacak dürtüsel görevi yaz ve Enter'a bas (ek süre eklenmez)...",
+    idea: "Aklına gelen fikri yaz ve Enter'a bas (ek süre eklenmez)...",
+    internal: "İçsel tetikleyiciyi / düşünceyi yaz ve Enter'a bas...",
+    external: "Dışsal uyaranı (bildirim, ses vb.) yaz ve Enter'a bas...",
+    escape: "Zorlandığın / kaçtığın noktayı kısaca yaz ve Enter'a bas...",
+  },
+  qcSwitchCatHint: "Tab: Kategori değiştir • Enter: Kaydet • Esc: İptal",
+  qcActiveTabLabel: "Son Açık Sekme",
+  qcCurrentContextLabel: "Son Kalınan Meşguliyet",
+  qcContextNone: "Meşguliyet belirtilmedi",
+  qcReminderTitle: "🎯 Son Kalınan Meşguliyet — Kaldığın Yerden Devam Et:",
+  qcReminderCloseHint: "Enter / Space / Esc ile hemen pencereye dön",
+  qcContextHeader: "🎯 Şu An Neyle Meşgulsün? (Context)",
+  qcContextPlaceholder:
+    "Şu an odaklandığın spesifik işi yaz ve Enter'a bas (örn: Türev Test 2, API Auth)...",
+  qcRecentContextsLabel: "Son meşguliyetler (Tıkla veya ↑↓):",
+
+  parkingBreakBannerTitle:
+    "🅿️ Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
+  parkingToggleBtn: (cnt) => `🅿️ Otopark (${cnt})`,
+  parkingTab: "🅿️ Otopark",
+  parkingPendingTasks: "⏳ Yapılmayan Görevler",
+  parkingDoneTasks: "✅ Yapılan Görevler",
+  parkingUnratedIdeas: "💡 Bekleyen Fikirler",
+  parkingImportantIdeas: "⭐ Önemli Fikirler",
+  parkingUnimportantIdeas: "💤 Önemsiz Fikirler",
+  parkingMarkImportant: "⭐ Önemli",
+  parkingMarkUnimportant: "💤 Önemsiz",
+  parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev veya fikir yok.",
+
+  shortBreakPromptTitle: "🎯 Şu An Neyle Meşgulsün? (Context)",
+  shortBreakPromptHint:
+    "Kısa molaya girmeden önce aktif meşguliyetini belirle; mola bitince kaldığın yeri hatırlatalım:",
+  shortBreakPromptPlaceholder:
+    "Şu an odaklandığın spesifik işi yaz (örn: Türev Test 2, API Auth)...",
+  shortBreakStartBtn: "☕ Molaya Geç",
+  shortBreakReminderPrefix: "🎯 Son Meşguliyet:",
+  contextReminderPrefix: "🎯 Son Meşguliyet:",
+  setContextBadgePlaceholder: "Meşguliyet",
+
+  contextShortTab: "Bağlam",
+  contextFullTab: "Meşguliyet (Context) Çalışma İstatistikleri",
+  appsShortTab: "Sekme",
+  appsFullTab: "Açık Uygulama & Sekme Bazlı Dağılmalar",
+  noContextStats:
+    "Henüz meşguliyet (context) kaydı yok. Kısayol ile o an neyle uğraştığını kaydedebilirsin.",
+  noAppDistractions:
+    "Henüz açık uygulama veya sekme bilgisi içeren dağılma kaydı yok.",
+
+  shortcutsSectionTitle: "⌨️ Global Kısayollar (Ekran Ortasında Hızlı Input)",
+  shortcutDistractLabel: "⚡ Dikkat / Görev / Fikir Yakala",
+  shortcutContextLabel: "🎯 Aktif Meşguliyet (Context) Yaz",
+  shortcutRecordPressKeys: "Tuş kombinasyonuna basın... (Esc iptal)",
+  shortcutResetBtn: "Varsayılan Kısayollar",
+  shortcutTestBtn: "Test",
 };
 
 const en: Translations = {
@@ -905,6 +1051,82 @@ const en: Translations = {
     "Interruption",
     "Other",
   ],
+
+  // v0.1.13
+  catImpulsiveTask: "Impulsive Task",
+  catIdea: "Sudden Idea",
+  catInternal: "Internal Trigger",
+  catExternal: "External Trigger",
+  catEscape: "Difficulty Escape",
+  catKeyHints: {
+    impulsive_task: "1·G",
+    idea: "2·F",
+    internal: "3·I",
+    external: "4·D",
+    escape: "5·Z",
+  },
+  noPenaltyParkingBadge: "+0m • Parking Lot",
+  addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}m added` : "+0m"),
+
+  qcDistractHeader: "⚡ Quick Capture",
+  qcSelectKeyHint:
+    "Press 1–5 or letter (G: Task, F: Idea, I: Internal, D: External, Z: Escape) • Esc close",
+  qcInputPlaceholders: {
+    impulsive_task:
+      "Type impulsive task for your break & press Enter (no time added)...",
+    idea: "Type your idea & press Enter (no time added)...",
+    internal: "Type internal thought / urge & press Enter...",
+    external: "Type external trigger (notification, noise...) & press Enter...",
+    escape: "What felt hard or boring right now? Press Enter...",
+  },
+  qcSwitchCatHint: "Tab: Switch category • Enter: Save • Esc: Cancel",
+  qcActiveTabLabel: "Last Open Tab",
+  qcCurrentContextLabel: "Last Active Context",
+  qcContextNone: "No active context set",
+  qcReminderTitle: "🎯 Last Active Context — Resume Right Here:",
+  qcReminderCloseHint: "Press Enter / Space / Esc to return immediately",
+  qcContextHeader: "🎯 What Are You Occupied With Right Now? (Context)",
+  qcContextPlaceholder:
+    "Type what you're actively working on & press Enter (e.g. Calc Problem 4, Auth API)...",
+  qcRecentContextsLabel: "Recent contexts (Click or ↑↓):",
+
+  parkingBreakBannerTitle:
+    "🅿️ These popped into your head while working — check them now:",
+  parkingToggleBtn: (cnt) => `🅿️ Parking (${cnt})`,
+  parkingTab: "🅿️ Parking",
+  parkingPendingTasks: "⏳ Unfinished Tasks",
+  parkingDoneTasks: "✅ Completed Tasks",
+  parkingUnratedIdeas: "💡 Unrated Ideas",
+  parkingImportantIdeas: "⭐ Important Ideas",
+  parkingUnimportantIdeas: "💤 Unimportant Ideas",
+  parkingMarkImportant: "⭐ Important",
+  parkingMarkUnimportant: "💤 Minor",
+  parkingEmpty: "No impulsive tasks or ideas in your parking lot yet.",
+
+  shortBreakPromptTitle: "🎯 What Are You Occupied With? (Context)",
+  shortBreakPromptHint:
+    "Set your active context before taking a short break; we'll remind you where you left off:",
+  shortBreakPromptPlaceholder:
+    "Type what you're actively working on (e.g. Calc Problem 4, Auth API)...",
+  shortBreakStartBtn: "☕ Start Short Break",
+  shortBreakReminderPrefix: "🎯 Last Context:",
+  contextReminderPrefix: "🎯 Last Context:",
+  setContextBadgePlaceholder: "Context",
+
+  contextShortTab: "Context",
+  contextFullTab: "Context Study Statistics",
+  appsShortTab: "App/Tab",
+  appsFullTab: "Distractions by Open App & Tab",
+  noContextStats:
+    "No context entries yet. Use the context global hotkey to log what you are working on.",
+  noAppDistractions: "No app/tab distraction records logged yet.",
+
+  shortcutsSectionTitle: "⌨️ Global Shortcuts (Centered Spotlight Input)",
+  shortcutDistractLabel: "⚡ Capture Distraction / Task / Idea",
+  shortcutContextLabel: "🎯 Log Current Context",
+  shortcutRecordPressKeys: "Press shortcut keys... (Esc cancel)",
+  shortcutResetBtn: "Default Shortcuts",
+  shortcutTestBtn: "Test",
 };
 
 export const translations: Record<ActiveLang, Translations> = { tr, en };

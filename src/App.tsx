@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { listen } from "@tauri-apps/api/event";
@@ -20,7 +21,14 @@ import {
   SummaryReasonsData,
   WeekDayStat,
   WeeklySummary,
-  DistractionTrigger,
+  DistractionCategory,
+  doesCategoryAddPenalty,
+  ParkingItem,
+  ParkingLotData,
+  ContextStatItem,
+  AppDistractionGroup,
+  GlobalShortcutSettings,
+  DEFAULT_SHORTCUTS,
   FeedbackCategory,
   FeedbackItem,
   SizeTargetPage,
@@ -75,11 +83,81 @@ import {
   saveCustomWindowSizes,
   resetCustomWindowSizes,
   getAdhdInsights,
+  addParkingItem,
+  getParkingLotData,
+  toggleParkingTaskDone,
+  rateParkingIdea,
+  deleteParkingItem,
+  startContextLog,
+  finalizeContextLog,
+  incrementContextDistraction,
+  getRecentContexts,
+  getContextStatsSummary,
+  getAppDistractionSummary,
+  loadGlobalShortcuts,
+  saveGlobalShortcuts,
 } from "./db";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
 import { ConfettiCanvas } from "./Confetti";
+import type { CaptureSubmittedEvent } from "./QuickCapture";
 import "./App.css";
+
+interface ShortcutStatus {
+  distractionShortcut: string;
+  contextShortcut: string;
+  distractionOk: boolean;
+  distractionError: string | null;
+  contextOk: boolean;
+  contextError: string | null;
+}
+
+const DISTRACT_CATEGORIES: DistractionCategory[] = [
+  "impulsive_task",
+  "idea",
+  "internal",
+  "external",
+  "escape",
+];
+
+function formatKeyCombo(e: React.KeyboardEvent): string | null {
+  const ignore = new Set(["Control", "Shift", "Alt", "Meta"]);
+  if (ignore.has(e.key)) return null;
+
+  const mods: string[] = [];
+  if (e.ctrlKey || e.metaKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (mods.length === 0) return null;
+
+  let keyToken = "";
+  if (e.code.startsWith("Key")) {
+    keyToken = e.code.slice(3).toUpperCase();
+  } else if (e.code.startsWith("Digit")) {
+    keyToken = e.code.slice(5);
+  } else if (e.code === "Space" || e.key === " ") {
+    keyToken = "Space";
+  } else if (/^F([1-9]|1[0-2])$/i.test(e.key)) {
+    keyToken = e.key.toUpperCase();
+  } else if (e.code === "Backquote") {
+    keyToken = "Backquote";
+  } else if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
+    keyToken = e.key.toUpperCase();
+  }
+
+  if (!keyToken) return null;
+  return [...mods, keyToken].join("+");
+}
+
+const EMPTY_PARKING: ParkingLotData = {
+  pendingTasks: [],
+  doneTasks: [],
+  unratedIdeas: [],
+  importantIdeas: [],
+  unimportantIdeas: [],
+  totalTasks: 0,
+  totalIdeas: 0,
+};
 
 type NavPage = "menu" | "timer" | "summary" | "settings";
 
@@ -312,15 +390,56 @@ export default function App() {
   const [distractPenaltyMins, setDistractPenaltyMins] = useState(1);
   const [currentSessionDistractions, setCurrentSessionDistractions] = useState(0);
 
-  // Dikkatim Dağıldı Kutusu
+  // Dikkatim Dağıldı Kutusu (5 Kategori + Açık Sekme Yakalama)
   const [showDistractBox, setShowDistractBox] = useState(false);
   const [distractTags, setDistractTags] = useState<TagItem[]>([]);
   const [selectedDistractTag, setSelectedDistractTag] = useState<string>("Diğer");
   const [distractPreviousReasons, setDistractPreviousReasons] = useState<string[]>([]);
   const [distractReasonText, setDistractReasonText] = useState("");
-  const [distractTrigger, setDistractTrigger] =
-    useState<DistractionTrigger>("internal");
+  const [distractCategory, setDistractCategory] =
+    useState<DistractionCategory>("internal");
+  const [detectedActiveApp, setDetectedActiveApp] = useState<{
+    appName: string;
+    windowTitle: string;
+  }>({ appName: "", windowTitle: "" });
   const [isEditingDistractTags, setIsEditingDistractTags] = useState(false);
+
+  // Aktif Meşguliyet (Context), Kısa Mola Notu, Otopark & Global Kısayollar
+  const [currentContext, setCurrentContext] = useState<string>("");
+  const [activeContextLogId, setActiveContextLogId] = useState<number | null>(
+    null,
+  );
+  const [contextStartedAtElapsedSec, setContextStartedAtElapsedSec] =
+    useState<number>(0);
+  const [recentContexts, setRecentContexts] = useState<string[]>([]);
+  const [contextStats, setContextStats] = useState<ContextStatItem[]>([]);
+  const [appDistractions, setAppDistractions] = useState<AppDistractionGroup[]>(
+    [],
+  );
+
+  const [showShortBreakPrompt, setShowShortBreakPrompt] =
+    useState<boolean>(false);
+  const [shortBreakDraft, setShortBreakDraft] = useState<string>("");
+
+  const [reminderBanner, setReminderBanner] = useState<{
+    kind?: "context" | "short_break";
+    text: string;
+  } | null>(null);
+
+  const [breakParkingData, setBreakParkingData] =
+    useState<ParkingLotData>(EMPTY_PARKING);
+  const [summaryParkingData, setSummaryParkingData] =
+    useState<ParkingLotData>(EMPTY_PARKING);
+  const [showBreakParking, setShowBreakParking] = useState<boolean>(true);
+
+  const [shortcuts, setShortcuts] =
+    useState<GlobalShortcutSettings>(DEFAULT_SHORTCUTS);
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(
+    null,
+  );
+  const [recordingShortcutFor, setRecordingShortcutFor] = useState<
+    "distraction" | "context" | null
+  >(null);
 
   // Satır-İçi Tag Ekle / Düzenle / Sil Formu (window.prompt / window.confirm yerine)
   const [tagForm, setTagForm] = useState<{
@@ -376,10 +495,10 @@ export default function App() {
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [summaryTab, setSummaryTab] = useState<
-    "timeline" | "weekly" | "recent" | "adhd"
+    "timeline" | "weekly" | "recent" | "parking" | "adhd"
   >("timeline");
   const [summaryReasonsTab, setSummaryReasonsTab] = useState<
-    "work" | "overtime" | "distractions" | "endings"
+    "work" | "contexts" | "apps" | "overtime" | "distractions" | "endings"
   >("work");
   const [summaryReasonsData, setSummaryReasonsData] = useState<SummaryReasonsData | null>(
     null,
@@ -433,6 +552,9 @@ export default function App() {
     workTag: "",
     workReason: "",
     sessionDistractions: 0,
+    currentContext: "",
+    activeContextLogId: null,
+    contextStartedAtElapsedSec: 0,
   });
   runtimeStateRef.current = {
     sessionActive,
@@ -449,7 +571,17 @@ export default function App() {
     workTag: currentWorkTag,
     workReason: currentWorkReason,
     sessionDistractions: currentSessionDistractions,
+    currentContext,
+    activeContextLogId,
+    contextStartedAtElapsedSec,
   };
+
+  const distractPenaltyRef = useRef<number>(distractPenaltyMins);
+  distractPenaltyRef.current = distractPenaltyMins;
+  const activeLangRef = useRef(activeLang);
+  activeLangRef.current = activeLang;
+  const freqOnlyTodayRef = useRef(freqOnlyToday);
+  freqOnlyTodayRef.current = freqOnlyToday;
 
   useEffect(() => {
     (async () => {
@@ -525,6 +657,13 @@ export default function App() {
           }
           setCurrentWorkReason(savedRuntime.workReason);
           setCurrentSessionDistractions(savedRuntime.sessionDistractions);
+          setCurrentContext(
+            savedRuntime.currentContext || savedRuntime.shortBreakNote || "",
+          );
+          setActiveContextLogId(savedRuntime.activeContextLogId ?? null);
+          setContextStartedAtElapsedSec(
+            savedRuntime.contextStartedAtElapsedSec || 0,
+          );
 
           if (savedRuntime.sessionActive) {
             setWorkSecondsLeft(saved.work_seconds_left || validPlan.workMins * 60);
@@ -585,6 +724,18 @@ export default function App() {
         const loadedSizes = await loadCustomWindowSizes();
         setCustomSizes(loadedSizes);
         setFeedbacks(await getFeedbacks());
+
+        const loadedShortcuts = await loadGlobalShortcuts();
+        setShortcuts(loadedShortcuts);
+        invoke<ShortcutStatus>("update_global_shortcuts", {
+          distractionShortcut: loadedShortcuts.distractionShortcut,
+          contextShortcut: loadedShortcuts.contextShortcut,
+        })
+          .then(setShortcutStatus)
+          .catch(() => {});
+
+        setBreakParkingData(await getParkingLotData(false));
+        setRecentContexts(await getRecentContexts(6));
         await getCurrentWindow().setResizable(true).catch(() => {});
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
@@ -614,7 +765,7 @@ export default function App() {
     })();
   }, []);
 
-  // Çalışma <-> Mola geçişlerinde yumuşak görsel geçiş animasyonu tetikle
+  // Çalışma <-> Mola geçişlerinde yumuşak görsel geçiş animasyonu tetikle ve Otopark'ı yenile
   useEffect(() => {
     if (!loaded) {
       prevTimerModeRef.current = timerMode;
@@ -623,10 +774,54 @@ export default function App() {
     if (prevTimerModeRef.current !== timerMode) {
       prevTimerModeRef.current = timerMode;
       setIsModeSwitching(true);
+      if (timerMode === "break") {
+        setShowBreakParking(true);
+        getParkingLotData(false)
+          .then(setBreakParkingData)
+          .catch(() => {});
+      }
       const timer = setTimeout(() => setIsModeSwitching(false), 680);
       return () => clearTimeout(timer);
     }
   }, [timerMode, loaded]);
+
+  // Spotlight Yakalama Penceresi için Rust arka planına anlık durum senkronizasyonu
+  useEffect(() => {
+    if (!loaded) return;
+    invoke("sync_capture_snapshot", {
+      snapshot: {
+        currentContext,
+        workTag: currentWorkTag,
+        workReason: currentWorkReason,
+        sessionActive,
+        timerMode,
+        distractPenaltyMins,
+        lang: activeLang,
+        bgColor: theme.bgColor,
+        recentContexts,
+      },
+    }).catch(() => {});
+  }, [
+    loaded,
+    currentContext,
+    currentWorkTag,
+    currentWorkReason,
+    sessionActive,
+    timerMode,
+    distractPenaltyMins,
+    activeLang,
+    theme.bgColor,
+    recentContexts,
+  ]);
+
+  // Sayaç ekranı hatırlatıcı şeridini 14 saniye sonra otomatik temizle
+  useEffect(() => {
+    if (!reminderBanner) return;
+    const tmr = setTimeout(() => {
+      setReminderBanner(null);
+    }, 14000);
+    return () => clearTimeout(tmr);
+  }, [reminderBanner]);
 
   // Seans aktif değilken sayaç ekranında kalınmasını ve sayacın çalışmasını engelle
   useEffect(() => {
@@ -660,7 +855,11 @@ export default function App() {
   }, [planDropdownOpen]);
 
   const anyModalOpen =
-    showStopBox || showDistractBox || showBreakOverdueBox || showWorkTopicBox;
+    showStopBox ||
+    showDistractBox ||
+    showBreakOverdueBox ||
+    showWorkTopicBox ||
+    showShortBreakPrompt;
 
   // Sağ alt mini sayaç widget'ına (saatin yanına) küçültme ve normal boyuta dönme
   const enterMiniDock = async () => {
@@ -756,9 +955,17 @@ export default function App() {
     }
     const targetPage = page as SizeTargetPage;
     const custom = customSizes[targetPage];
+    const hasBreakParking =
+      targetPage === "timer" &&
+      sessionActive &&
+      timerMode === "break" &&
+      showBreakParking &&
+      breakParkingData.totalTasks + breakParkingData.totalIdeas > 0;
     if (custom) {
-      win.setSize(new LogicalSize(custom.width, custom.height));
-      setCurrentWinSize({ w: custom.width, h: custom.height });
+      const w = hasBreakParking ? Math.max(custom.width, 345) : custom.width;
+      const h = hasBreakParking ? Math.max(custom.height, 365) : custom.height;
+      win.setSize(new LogicalSize(w, h));
+      setCurrentWinSize({ w, h });
       return;
     }
     if (page === "menu") {
@@ -791,18 +998,29 @@ export default function App() {
         h: DEFAULT_WINDOW_SIZES.settings.height,
       });
     } else {
-      win.setSize(
-        new LogicalSize(
-          DEFAULT_WINDOW_SIZES.timer.width,
-          DEFAULT_WINDOW_SIZES.timer.height,
-        ),
-      );
-      setCurrentWinSize({
-        w: DEFAULT_WINDOW_SIZES.timer.width,
-        h: DEFAULT_WINDOW_SIZES.timer.height,
-      });
+      const hasBreakParking =
+        sessionActive &&
+        timerMode === "break" &&
+        showBreakParking &&
+        breakParkingData.totalTasks + breakParkingData.totalIdeas > 0;
+      const w = hasBreakParking ? 345 : DEFAULT_WINDOW_SIZES.timer.width;
+      const h = hasBreakParking ? 365 : DEFAULT_WINDOW_SIZES.timer.height;
+      win.setSize(new LogicalSize(w, h));
+      setCurrentWinSize({ w, h });
     }
-  }, [page, anyModalOpen, loaded, updateStatus.kind, isMiniDock, customSizes]);
+  }, [
+    page,
+    anyModalOpen,
+    loaded,
+    updateStatus.kind,
+    isMiniDock,
+    customSizes,
+    sessionActive,
+    timerMode,
+    showBreakParking,
+    breakParkingData.totalTasks,
+    breakParkingData.totalIdeas,
+  ]);
 
   // Renk ayarları değişince kaydet
   useEffect(() => {
@@ -850,6 +1068,9 @@ export default function App() {
     currentWorkTag,
     currentWorkReason,
     currentSessionDistractions,
+    currentContext,
+    activeContextLogId,
+    contextStartedAtElapsedSec,
   ]);
 
   // Sayaç çalışırken 5 saniyede bir yedekle
@@ -892,6 +1113,12 @@ export default function App() {
             setBreakSecondsLeft(0);
             setBreakElapsedSec(rt.breakElapsedSec + prevLeft);
             setBreakOverdueSec(rt.breakOverdueSec + overflow);
+            if (rt.breakKind === "short" && rt.currentContext.trim()) {
+              setReminderBanner({
+                kind: "context",
+                text: rt.currentContext.trim(),
+              });
+            }
             playAlarmChime();
             lastAlarmPlayRef.current = now;
           }
@@ -915,6 +1142,11 @@ export default function App() {
       const finishedElapsed = Math.max(1, workElapsedSec);
       const finishedTag = currentWorkTag;
       const finishedReason = currentWorkReason;
+      const finishedCtxId = activeContextLogId;
+      const finishedCtxDelta = Math.max(
+        0,
+        finishedElapsed - contextStartedAtElapsedSec,
+      );
       const finishedStartedAt =
         workStartedAtRef.current ||
         new Date(Date.now() - finishedElapsed * 1000).toISOString();
@@ -938,6 +1170,8 @@ export default function App() {
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
       setCurrentSessionDistractions(0);
+      setActiveContextLogId(null);
+      setContextStartedAtElapsedSec(0);
       workStartedAtRef.current = null;
 
       // Otomatik molaya geç ve başlat
@@ -953,6 +1187,9 @@ export default function App() {
       breakStartedAtRef.current = finishedEndedAt;
 
       (async () => {
+        if (finishedCtxId) {
+          await finalizeContextLog(finishedCtxId, finishedCtxDelta);
+        }
         await recordWorkSession(
           finishedElapsed,
           finishedTag,
@@ -964,6 +1201,7 @@ export default function App() {
         setDayStats(await getActiveDayStats(locale));
         setWeeklySummary(await getWeeklySummary(locale));
         setTimelineSessions(await getTimelineSessions());
+        setBreakParkingData(await getParkingLotData(false));
       })();
     }
   }, [
@@ -978,6 +1216,8 @@ export default function App() {
     completedWorkCount,
     sessionShortBreakCount,
     currentPlan,
+    activeContextLogId,
+    contextStartedAtElapsedSec,
   ]);
 
   // Kutlama animasyonu ve konfeti en geç 4.2 saniye sonra kesinlikle kapanır
@@ -1090,6 +1330,155 @@ export default function App() {
     return `${m}:${s}`;
   };
 
+  const getCategoryDisplayName = (
+    cat: DistractionCategory,
+    lang: "tr" | "en" = activeLang,
+  ): string => {
+    const trObj = translations[lang];
+    switch (cat) {
+      case "impulsive_task":
+        return trObj.catImpulsiveTask;
+      case "idea":
+        return trObj.catIdea;
+      case "internal":
+        return trObj.catInternal;
+      case "external":
+        return trObj.catExternal;
+      case "escape":
+        return trObj.catEscape;
+    }
+  };
+
+  // Aktif Meşguliyet (Context) Kaydetme & Süre Muhasebesi
+  const applyNewContext = async (
+    rawText: string,
+    activeApp?: string,
+    activeWindow?: string,
+  ) => {
+    const text = rawText.trim();
+    if (!text) return;
+    const rt = runtimeStateRef.current;
+    const appSt = appStateRef.current;
+
+    if (rt.activeContextLogId && rt.sessionActive && rt.mode === "work") {
+      const delta = Math.max(
+        0,
+        appSt.work_elapsed_sec - rt.contextStartedAtElapsedSec,
+      );
+      await finalizeContextLog(rt.activeContextLogId, delta);
+    }
+
+    setCurrentContext(text);
+    const newId = await startContextLog({
+      contextText: text,
+      workTag: rt.workTag,
+      activeApp,
+      activeWindow,
+    });
+    const baseElapsed =
+      rt.sessionActive && rt.mode === "work" ? appSt.work_elapsed_sec : 0;
+    setActiveContextLogId(newId);
+    setContextStartedAtElapsedSec(baseElapsed);
+    setRecentContexts(await getRecentContexts(6));
+  };
+
+  // Hem Global Spotlight Hem Widget İçi Ortak Dikkat / Görev / Fikir İşleyici
+  const processDistractionSubmission = async (params: {
+    category: DistractionCategory;
+    reasonText: string;
+    tag?: string;
+    activeApp: string;
+    activeWindow: string;
+  }) => {
+    const rt = runtimeStateRef.current;
+    const appSt = appStateRef.current;
+    const lang = activeLangRef.current;
+    const trObj = translations[lang];
+    const catLabel = getCategoryDisplayName(params.category, lang);
+    const cleanText = params.reasonText.trim() || catLabel;
+    const effectiveCtx =
+      rt.currentContext.trim() ||
+      (rt.workTag
+        ? `${rt.workTag}${rt.workReason ? `: ${rt.workReason}` : ""}`
+        : "");
+
+    const addsPenalty = doesCategoryAddPenalty(params.category);
+    const penaltyMins = distractPenaltyRef.current;
+    let appliedPenaltySec = 0;
+
+    if (addsPenalty && rt.sessionActive && rt.mode === "work" && penaltyMins > 0) {
+      appliedPenaltySec = penaltyMins * 60;
+      setWorkSecondsLeft((prev) => prev + appliedPenaltySec);
+    }
+
+    if (rt.sessionActive) {
+      setCurrentSessionDistractions((prev) => prev + 1);
+    }
+
+    if (rt.activeContextLogId) {
+      await incrementContextDistraction(rt.activeContextLogId);
+    }
+
+    // 1: Dürtüsel Görev ve 2: Akla Gelen Fikir -> Mola Otoparkına ekleme sırasına göre kaydedilir (süre eklenmez!)
+    if (params.category === "impulsive_task" || params.category === "idea") {
+      await addParkingItem({
+        itemType: params.category === "impulsive_task" ? "task" : "idea",
+        content: cleanText,
+        activeApp: params.activeApp,
+        activeWindow: params.activeWindow,
+        contextText: effectiveCtx,
+      });
+      setBreakParkingData(await getParkingLotData(false));
+      setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+    }
+
+    await recordDistraction({
+      reason: cleanText,
+      tag: params.tag?.trim() || catLabel,
+      elapsedWorkSec: rt.sessionActive ? appSt.work_elapsed_sec : 0,
+      category: params.category,
+      activeApp: params.activeApp,
+      activeWindow: params.activeWindow,
+      contextText: effectiveCtx,
+      penaltySec: appliedPenaltySec,
+    });
+
+    // Sebebi yazdıktan sonra ekrana son kalınan meşguliyet (context) gelsin
+    setReminderBanner({
+      kind: "context",
+      text: effectiveCtx || trObj.qcContextNone,
+    });
+  };
+
+  const captureHandlerRef = useRef<(ev: CaptureSubmittedEvent) => void>(() => {});
+  captureHandlerRef.current = (ev: CaptureSubmittedEvent) => {
+    if (ev.mode === "context") {
+      applyNewContext(ev.text, ev.activeApp, ev.activeWindow).catch((err) =>
+        console.error("Meşguliyet kaydedilemedi:", err),
+      );
+    } else {
+      processDistractionSubmission({
+        category: ev.category || "internal",
+        reasonText: ev.text,
+        activeApp: ev.activeApp,
+        activeWindow: ev.activeWindow,
+      }).catch((err) => console.error("Hızlı yakalama kaydedilemedi:", err));
+    }
+  };
+
+  useEffect(() => {
+    if (!loaded) return;
+    let unlistenCapture: (() => void) | null = null;
+    listen<CaptureSubmittedEvent>("capture-submitted", (ev) => {
+      captureHandlerRef.current(ev.payload);
+    }).then((fn) => {
+      unlistenCapture = fn;
+    });
+    return () => {
+      if (unlistenCapture) unlistenCapture();
+    };
+  }, [loaded]);
+
   // ---------------------------------------------------------------------------
   // SEANS BAŞLATMA & SEANS BİTİRME (SESSION LIFECYCLE)
   // ---------------------------------------------------------------------------
@@ -1124,6 +1513,16 @@ export default function App() {
 
     workStartedAtRef.current = nowIso;
     breakStartedAtRef.current = null;
+    setContextStartedAtElapsedSec(0);
+    if (currentContext.trim()) {
+      const cId = await startContextLog({
+        contextText: currentContext.trim(),
+        workTag: currentWorkTag,
+      });
+      setActiveContextLogId(cId);
+    } else {
+      setActiveContextLogId(null);
+    }
 
     setTimerMode("work");
     setSessionActive(true);
@@ -1139,8 +1538,18 @@ export default function App() {
     setShowStopBox(false);
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
+    setShowShortBreakPrompt(false);
 
     const nowIso = new Date().toISOString();
+
+    if (activeContextLogId && timerMode === "work") {
+      await finalizeContextLog(
+        activeContextLogId,
+        Math.max(0, workElapsedSec - contextStartedAtElapsedSec),
+      );
+    }
+    setActiveContextLogId(null);
+    setContextStartedAtElapsedSec(0);
 
     // Yarım kalan çalışma veya mola varsa istatistik kaybolmasın diye kaydet
     if (timerMode === "work" && workElapsedSec >= 15) {
@@ -1207,6 +1616,10 @@ export default function App() {
     setCurrentSessionDistractions(0);
     setCompletedWorkCount(0);
     setSessionShortBreakCount(0);
+    setCurrentContext("");
+    setActiveContextLogId(null);
+    setContextStartedAtElapsedSec(0);
+    setReminderBanner(null);
     workStartedAtRef.current = null;
     breakStartedAtRef.current = null;
 
@@ -1216,18 +1629,20 @@ export default function App() {
     setDayStats(freshStats);
     setWeeklySummary(await getWeeklySummary(locale));
     setTimelineSessions(await getTimelineSessions(freshStats.dayId));
+    setBreakParkingData(await getParkingLotData(false));
     setPage("menu");
   };
 
   // ---------------------------------------------------------------------------
-  // DİKKAT DAĞILMASI İŞLEMLERİ
+  // DİKKAT DAĞILMASI İŞLEMLERİ (5 KATEGORİ + AÇIK SEKME + SON KALINAN CONTEXT)
   // ---------------------------------------------------------------------------
   const handleDistractedClick = async () => {
     if (!sessionActive) return;
-    if (distractPenaltyMins > 0) {
-      setWorkSecondsLeft((prev) => prev + distractPenaltyMins * 60);
-    }
-    setCurrentSessionDistractions((prev) => prev + 1);
+
+    const fg = await invoke<{ appName: string; windowTitle: string }>(
+      "get_last_active_window",
+    ).catch(() => ({ appName: "", windowTitle: "" }));
+    setDetectedActiveApp(fg);
 
     const loadedTags = await getTags("distraction", t.defaultDistractionTags);
     setDistractTags(loadedTags);
@@ -1237,7 +1652,7 @@ export default function App() {
     const prevReasons = await getPreviousReasons("distraction", initialTag);
     setDistractPreviousReasons(prevReasons);
     setDistractReasonText("");
-    setDistractTrigger("internal");
+    setDistractCategory("internal");
     setTagForm(null);
     setShowDistractBox(true);
   };
@@ -1249,13 +1664,18 @@ export default function App() {
   };
 
   const submitDistraction = async () => {
-    const reason = distractReasonText.trim() || selectedDistractTag;
-    await recordDistraction(
-      reason,
-      selectedDistractTag,
-      workElapsedSec,
-      distractTrigger,
-    );
+    const fallbackLabel =
+      distractCategory === "impulsive_task" || distractCategory === "idea"
+        ? getCategoryDisplayName(distractCategory)
+        : selectedDistractTag;
+    const reason = distractReasonText.trim() || fallbackLabel;
+    await processDistractionSubmission({
+      category: distractCategory,
+      reasonText: reason,
+      tag: selectedDistractTag,
+      activeApp: detectedActiveApp.appName,
+      activeWindow: detectedActiveApp.windowTitle,
+    });
     setShowDistractBox(false);
     setDistractReasonText("");
     setIsEditingDistractTags(false);
@@ -1313,6 +1733,14 @@ export default function App() {
   };
 
   const submitEnding = async (withTag = true) => {
+    if (activeContextLogId) {
+      await finalizeContextLog(
+        activeContextLogId,
+        Math.max(0, workElapsedSec - contextStartedAtElapsedSec),
+      );
+      setActiveContextLogId(null);
+      setContextStartedAtElapsedSec(0);
+    }
     if (workElapsedSec >= 15) {
       const endTag = withTag ? selectedEndingTag : t.other;
       const endReason = withTag
@@ -1357,8 +1785,30 @@ export default function App() {
     await getCurrentWindow().setAlwaysOnTop(next).catch(() => {});
   };
 
-  const handleTakeShortBreak = async () => {
+  const handleTakeShortBreak = () => {
     if (!sessionActive) return;
+    setShortBreakDraft(currentContext || "");
+    setShowShortBreakPrompt(true);
+  };
+
+  const confirmStartShortBreak = async () => {
+    if (!sessionActive) return;
+    const chosenContext = shortBreakDraft.trim() || currentContext.trim();
+    setShowShortBreakPrompt(false);
+
+    if (activeContextLogId) {
+      await finalizeContextLog(
+        activeContextLogId,
+        Math.max(0, workElapsedSec - contextStartedAtElapsedSec),
+      );
+      setActiveContextLogId(null);
+    }
+
+    if (chosenContext) {
+      setCurrentContext(chosenContext);
+      setRecentContexts(await getRecentContexts(6));
+    }
+
     setSavedWorkSecondsLeft(workSecondsLeft);
     setSavedWorkElapsedSec(workElapsedSec);
     const nextShort = sessionShortBreakCount + 1;
@@ -1499,10 +1949,32 @@ export default function App() {
     if (breakKind === "short") {
       setWorkSecondsLeft(savedWorkSecondsLeft);
       setWorkElapsedSec(savedWorkElapsedSec);
+      setContextStartedAtElapsedSec(savedWorkElapsedSec);
+      if (currentContext.trim()) {
+        setReminderBanner({
+          kind: "context",
+          text: currentContext.trim(),
+        });
+      }
+      if (currentContext.trim() && autoRunWork) {
+        const cId = await startContextLog({
+          contextText: currentContext.trim(),
+          workTag: currentWorkTag,
+        });
+        setActiveContextLogId(cId);
+      }
     } else {
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
+      setContextStartedAtElapsedSec(0);
       workStartedAtRef.current = autoRunWork ? new Date().toISOString() : null;
+      if (currentContext.trim() && autoRunWork) {
+        const cId = await startContextLog({
+          contextText: currentContext.trim(),
+          workTag: currentWorkTag,
+        });
+        setActiveContextLogId(cId);
+      }
     }
 
     setTimerMode("work");
@@ -1706,6 +2178,172 @@ export default function App() {
     );
   };
 
+  // Mola Otoparkı & Özet Otoparkı Ortak Render Yardımcısı (Görevler Ekleme Sırasıyla + Fikirler Önemli/Önemsiz)
+  const renderParkingItemTooltip = (item: ParkingItem): string => {
+    const parts: string[] = [];
+    if (item.context_text) {
+      parts.push(`🎯 ${item.context_text}`);
+    }
+    if (item.active_app || item.active_window) {
+      parts.push(
+        `🌐 ${item.active_app || ""}${
+          item.active_window ? ` — ${item.active_window}` : ""
+        }`,
+      );
+    }
+    return parts.join(" • ");
+  };
+
+  const renderParkingLotContent = (
+    data: ParkingLotData,
+    isBreakView: boolean,
+  ) => {
+    const renderTaskRow = (item: ParkingItem, isDone: boolean) => (
+      <div
+        key={item.id}
+        className="parking-todo-row"
+        title={renderParkingItemTooltip(item)}
+      >
+        <label className="parking-todo-left">
+          <input
+            type="checkbox"
+            checked={isDone}
+            onChange={() => handleToggleParkingTask(item.id, !isDone)}
+          />
+          <span className={`parking-todo-text ${isDone ? "done" : ""}`}>
+            {item.content}
+          </span>
+        </label>
+        <button
+          type="button"
+          className="tag-icon-btn del-btn"
+          onClick={() => handleDeleteParkingEntry(item.id)}
+          title={t.cancel}
+        >
+          ✕
+        </button>
+      </div>
+    );
+
+    const renderIdeaRow = (item: ParkingItem) => (
+      <div
+        key={item.id}
+        className="parking-idea-row"
+        title={renderParkingItemTooltip(item)}
+      >
+        <span className="parking-todo-text">{item.content}</span>
+        <div className="parking-idea-actions">
+          <button
+            type="button"
+            className={`idea-rate-btn ${
+              item.status === "important" ? "active-imp" : ""
+            }`}
+            onClick={() =>
+              handleRateParkingIdea(
+                item.id,
+                item.status === "important" ? "unrated" : "important",
+              )
+            }
+          >
+            {t.parkingMarkImportant}
+          </button>
+          <button
+            type="button"
+            className={`idea-rate-btn ${
+              item.status === "unimportant" ? "active-unimp" : ""
+            }`}
+            onClick={() =>
+              handleRateParkingIdea(
+                item.id,
+                item.status === "unimportant" ? "unrated" : "unimportant",
+              )
+            }
+          >
+            {t.parkingMarkUnimportant}
+          </button>
+          <button
+            type="button"
+            className="tag-icon-btn del-btn"
+            onClick={() => handleDeleteParkingEntry(item.id)}
+            title={t.cancel}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    );
+
+    return (
+      <>
+        {isBreakView && (
+          <div className="parking-banner-title">
+            {t.parkingBreakBannerTitle}
+          </div>
+        )}
+
+        {data.totalTasks === 0 && data.totalIdeas === 0 ? (
+          <div
+            style={{
+              fontSize: "9.5px",
+              color: "#a1a1aa",
+              padding: "4px 2px",
+              textAlign: "center",
+            }}
+          >
+            {t.parkingEmpty}
+          </div>
+        ) : (
+          <>
+            {data.pendingTasks.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingPendingTasks} ({data.pendingTasks.length})
+                </div>
+                {data.pendingTasks.map((it) => renderTaskRow(it, false))}
+              </>
+            )}
+
+            {data.doneTasks.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingDoneTasks} ({data.doneTasks.length})
+                </div>
+                {data.doneTasks.map((it) => renderTaskRow(it, true))}
+              </>
+            )}
+
+            {data.unratedIdeas.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingUnratedIdeas} ({data.unratedIdeas.length})
+                </div>
+                {data.unratedIdeas.map((it) => renderIdeaRow(it))}
+              </>
+            )}
+
+            {data.importantIdeas.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingImportantIdeas} ({data.importantIdeas.length})
+                </div>
+                {data.importantIdeas.map((it) => renderIdeaRow(it))}
+              </>
+            )}
+
+            {data.unimportantIdeas.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingUnimportantIdeas} ({data.unimportantIdeas.length})
+                </div>
+                {data.unimportantIdeas.map((it) => renderIdeaRow(it))}
+              </>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // MENÜ, AYARLAR VE ÖZET SAYFASI GEÇİŞLERİ
   // ---------------------------------------------------------------------------
@@ -1716,6 +2354,7 @@ export default function App() {
     setShowStopBox(false);
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
+    setShowShortBreakPrompt(false);
     setTagForm(null);
     if (sessionActive) {
       setIsRunning(true);
@@ -1735,12 +2374,18 @@ export default function App() {
     const reasonsData = await getSummaryReasonsData(freqOnlyToday);
     const timeline = await getTimelineSessions();
     const insights = await getAdhdInsights(freqOnlyToday);
+    const pData = await getParkingLotData(freqOnlyToday);
+    const cStats = await getContextStatsSummary(freqOnlyToday);
+    const aStats = await getAppDistractionSummary(freqOnlyToday);
 
     setSummaryDays(days);
     setWeeklySummary(weekly);
     setSummaryReasonsData(reasonsData);
     setTimelineSessions(timeline);
     setAdhdInsights(insights);
+    setSummaryParkingData(pData);
+    setContextStats(cStats);
+    setAppDistractions(aStats);
     setHoveredDay(days[days.length - 1] ?? null);
     const todayWeekDay =
       weekly.days.find((d) => d.is_today) ??
@@ -1753,6 +2398,7 @@ export default function App() {
 
   const openSettings = () => {
     setPlanDropdownOpen(false);
+    setRecordingShortcutFor(null);
     setPage("settings");
   };
 
@@ -1761,6 +2407,53 @@ export default function App() {
     setFreqOnlyToday(nextVal);
     setSummaryReasonsData(await getSummaryReasonsData(nextVal));
     setAdhdInsights(await getAdhdInsights(nextVal));
+    setSummaryParkingData(await getParkingLotData(nextVal));
+    setContextStats(await getContextStatsSummary(nextVal));
+    setAppDistractions(await getAppDistractionSummary(nextVal));
+  };
+
+  // Mola Otoparkı & Özet Otoparkı Etkileşimleri (Veritabanına Ekleme Sırasıyla Kaydedilir)
+  const refreshParkingViews = async () => {
+    setBreakParkingData(await getParkingLotData(false));
+    setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+  };
+
+  const handleToggleParkingTask = async (id: number, done: boolean) => {
+    await toggleParkingTaskDone(id, done);
+    await refreshParkingViews();
+  };
+
+  const handleRateParkingIdea = async (
+    id: number,
+    rating: "important" | "unimportant" | "unrated",
+  ) => {
+    await rateParkingIdea(id, rating);
+    await refreshParkingViews();
+  };
+
+  const handleDeleteParkingEntry = async (id: number) => {
+    await deleteParkingItem(id);
+    await refreshParkingViews();
+  };
+
+  // Global Kısayol Kaydetme & Sıfırlama
+  const handleApplyShortcuts = async (next: GlobalShortcutSettings) => {
+    setShortcuts(next);
+    await saveGlobalShortcuts(next);
+    const status = await invoke<ShortcutStatus>("update_global_shortcuts", {
+      distractionShortcut: next.distractionShortcut,
+      contextShortcut: next.contextShortcut,
+    }).catch(() => null);
+    if (status) setShortcutStatus(status);
+  };
+
+  const handleResetShortcuts = async () => {
+    setRecordingShortcutFor(null);
+    await handleApplyShortcuts({ ...DEFAULT_SHORTCUTS });
+  };
+
+  const openQuickCaptureFromUi = (mode: "distraction" | "context") => {
+    invoke("open_quick_capture_manual", { mode }).catch(() => {});
   };
 
   const toggleAccordionTag = (tagName: string) => {
@@ -1789,6 +2482,15 @@ export default function App() {
     setCurrentSessionDistractions(0);
     setCompletedWorkCount(0);
     setSessionShortBreakCount(0);
+    setCurrentContext("");
+    setActiveContextLogId(null);
+    setContextStartedAtElapsedSec(0);
+    setReminderBanner(null);
+    setBreakParkingData(EMPTY_PARKING);
+    setSummaryParkingData(EMPTY_PARKING);
+    setContextStats([]);
+    setAppDistractions([]);
+    setRecentContexts([]);
     workStartedAtRef.current = null;
     breakStartedAtRef.current = null;
 
@@ -2019,10 +2721,19 @@ export default function App() {
     );
   }
 
+  const breakParkingTotalCount =
+    breakParkingData.totalTasks + breakParkingData.totalIdeas;
+  const hasBreakParkingView =
+    page === "timer" &&
+    sessionActive &&
+    timerMode === "break" &&
+    showBreakParking &&
+    breakParkingTotalCount > 0;
+
   return (
     <div
       className={`widget-shell ${
-        page !== "timer" || anyModalOpen ? "solid-bg" : ""
+        page !== "timer" || anyModalOpen || hasBreakParkingView ? "solid-bg" : ""
       } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${modeClass} ${
         isModeSwitching ? "mode-switching" : ""
       } ${isCelebrating ? "celebrating-shell" : ""} ${
@@ -2065,9 +2776,76 @@ export default function App() {
       )}
 
       {/* =====================================================================
-          ORTAK TAG & AÇIKLAMA DİYALOGLARI (Konu, Dağılma, Erken Bitirme, Gecikme)
+          ORTAK TAG & AÇIKLAMA DİYALOGLARI (Kısa Mola Notu, Konu, Dağılma, Erken Bitirme, Gecikme)
          ===================================================================== */}
-      {showWorkTopicBox ? (
+      {showShortBreakPrompt ? (
+        <div className="stop-box">
+          <div className="stop-box-header">
+            <span className="stop-box-title">{t.shortBreakPromptTitle}</span>
+          </div>
+          <div className="stop-box-hint">{t.shortBreakPromptHint}</div>
+
+          {(currentContext || recentContexts.length > 0) && (
+            <div className="previous-reasons-box">
+              <div className="previous-reasons-chips">
+                {currentContext && (
+                  <button
+                    type="button"
+                    className={`reason-suggestion-chip ${
+                      shortBreakDraft === currentContext ? "selected" : ""
+                    }`}
+                    onClick={() => setShortBreakDraft(currentContext)}
+                  >
+                    🎯 {currentContext}
+                  </button>
+                )}
+                {recentContexts
+                  .filter((rc) => rc !== currentContext)
+                  .slice(0, 4)
+                  .map((rc) => (
+                    <button
+                      key={rc}
+                      type="button"
+                      className={`reason-suggestion-chip ${
+                        shortBreakDraft === rc ? "selected" : ""
+                      }`}
+                      onClick={() => setShortBreakDraft(rc)}
+                    >
+                      {rc}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <div className="new-reason-row">
+            <textarea
+              className="distract-textarea"
+              rows={2}
+              placeholder={t.shortBreakPromptPlaceholder}
+              value={shortBreakDraft}
+              autoFocus
+              onChange={(e) => setShortBreakDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  confirmStartShortBreak();
+                }
+                if (e.key === "Escape") setShowShortBreakPrompt(false);
+              }}
+            />
+          </div>
+
+          <div className="stop-box-actions">
+            <button className="primary-btn" onClick={confirmStartShortBreak}>
+              {t.shortBreakStartBtn}
+            </button>
+            <button onClick={() => setShowShortBreakPrompt(false)}>
+              {t.cancel}
+            </button>
+          </div>
+        </div>
+      ) : showWorkTopicBox ? (
         <div className="stop-box">
           <div className="stop-box-header">
             <span className="stop-box-title">{t.whatAreYouWorkingOn}</span>
@@ -2211,28 +2989,60 @@ export default function App() {
 
           {renderInlineTagForm("distraction")}
 
-          {/* İçsel Dürtü vs Dışsal Etken Seçici */}
-          <div className="trigger-toggle-row">
-            <button
-              type="button"
-              className={`trigger-btn ${
-                distractTrigger === "internal" ? "active-internal" : ""
+          {/* Son Kalınan Context & Son Açık Uygulama / Sekme Şeridi */}
+          <div className="active-app-strip">
+            <div
+              className="active-app-strip-row"
+              title={`${t.qcCurrentContextLabel}: ${
+                currentContext || fullTopicLabel
               }`}
-              onClick={() => setDistractTrigger("internal")}
-              title={t.triggerInternalTooltip}
             >
-              {t.triggerInternal}
-            </button>
-            <button
-              type="button"
-              className={`trigger-btn ${
-                distractTrigger === "external" ? "active-external" : ""
-              }`}
-              onClick={() => setDistractTrigger("external")}
-              title={t.triggerExternalTooltip}
-            >
-              {t.triggerExternal}
-            </button>
+              🎯 <b>{t.qcCurrentContextLabel}:</b>{" "}
+              {currentContext || fullTopicLabel}
+            </div>
+            {(detectedActiveApp.appName || detectedActiveApp.windowTitle) && (
+              <div
+                className="active-app-strip-row"
+                title={`${detectedActiveApp.appName}${
+                  detectedActiveApp.windowTitle
+                    ? ` — ${detectedActiveApp.windowTitle}`
+                    : ""
+                }`}
+              >
+                🌐 <b>{t.qcActiveTabLabel}:</b> {detectedActiveApp.appName}
+                {detectedActiveApp.windowTitle
+                  ? ` — ${detectedActiveApp.windowTitle}`
+                  : ""}
+              </div>
+            )}
+          </div>
+
+          {/* 5 Kategori Seçici (1·G Dürtüsel Görev, 2·F Fikir -> +0dk Otopark | 3·İ, 4·D, 5·Z -> Ceza Süresi) */}
+          <div className="cat5-grid">
+            {DISTRACT_CATEGORIES.map((cat) => {
+              const isSel = distractCategory === cat;
+              const addsPen = doesCategoryAddPenalty(cat);
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  className={`cat5-btn ${isSel ? "active" : ""} ${
+                    addsPen ? "has-pen" : "zero-pen"
+                  }`}
+                  onClick={() => setDistractCategory(cat)}
+                  title={`${t.catKeyHints[cat]} ${getCategoryDisplayName(cat)} (${
+                    addsPen
+                      ? t.addsPenaltyBadge(distractPenaltyMins)
+                      : t.noPenaltyParkingBadge
+                  })`}
+                >
+                  <span className="cat5-key">{t.catKeyHints[cat]}</span>
+                  <span className="cat5-lbl">
+                    {getCategoryDisplayName(cat)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="section-subhead">{t.selectTagHint}</div>
@@ -2296,11 +3106,30 @@ export default function App() {
             <textarea
               className="distract-textarea"
               rows={2}
-              placeholder={t.distractExplanationPlaceholder}
+              placeholder={t.qcInputPlaceholders[distractCategory]}
               value={distractReasonText}
               autoFocus
               onChange={(e) => setDistractReasonText(e.target.value)}
               onKeyDown={(e) => {
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  const idx = DISTRACT_CATEGORIES.indexOf(distractCategory);
+                  const next =
+                    DISTRACT_CATEGORIES[
+                      (idx +
+                        (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
+                        DISTRACT_CATEGORIES.length
+                    ];
+                  setDistractCategory(next);
+                  return;
+                }
+                if (e.altKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+                  e.preventDefault();
+                  setDistractCategory(
+                    DISTRACT_CATEGORIES[Number(e.key) - 1],
+                  );
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   submitDistraction();
@@ -2309,7 +3138,9 @@ export default function App() {
               }}
             />
             <button className="primary-btn" onClick={submitDistraction}>
-              {t.saveAndAddMin(distractPenaltyMins)}
+              {doesCategoryAddPenalty(distractCategory)
+                ? t.saveAndAddMin(distractPenaltyMins)
+                : `${t.feedbackSaveBtn} (${t.noPenaltyParkingBadge})`}
             </button>
           </div>
 
@@ -2575,7 +3406,11 @@ export default function App() {
              ================================================================= */}
           {page === "timer" && sessionActive && (
             <>
-              <div className="top-bar hover-reveal">
+              <div
+                className={
+                  hasBreakParkingView ? "top-bar" : "top-bar hover-reveal"
+                }
+              >
                 <div className="top-bar-left">
                   {timerMode === "work" ? (
                     <>
@@ -2592,6 +3427,17 @@ export default function App() {
                         title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
                       >
                         🏷️ {currentWorkTag || t.selectWorkTopic}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="context-badge"
+                        onClick={() => openQuickCaptureFromUi("context")}
+                        title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
+                          currentContext || t.qcContextNone
+                        }`}
+                      >
+                        🎯 {currentContext || t.setContextBadgePlaceholder}
                       </button>
 
                       <span
@@ -2655,6 +3501,16 @@ export default function App() {
                           currentPlan.longBreakInterval,
                         )}
                       </span>
+                      {breakParkingTotalCount > 0 && (
+                        <button
+                          type="button"
+                          className="context-badge"
+                          onClick={() => setShowBreakParking((p) => !p)}
+                          title={t.parkingBreakBannerTitle}
+                        >
+                          {t.parkingToggleBtn(breakParkingTotalCount)}
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -2705,10 +3561,39 @@ export default function App() {
                     {t.resumeHint(Math.floor(workElapsedSec / 60))}
                   </div>
                 )}
+
+                {reminderBanner && (
+                  <div
+                    className="reminder-banner no-drag"
+                    title={`${t.contextReminderPrefix} ${reminderBanner.text}`}
+                  >
+                    <span className="reminder-banner-text">
+                      {t.contextReminderPrefix} <b>{reminderBanner.text}</b>
+                    </span>
+                    <button
+                      type="button"
+                      className="tag-icon-btn"
+                      onClick={() => setReminderBanner(null)}
+                      title={t.cancel}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
               </div>
 
+              {hasBreakParkingView && (
+                <div className="parking-panel no-drag">
+                  {renderParkingLotContent(breakParkingData, true)}
+                </div>
+              )}
+
               {timerMode === "break" ? (
-                <div className="btn-row hover-reveal">
+                <div
+                  className={
+                    hasBreakParkingView ? "btn-row" : "btn-row hover-reveal"
+                  }
+                >
                   <button
                     className="primary-btn"
                     onClick={handleStartWorkFromBreak}
@@ -2984,14 +3869,35 @@ export default function App() {
                 </div>
 
                 <div className="plan-meta-row">
-                  <button
-                    type="button"
-                    className="work-topic-badge menu-topic"
-                    onClick={handleOpenWorkTopicBox}
-                    title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      minWidth: 0,
+                      flex: 1,
+                    }}
                   >
-                    🏷️ {fullTopicLabel}
-                  </button>
+                    <button
+                      type="button"
+                      className="work-topic-badge menu-topic"
+                      onClick={handleOpenWorkTopicBox}
+                      title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
+                    >
+                      🏷️ {fullTopicLabel}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="context-badge"
+                      onClick={() => openQuickCaptureFromUi("context")}
+                      title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
+                        currentContext || t.qcContextNone
+                      }`}
+                    >
+                      🎯 {currentContext || t.setContextBadgePlaceholder}
+                    </button>
+                  </div>
 
                   <div className="plan-chips-row">
                     <span
@@ -3135,6 +4041,150 @@ export default function App() {
                       ? "Kapalı"
                       : "Disabled"}
                 </button>
+              </div>
+
+              {/* GLOBAL KISAYOLLAR (EKRAN ORTASINDA HIZLI TEK SATIR INPUT) */}
+              <div className="settings-section no-drag">
+                <div
+                  className="settings-label"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>{t.shortcutsSectionTitle}</span>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    style={{ fontSize: "9px", padding: "2px 6px" }}
+                    onClick={handleResetShortcuts}
+                  >
+                    {t.shortcutResetBtn}
+                  </button>
+                </div>
+
+                <div className="shortcut-setting-row">
+                  <span
+                    className="shortcut-lbl"
+                    title={t.shortcutDistractLabel}
+                  >
+                    {t.shortcutDistractLabel}
+                  </span>
+                  <button
+                    type="button"
+                    className={`shortcut-record-btn ${
+                      recordingShortcutFor === "distraction" ? "recording" : ""
+                    }`}
+                    onClick={() =>
+                      setRecordingShortcutFor(
+                        recordingShortcutFor === "distraction"
+                          ? null
+                          : "distraction",
+                      )
+                    }
+                    onBlur={() =>
+                      setRecordingShortcutFor((cur) =>
+                        cur === "distraction" ? null : cur,
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (recordingShortcutFor !== "distraction") return;
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setRecordingShortcutFor(null);
+                        return;
+                      }
+                      const combo = formatKeyCombo(e);
+                      if (combo) {
+                        e.preventDefault();
+                        setRecordingShortcutFor(null);
+                        handleApplyShortcuts({
+                          ...shortcuts,
+                          distractionShortcut: combo,
+                        });
+                      }
+                    }}
+                    title={t.shortcutRecordPressKeys}
+                  >
+                    {recordingShortcutFor === "distraction"
+                      ? "..."
+                      : shortcuts.distractionShortcut}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => openQuickCaptureFromUi("distraction")}
+                  >
+                    {t.shortcutTestBtn}
+                  </button>
+                </div>
+
+                <div className="shortcut-setting-row">
+                  <span className="shortcut-lbl" title={t.shortcutContextLabel}>
+                    {t.shortcutContextLabel}
+                  </span>
+                  <button
+                    type="button"
+                    className={`shortcut-record-btn ${
+                      recordingShortcutFor === "context" ? "recording" : ""
+                    }`}
+                    onClick={() =>
+                      setRecordingShortcutFor(
+                        recordingShortcutFor === "context" ? null : "context",
+                      )
+                    }
+                    onBlur={() =>
+                      setRecordingShortcutFor((cur) =>
+                        cur === "context" ? null : cur,
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (recordingShortcutFor !== "context") return;
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setRecordingShortcutFor(null);
+                        return;
+                      }
+                      const combo = formatKeyCombo(e);
+                      if (combo) {
+                        e.preventDefault();
+                        setRecordingShortcutFor(null);
+                        handleApplyShortcuts({
+                          ...shortcuts,
+                          contextShortcut: combo,
+                        });
+                      }
+                    }}
+                    title={t.shortcutRecordPressKeys}
+                  >
+                    {recordingShortcutFor === "context"
+                      ? "..."
+                      : shortcuts.contextShortcut}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => openQuickCaptureFromUi("context")}
+                  >
+                    {t.shortcutTestBtn}
+                  </button>
+                </div>
+
+                {recordingShortcutFor && (
+                  <div style={{ fontSize: "9px", color: "#fbbf24" }}>
+                    {t.shortcutRecordPressKeys}
+                  </div>
+                )}
+
+                {shortcutStatus &&
+                  (!shortcutStatus.distractionOk ||
+                    !shortcutStatus.contextOk) && (
+                    <div style={{ fontSize: "9px", color: "#fca5a5" }}>
+                      {shortcutStatus.distractionError ||
+                        shortcutStatus.contextError}
+                    </div>
+                  )}
               </div>
 
               {/* ÇALIŞMA PLANLARI & MOLA AYARLARI */}
@@ -3613,6 +4663,16 @@ export default function App() {
                       {t.viewRecentDays}
                     </button>
                     <button
+                      className={`tab-btn ${summaryTab === "parking" ? "active" : ""}`}
+                      onClick={() => setSummaryTab("parking")}
+                      title={`${t.parkingTab} (${
+                        summaryParkingData.totalTasks +
+                        summaryParkingData.totalIdeas
+                      })`}
+                    >
+                      {t.parkingTab}
+                    </button>
+                    <button
                       className={`tab-btn ${summaryTab === "adhd" ? "active" : ""}`}
                       onClick={() => setSummaryTab("adhd")}
                     >
@@ -4032,6 +5092,35 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* MOLA & FİKİR OTOPARKI GÖRÜNÜMÜ (Ekleme Sırasıyla Görevler & Önemli/Önemsiz Fikirler) */}
+                  {summaryTab === "parking" && (
+                    <div className="parking-panel summary-parking no-drag">
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span className="parking-banner-title">
+                          {t.parkingTab} (
+                          {summaryParkingData.totalTasks +
+                            summaryParkingData.totalIdeas}
+                          )
+                        </span>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={toggleFreqFilter}
+                          title={freqOnlyToday ? t.filterToday : t.filterAll}
+                        >
+                          {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
+                        </button>
+                      </div>
+                      {renderParkingLotContent(summaryParkingData, false)}
+                    </div>
+                  )}
+
                   {/* KOMPAKT KATEGORİ KIRILIMI (Üzerine gelince detaylı açıklama) */}
                   <div className="summary-subtabs">
                     <button
@@ -4043,12 +5132,23 @@ export default function App() {
                       {summaryReasonsData?.totalWorkSubjects ?? 0})
                     </button>
                     <button
-                      className={`subtab-btn ${summaryReasonsTab === "overtime" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("overtime")}
-                      title={t.breakOvertimeTab}
+                      className={`subtab-btn ${summaryReasonsTab === "contexts" ? "active" : ""}`}
+                      onClick={() => setSummaryReasonsTab("contexts")}
+                      title={t.contextFullTab}
                     >
-                      ⏰ {t.breakOvertimeShortTab} (
-                      {summaryReasonsData?.totalBreakOvertimes ?? 0})
+                      🎯 {t.contextShortTab} ({contextStats.length})
+                    </button>
+                    <button
+                      className={`subtab-btn ${summaryReasonsTab === "apps" ? "active" : ""}`}
+                      onClick={() => setSummaryReasonsTab("apps")}
+                      title={t.appsFullTab}
+                    >
+                      🌐 {t.appsShortTab} (
+                      {appDistractions.reduce(
+                        (acc, g) => acc + g.totalCount,
+                        0,
+                      )}
+                      )
                     </button>
                     <button
                       className={`subtab-btn ${summaryReasonsTab === "distractions" ? "active" : ""}`}
@@ -4057,6 +5157,14 @@ export default function App() {
                     >
                       ⚡ {t.distractionShortTab} (
                       {summaryReasonsData?.totalDistractions ?? 0})
+                    </button>
+                    <button
+                      className={`subtab-btn ${summaryReasonsTab === "overtime" ? "active" : ""}`}
+                      onClick={() => setSummaryReasonsTab("overtime")}
+                      title={t.breakOvertimeTab}
+                    >
+                      ⏰ {t.breakOvertimeShortTab} (
+                      {summaryReasonsData?.totalBreakOvertimes ?? 0})
                     </button>
                     <button
                       className={`subtab-btn ${summaryReasonsTab === "endings" ? "active" : ""}`}
@@ -4077,6 +5185,160 @@ export default function App() {
 
                   <div className="accordion-list">
                     {(() => {
+                      if (summaryReasonsTab === "contexts") {
+                        if (contextStats.length === 0) {
+                          return (
+                            <div
+                              style={{
+                                fontSize: "10px",
+                                color: "#a1a1aa",
+                                padding: "6px",
+                              }}
+                            >
+                              {t.noContextStats}
+                            </div>
+                          );
+                        }
+                        return contextStats.map((ctx) => {
+                          const expandKey = `ctx:${ctx.contextText}`;
+                          const isExpanded = !!expandedTags[expandKey];
+                          return (
+                            <div
+                              key={ctx.contextText}
+                              className="accordion-card"
+                            >
+                              <div
+                                className="accordion-header"
+                                onClick={() => toggleAccordionTag(expandKey)}
+                              >
+                                <div
+                                  className="accordion-title"
+                                  style={{ minWidth: 0, overflow: "hidden" }}
+                                >
+                                  <span className="accordion-arrow">
+                                    {isExpanded ? "▼" : "▶"}
+                                  </span>
+                                  <span
+                                    style={{
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    🎯 {ctx.contextText}
+                                  </span>
+                                </div>
+                                <span
+                                  className="accordion-count"
+                                  style={{ flexShrink: 0 }}
+                                >
+                                  {t.formatDuration(ctx.totalDurationSec)} • ⚡
+                                  {ctx.distractionCount}
+                                </span>
+                              </div>
+                              {isExpanded && (
+                                <div className="accordion-body">
+                                  {ctx.lastWorkTag && (
+                                    <div className="explanation-row">
+                                      <span className="explanation-text">
+                                        💼 {ctx.lastWorkTag}
+                                      </span>
+                                      <span className="explanation-badge">
+                                        {ctx.entryCount}x
+                                      </span>
+                                    </div>
+                                  )}
+                                  {ctx.topApp && (
+                                    <div className="explanation-row">
+                                      <span className="explanation-text">
+                                        🌐 {ctx.topApp}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      }
+
+                      if (summaryReasonsTab === "apps") {
+                        const totalAppDist = appDistractions.reduce(
+                          (acc, g) => acc + g.totalCount,
+                          0,
+                        );
+                        if (appDistractions.length === 0) {
+                          return (
+                            <div
+                              style={{
+                                fontSize: "10px",
+                                color: "#a1a1aa",
+                                padding: "6px",
+                              }}
+                            >
+                              {t.noAppDistractions}
+                            </div>
+                          );
+                        }
+                        return appDistractions.map((grp) => {
+                          const expandKey = `app:${grp.appName}`;
+                          const isExpanded = !!expandedTags[expandKey];
+                          const pct =
+                            totalAppDist > 0
+                              ? Math.round(
+                                  (grp.totalCount / totalAppDist) * 100,
+                                )
+                              : 0;
+                          return (
+                            <div key={grp.appName} className="accordion-card">
+                              <div
+                                className="accordion-header"
+                                onClick={() => toggleAccordionTag(expandKey)}
+                              >
+                                <div className="accordion-title">
+                                  <span className="accordion-arrow">
+                                    {isExpanded ? "▼" : "▶"}
+                                  </span>
+                                  <span>🌐 {grp.appName}</span>
+                                </div>
+                                <span className="accordion-count">
+                                  {t.timesCount(grp.totalCount, pct)}
+                                </span>
+                              </div>
+                              {isExpanded && (
+                                <div className="accordion-body">
+                                  {grp.details.map((d, idx) => (
+                                    <div key={idx} className="explanation-row">
+                                      <span className="explanation-text">
+                                        <span className="explanation-bullet">
+                                          •
+                                        </span>
+                                        {d.windowTitle && (
+                                          <>
+                                            <b>{d.windowTitle}</b>
+                                            {" — "}
+                                          </>
+                                        )}
+                                        <span style={{ color: "#fbbf24" }}>
+                                          [{t.catKeyHints[d.category]}]
+                                        </span>{" "}
+                                        {d.reason}
+                                        {d.contextText
+                                          ? ` (🎯 ${d.contextText})`
+                                          : ""}
+                                      </span>
+                                      <span className="explanation-badge">
+                                        {d.count}x
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      }
+
                       const activeList =
                         summaryReasonsTab === "work"
                           ? summaryReasonsData?.workTags ?? []

@@ -26,6 +26,10 @@ export interface RuntimeState {
   workTag: string;
   workReason: string;
   sessionDistractions: number;
+  currentContext: string;
+  activeContextLogId: number | null;
+  contextStartedAtElapsedSec: number;
+  shortBreakNote?: string;
 }
 
 export interface ThemeSettings {
@@ -70,6 +74,87 @@ export interface DistractionFrequency {
 
 export type TagKind = "distraction" | "ending" | "work" | "break_overtime";
 export type DistractionTrigger = "internal" | "external";
+export type DistractionCategory =
+  | "impulsive_task"
+  | "idea"
+  | "internal"
+  | "external"
+  | "escape";
+
+export function doesCategoryAddPenalty(cat: DistractionCategory): boolean {
+  // 1: Dürtüsel görev ve 2: Akla gelen fikir için ek süre eklenmez.
+  // 3: İçsel tetikleyici, 4: Dışsal tetikleyici ve 5: Zorluktan kaçış için süre eklenir.
+  return cat === "internal" || cat === "external" || cat === "escape";
+}
+
+export function categoryToTrigger(cat: DistractionCategory): DistractionTrigger {
+  return cat === "external" ? "external" : "internal";
+}
+
+export type ParkingItemType = "task" | "idea";
+export type ParkingStatus =
+  | "pending"
+  | "done"
+  | "unrated"
+  | "important"
+  | "unimportant";
+
+export interface ParkingItem {
+  id: number;
+  day_id: number;
+  item_type: ParkingItemType;
+  content: string;
+  status: ParkingStatus;
+  active_app: string | null;
+  active_window: string | null;
+  context_text: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ParkingLotData {
+  pendingTasks: ParkingItem[];
+  doneTasks: ParkingItem[];
+  unratedIdeas: ParkingItem[];
+  importantIdeas: ParkingItem[];
+  unimportantIdeas: ParkingItem[];
+  totalTasks: number;
+  totalIdeas: number;
+}
+
+export interface ContextStatItem {
+  contextText: string;
+  totalDurationSec: number;
+  entryCount: number;
+  distractionCount: number;
+  lastWorkTag: string | null;
+  topApp: string | null;
+}
+
+export interface AppDistractionDetail {
+  windowTitle: string;
+  contextText: string | null;
+  reason: string;
+  category: DistractionCategory;
+  count: number;
+}
+
+export interface AppDistractionGroup {
+  appName: string;
+  totalCount: number;
+  details: AppDistractionDetail[];
+}
+
+export interface GlobalShortcutSettings {
+  distractionShortcut: string;
+  contextShortcut: string;
+}
+
+export const DEFAULT_SHORTCUTS: GlobalShortcutSettings = {
+  distractionShortcut: "Ctrl+Shift+D",
+  contextShortcut: "Ctrl+Alt+C",
+};
+
 export type FeedbackCategory = "bug" | "feature" | "ui" | "other";
 
 export interface FeedbackItem {
@@ -320,6 +405,34 @@ async function initDb(): Promise<Database> {
       created_at TEXT NOT NULL
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS parking_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_id INTEGER NOT NULL,
+      item_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      active_app TEXT,
+      active_window TEXT,
+      context_text TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS context_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_id INTEGER NOT NULL,
+      context_text TEXT NOT NULL,
+      work_tag TEXT,
+      active_app TEXT,
+      active_window TEXT,
+      duration_sec INTEGER NOT NULL DEFAULT 0,
+      distraction_count INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    )
+  `);
 
   try {
     await db.execute("ALTER TABLE distractions ADD COLUMN elapsed_work_sec INTEGER DEFAULT 0");
@@ -329,6 +442,36 @@ async function initDb(): Promise<Database> {
 
   try {
     await db.execute("ALTER TABLE distractions ADD COLUMN trigger_type TEXT DEFAULT 'internal'");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN category TEXT DEFAULT 'internal'");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN active_app TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN active_window TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN context_text TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN penalty_sec INTEGER DEFAULT 0");
   } catch {
     // sütun zaten varsa hata yok sayılır
   }
@@ -544,7 +687,9 @@ export async function beginSessionDay(locale = "tr-TR"): Promise<ActiveDayStats>
   const day = await getOrCreateActiveDay(db, locale);
   const rows = await db.select<{ cnt: number }[]>(
     `SELECT (SELECT COUNT(id) FROM sessions WHERE day_id = $1) +
-            (SELECT COUNT(id) FROM distractions WHERE day_id = $1) AS cnt`,
+            (SELECT COUNT(id) FROM distractions WHERE day_id = $1) +
+            (SELECT COUNT(id) FROM parking_items WHERE day_id = $1) +
+            (SELECT COUNT(id) FROM context_logs WHERE day_id = $1) AS cnt`,
     [day.id],
   );
   if (Number(rows[0]?.cnt ?? 0) > 0) {
@@ -743,27 +888,76 @@ export async function getDaysSummary(): Promise<DaySummary[]> {
 // Dikkat dağılmaları
 // ---------------------------------------------------------------------------
 
+export interface RecordDistractionParams {
+  reason: string;
+  tag?: string;
+  elapsedWorkSec?: number;
+  category?: DistractionCategory;
+  activeApp?: string;
+  activeWindow?: string;
+  contextText?: string;
+  penaltySec?: number;
+}
+
 export async function recordDistraction(
-  rawReason: string,
+  rawReasonOrParams: string | RecordDistractionParams,
   rawTag?: string,
   elapsedWorkSec = 0,
   triggerType: DistractionTrigger = "internal",
 ): Promise<void> {
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
+
+  let rawReason = "";
+  let tagInput = rawTag;
+  let elapsedInput = elapsedWorkSec;
+  let category: DistractionCategory =
+    triggerType === "external" ? "external" : "internal";
+  let activeApp: string | null = null;
+  let activeWindow: string | null = null;
+  let contextText: string | null = null;
+  let penaltySec = 0;
+
+  if (typeof rawReasonOrParams === "string") {
+    rawReason = rawReasonOrParams;
+  } else {
+    rawReason = rawReasonOrParams.reason;
+    tagInput = rawReasonOrParams.tag;
+    elapsedInput = rawReasonOrParams.elapsedWorkSec ?? 0;
+    category = rawReasonOrParams.category ?? "internal";
+    activeApp = rawReasonOrParams.activeApp?.trim() || null;
+    activeWindow = rawReasonOrParams.activeWindow?.trim() || null;
+    contextText = rawReasonOrParams.contextText?.trim() || null;
+    penaltySec = Math.max(0, Math.round(Number(rawReasonOrParams.penaltySec) || 0));
+  }
+
   const trimmed = rawReason.trim();
-  const tag = (rawTag && rawTag.trim()) || "Diğer";
+  const tag = (tagInput && tagInput.trim()) || "Diğer";
   const normalized =
     trimmed.length > 0
       ? trimmed.charAt(0).toLocaleUpperCase("tr-TR") + trimmed.slice(1)
       : tag;
-  const elapsed = Math.max(0, Math.round(Number(elapsedWorkSec) || 0));
-  const trig: DistractionTrigger =
-    triggerType === "external" ? "external" : "internal";
+  const elapsed = Math.max(0, Math.round(Number(elapsedInput) || 0));
+  const trig: DistractionTrigger = categoryToTrigger(category);
 
   await db.execute(
-    "INSERT INTO distractions (day_id, reason, tag, created_at, elapsed_work_sec, trigger_type) VALUES ($1, $2, $3, $4, $5, $6)",
-    [day.id, normalized, tag, new Date().toISOString(), elapsed, trig],
+    `INSERT INTO distractions (
+       day_id, reason, tag, created_at, elapsed_work_sec, trigger_type,
+       category, active_app, active_window, context_text, penalty_sec
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      day.id,
+      normalized,
+      tag,
+      new Date().toISOString(),
+      elapsed,
+      trig,
+      category,
+      activeApp,
+      activeWindow,
+      contextText,
+      penaltySec,
+    ],
   );
 }
 
@@ -915,6 +1109,8 @@ export async function clearAllData(locale = "tr-TR"): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM sessions");
   await db.execute("DELETE FROM distractions");
+  await db.execute("DELETE FROM parking_items");
+  await db.execute("DELETE FROM context_logs");
   await db.execute("DELETE FROM study_days");
   await db.execute(
     "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
@@ -1366,17 +1562,21 @@ export async function exportAllData(): Promise<string> {
   const days = await db.select("SELECT * FROM study_days ORDER BY id ASC");
   const sessions = await db.select("SELECT * FROM sessions ORDER BY id ASC");
   const distractions = await db.select("SELECT * FROM distractions ORDER BY id ASC");
+  const parking_items = await db.select("SELECT * FROM parking_items ORDER BY id ASC");
+  const context_logs = await db.select("SELECT * FROM context_logs ORDER BY id ASC");
   const tags = await db.select("SELECT * FROM tags ORDER BY id ASC");
   const feedbacks = await db.select("SELECT * FROM feedbacks ORDER BY id DESC");
   const settings = await db.select("SELECT * FROM settings ORDER BY key ASC");
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.12",
+    version: "0.1.13",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,
     distractions,
+    parking_items,
+    context_logs,
     tags,
     feedbacks,
     settings,
@@ -1747,6 +1947,17 @@ export async function loadRuntimeState(): Promise<RuntimeState | null> {
       workTag: typeof raw.workTag === "string" ? raw.workTag : "",
       workReason: typeof raw.workReason === "string" ? raw.workReason : "",
       sessionDistractions: posInt(raw.sessionDistractions, 0),
+      currentContext:
+        typeof raw.currentContext === "string" ? raw.currentContext : "",
+      activeContextLogId:
+        typeof raw.activeContextLogId === "number" &&
+        Number.isFinite(raw.activeContextLogId) &&
+        raw.activeContextLogId > 0
+          ? Math.round(raw.activeContextLogId)
+          : null,
+      contextStartedAtElapsedSec: posInt(raw.contextStartedAtElapsedSec, 0),
+      shortBreakNote:
+        typeof raw.shortBreakNote === "string" ? raw.shortBreakNote : "",
     };
   } catch {
     return null;
@@ -1811,5 +2022,427 @@ export async function saveSessionCycleStats(
     `INSERT INTO settings (key, value) VALUES ('sessionShortBreakCount', $1)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [String(shortBreakCount)],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "Sonra Bak" Otoparkı (Parking Lot: Dürtüsel Görevler & Fikirler)
+// Ekleme sırasına göre (ORDER BY id ASC) saklanır ve ayrıştırılır.
+// ---------------------------------------------------------------------------
+
+export async function addParkingItem(params: {
+  itemType: ParkingItemType;
+  content: string;
+  activeApp?: string;
+  activeWindow?: string;
+  contextText?: string;
+}): Promise<ParkingItem | null> {
+  const trimmed = params.content.trim();
+  if (!trimmed) return null;
+  const db = await getDb();
+  const day = await getOrCreateActiveDay(db);
+  const nowIso = new Date().toISOString();
+  const status: ParkingStatus =
+    params.itemType === "task" ? "pending" : "unrated";
+  const app = params.activeApp?.trim() || null;
+  const win = params.activeWindow?.trim() || null;
+  const ctx = params.contextText?.trim() || null;
+
+  const res = await db.execute(
+    `INSERT INTO parking_items (
+       day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [day.id, params.itemType, trimmed, status, app, win, ctx, nowIso, nowIso],
+  );
+
+  return {
+    id: Number(res.lastInsertId),
+    day_id: day.id,
+    item_type: params.itemType,
+    content: trimmed,
+    status,
+    active_app: app,
+    active_window: win,
+    context_text: ctx,
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+}
+
+export async function getParkingLotData(
+  onlyToday = false,
+): Promise<ParkingLotData> {
+  const db = await getDb();
+  let rows: ParkingItem[];
+
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    rows = await db.select<ParkingItem[]>(
+      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
+       FROM parking_items
+       WHERE day_id = $1
+       ORDER BY id ASC`,
+      [day.id],
+    );
+  } else {
+    rows = await db.select<ParkingItem[]>(
+      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
+       FROM parking_items
+       ORDER BY id ASC`,
+    );
+  }
+
+  const pendingTasks: ParkingItem[] = [];
+  const doneTasks: ParkingItem[] = [];
+  const unratedIdeas: ParkingItem[] = [];
+  const importantIdeas: ParkingItem[] = [];
+  const unimportantIdeas: ParkingItem[] = [];
+
+  for (const r of rows) {
+    const item: ParkingItem = {
+      id: Number(r.id),
+      day_id: Number(r.day_id),
+      item_type: r.item_type === "idea" ? "idea" : "task",
+      content: r.content,
+      status: r.status as ParkingStatus,
+      active_app: r.active_app ?? null,
+      active_window: r.active_window ?? null,
+      context_text: r.context_text ?? null,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+    };
+
+    if (item.item_type === "task") {
+      if (item.status === "done") {
+        doneTasks.push(item);
+      } else {
+        pendingTasks.push(item);
+      }
+    } else {
+      if (item.status === "important") {
+        importantIdeas.push(item);
+      } else if (item.status === "unimportant") {
+        unimportantIdeas.push(item);
+      } else {
+        unratedIdeas.push(item);
+      }
+    }
+  }
+
+  return {
+    pendingTasks,
+    doneTasks,
+    unratedIdeas,
+    importantIdeas,
+    unimportantIdeas,
+    totalTasks: pendingTasks.length + doneTasks.length,
+    totalIdeas:
+      unratedIdeas.length + importantIdeas.length + unimportantIdeas.length,
+  };
+}
+
+export async function toggleParkingTaskDone(
+  id: number,
+  done: boolean,
+): Promise<void> {
+  const db = await getDb();
+  const status: ParkingStatus = done ? "done" : "pending";
+  await db.execute(
+    "UPDATE parking_items SET status = $1, updated_at = $2 WHERE id = $3",
+    [status, new Date().toISOString(), id],
+  );
+}
+
+export async function rateParkingIdea(
+  id: number,
+  rating: "important" | "unimportant" | "unrated",
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE parking_items SET status = $1, updated_at = $2 WHERE id = $3",
+    [rating, new Date().toISOString(), id],
+  );
+}
+
+export async function deleteParkingItem(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM parking_items WHERE id = $1", [id]);
+}
+
+// ---------------------------------------------------------------------------
+// Aktif Meşguliyet (Context) Kayıtları ve Çalışma İstatistikleri
+// ---------------------------------------------------------------------------
+
+export async function startContextLog(params: {
+  contextText: string;
+  workTag?: string;
+  activeApp?: string;
+  activeWindow?: string;
+}): Promise<number | null> {
+  const text = params.contextText.trim();
+  if (!text) return null;
+  const db = await getDb();
+  const day = await getOrCreateActiveDay(db);
+  const nowIso = new Date().toISOString();
+  const res = await db.execute(
+    `INSERT INTO context_logs (
+       day_id, context_text, work_tag, active_app, active_window, duration_sec, distraction_count, started_at
+     ) VALUES ($1, $2, $3, $4, $5, 0, 0, $6)`,
+    [
+      day.id,
+      text,
+      params.workTag?.trim() || null,
+      params.activeApp?.trim() || null,
+      params.activeWindow?.trim() || null,
+      nowIso,
+    ],
+  );
+  return Number(res.lastInsertId);
+}
+
+export async function finalizeContextLog(
+  id: number | null,
+  addDurationSec: number,
+): Promise<void> {
+  if (!id || id <= 0) return;
+  const add = Math.max(0, Math.round(Number(addDurationSec) || 0));
+  const db = await getDb();
+  await db.execute(
+    `UPDATE context_logs
+     SET duration_sec = duration_sec + $1,
+         ended_at = $2
+     WHERE id = $3`,
+    [add, new Date().toISOString(), id],
+  );
+}
+
+export async function incrementContextDistraction(
+  id: number | null,
+): Promise<void> {
+  if (!id || id <= 0) return;
+  const db = await getDb();
+  await db.execute(
+    "UPDATE context_logs SET distraction_count = distraction_count + 1 WHERE id = $1",
+    [id],
+  );
+}
+
+export async function getRecentContexts(limit = 6): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.select<{ context_text: string }[]>(
+    `SELECT context_text
+     FROM context_logs
+     WHERE context_text IS NOT NULL AND context_text != ''
+     GROUP BY context_text
+     ORDER BY MAX(id) DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return rows.map((r) => r.context_text);
+}
+
+export async function getContextStatsSummary(
+  onlyToday: boolean,
+): Promise<ContextStatItem[]> {
+  const db = await getDb();
+  const params: number[] = [];
+  let whereClause = "";
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    whereClause = "WHERE day_id = $1";
+    params.push(day.id);
+  }
+
+  const rows = await db.select<{
+    context_text: string;
+    work_tag: string | null;
+    active_app: string | null;
+    duration_sec: number;
+    distraction_count: number;
+  }[]>(
+    `SELECT context_text, work_tag, active_app, duration_sec, distraction_count
+     FROM context_logs
+     ${whereClause}
+     ORDER BY id ASC`,
+    params,
+  );
+
+  const map = new Map<
+    string,
+    {
+      totalDurationSec: number;
+      entryCount: number;
+      distractionCount: number;
+      lastWorkTag: string | null;
+      appCounts: Map<string, number>;
+    }
+  >();
+
+  for (const r of rows) {
+    const key = (r.context_text || "").trim();
+    if (!key) continue;
+    if (!map.has(key)) {
+      map.set(key, {
+        totalDurationSec: 0,
+        entryCount: 0,
+        distractionCount: 0,
+        lastWorkTag: null,
+        appCounts: new Map(),
+      });
+    }
+    const entry = map.get(key)!;
+    entry.totalDurationSec += Math.max(0, Number(r.duration_sec) || 0);
+    entry.entryCount += 1;
+    entry.distractionCount += Math.max(0, Number(r.distraction_count) || 0);
+    if (r.work_tag) entry.lastWorkTag = r.work_tag;
+    if (r.active_app) {
+      entry.appCounts.set(
+        r.active_app,
+        (entry.appCounts.get(r.active_app) || 0) + 1,
+      );
+    }
+  }
+
+  const out: ContextStatItem[] = [];
+  for (const [contextText, v] of map.entries()) {
+    let topApp: string | null = null;
+    let topCnt = 0;
+    for (const [app, cnt] of v.appCounts.entries()) {
+      if (cnt > topCnt) {
+        topCnt = cnt;
+        topApp = app;
+      }
+    }
+    out.push({
+      contextText,
+      totalDurationSec: v.totalDurationSec,
+      entryCount: v.entryCount,
+      distractionCount: v.distractionCount,
+      lastWorkTag: v.lastWorkTag,
+      topApp,
+    });
+  }
+
+  out.sort(
+    (a, b) =>
+      b.totalDurationSec - a.totalDurationSec || b.entryCount - a.entryCount,
+  );
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Hangi Uygulama / Açık Sekmede Dikkat Dağıldı Analitiği (Summary)
+// ---------------------------------------------------------------------------
+
+export async function getAppDistractionSummary(
+  onlyToday: boolean,
+): Promise<AppDistractionGroup[]> {
+  const db = await getDb();
+  const params: number[] = [];
+  let whereClause = "WHERE (active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != '')";
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    whereClause =
+      "WHERE day_id = $1 AND ((active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != ''))";
+    params.push(day.id);
+  }
+
+  const rows = await db.select<{
+    active_app: string | null;
+    active_window: string | null;
+    context_text: string | null;
+    reason: string;
+    category: string | null;
+  }[]>(
+    `SELECT active_app, active_window, context_text, reason, category
+     FROM distractions
+     ${whereClause}
+     ORDER BY id DESC`,
+    params,
+  );
+
+  const appMap = new Map<
+    string,
+    {
+      totalCount: number;
+      detailMap: Map<string, AppDistractionDetail>;
+    }
+  >();
+
+  for (const r of rows) {
+    const appName = (r.active_app && r.active_app.trim()) || "Uygulama";
+    const winTitle = (r.active_window && r.active_window.trim()) || appName;
+    const ctx = (r.context_text && r.context_text.trim()) || null;
+    const cat = (r.category as DistractionCategory) || "internal";
+    const reason = (r.reason && r.reason.trim()) || "";
+
+    if (!appMap.has(appName)) {
+      appMap.set(appName, { totalCount: 0, detailMap: new Map() });
+    }
+    const group = appMap.get(appName)!;
+    group.totalCount += 1;
+
+    const dKey = `${winTitle}|||${ctx || ""}|||${reason}|||${cat}`;
+    const existing = group.detailMap.get(dKey);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      group.detailMap.set(dKey, {
+        windowTitle: winTitle,
+        contextText: ctx,
+        reason,
+        category: cat,
+        count: 1,
+      });
+    }
+  }
+
+  const result: AppDistractionGroup[] = [];
+  for (const [appName, v] of appMap.entries()) {
+    const details = Array.from(v.detailMap.values()).sort(
+      (a, b) => b.count - a.count,
+    );
+    result.push({
+      appName,
+      totalCount: v.totalCount,
+      details,
+    });
+  }
+  result.sort((a, b) => b.totalCount - a.totalCount);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Global Kısayol Ayarları (Global Shortcuts)
+// ---------------------------------------------------------------------------
+
+export async function loadGlobalShortcuts(): Promise<GlobalShortcutSettings> {
+  const db = await getDb();
+  const rows = await db.select<{ key: string; value: string }[]>(
+    "SELECT key, value FROM settings WHERE key IN ('distractionShortcut', 'contextShortcut')",
+  );
+  const map = new Map(rows.map((r) => [r.key, r.value]));
+  return {
+    distractionShortcut:
+      map.get("distractionShortcut")?.trim() ||
+      DEFAULT_SHORTCUTS.distractionShortcut,
+    contextShortcut:
+      map.get("contextShortcut")?.trim() || DEFAULT_SHORTCUTS.contextShortcut,
+  };
+}
+
+export async function saveGlobalShortcuts(
+  shortcuts: GlobalShortcutSettings,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('distractionShortcut', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [shortcuts.distractionShortcut.trim()],
+  );
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('contextShortcut', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [shortcuts.contextShortcut.trim()],
   );
 }
