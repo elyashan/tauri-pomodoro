@@ -69,6 +69,37 @@ export interface DistractionFrequency {
 }
 
 export type TagKind = "distraction" | "ending" | "work" | "break_overtime";
+export type DistractionTrigger = "internal" | "external";
+export type FeedbackCategory = "bug" | "feature" | "ui" | "other";
+
+export interface FeedbackItem {
+  id: number;
+  category: FeedbackCategory;
+  message: string;
+  created_at: string;
+}
+
+export interface WindowSizePreset {
+  width: number;
+  height: number;
+}
+
+export type SizeTargetPage = "timer" | "menu" | "summary" | "settings";
+export type CustomWindowSizes = Partial<Record<SizeTargetPage, WindowSizePreset>>;
+
+export interface AdhdInsightsData {
+  avgFocusThresholdMins: number | null;
+  internalCount: number;
+  externalCount: number;
+  internalPct: number;
+  peakFocusHoursLabel: string | null;
+  mostDistractedHoursLabel: string | null;
+  avgBreakOvertimeMins: number;
+  overtimeBreakRatePct: number;
+  completionRatePct: number;
+  hyperfocusCount: number;
+  topTriggerTag: string | null;
+}
 
 export interface TagItem {
   id: number;
@@ -281,6 +312,26 @@ async function initDb(): Promise<Database> {
       created_at TEXT NOT NULL
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS feedbacks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL DEFAULT 'feature',
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN elapsed_work_sec INTEGER DEFAULT 0");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE distractions ADD COLUMN trigger_type TEXT DEFAULT 'internal'");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
 
   try {
     await db.execute("ALTER TABLE tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'distraction'");
@@ -695,6 +746,8 @@ export async function getDaysSummary(): Promise<DaySummary[]> {
 export async function recordDistraction(
   rawReason: string,
   rawTag?: string,
+  elapsedWorkSec = 0,
+  triggerType: DistractionTrigger = "internal",
 ): Promise<void> {
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
@@ -704,10 +757,13 @@ export async function recordDistraction(
     trimmed.length > 0
       ? trimmed.charAt(0).toLocaleUpperCase("tr-TR") + trimmed.slice(1)
       : tag;
+  const elapsed = Math.max(0, Math.round(Number(elapsedWorkSec) || 0));
+  const trig: DistractionTrigger =
+    triggerType === "external" ? "external" : "internal";
 
   await db.execute(
-    "INSERT INTO distractions (day_id, reason, tag, created_at) VALUES ($1, $2, $3, $4)",
-    [day.id, normalized, tag, new Date().toISOString()],
+    "INSERT INTO distractions (day_id, reason, tag, created_at, elapsed_work_sec, trigger_type) VALUES ($1, $2, $3, $4, $5, $6)",
+    [day.id, normalized, tag, new Date().toISOString(), elapsed, trig],
   );
 }
 
@@ -1311,20 +1367,312 @@ export async function exportAllData(): Promise<string> {
   const sessions = await db.select("SELECT * FROM sessions ORDER BY id ASC");
   const distractions = await db.select("SELECT * FROM distractions ORDER BY id ASC");
   const tags = await db.select("SELECT * FROM tags ORDER BY id ASC");
+  const feedbacks = await db.select("SELECT * FROM feedbacks ORDER BY id DESC");
   const settings = await db.select("SELECT * FROM settings ORDER BY key ASC");
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.11",
+    version: "0.1.12",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,
     distractions,
     tags,
+    feedbacks,
     settings,
   };
 
   return JSON.stringify(data, null, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Geri Bildirim (In-App Feedback) Yönetimi
+// ---------------------------------------------------------------------------
+
+export async function addFeedback(
+  category: FeedbackCategory,
+  rawMessage: string,
+): Promise<FeedbackItem | null> {
+  const message = rawMessage.trim();
+  if (!message) return null;
+  const db = await getDb();
+  const created_at = new Date().toISOString();
+  const res = await db.execute(
+    "INSERT INTO feedbacks (category, message, created_at) VALUES ($1, $2, $3)",
+    [category, message, created_at],
+  );
+  return {
+    id: Number(res.lastInsertId),
+    category,
+    message,
+    created_at,
+  };
+}
+
+export async function getFeedbacks(): Promise<FeedbackItem[]> {
+  const db = await getDb();
+  const rows = await db.select<FeedbackItem[]>(
+    "SELECT id, category, message, created_at FROM feedbacks ORDER BY id DESC",
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    category:
+      r.category === "bug" || r.category === "ui" || r.category === "other"
+        ? r.category
+        : "feature",
+    message: r.message,
+    created_at: r.created_at,
+  }));
+}
+
+export async function deleteFeedback(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM feedbacks WHERE id = $1", [id]);
+}
+
+// ---------------------------------------------------------------------------
+// Özel Pencere Boyutları (Custom Window Sizes)
+// ---------------------------------------------------------------------------
+
+export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
+  timer: { width: 284, height: 138 },
+  menu: { width: 315, height: 365 },
+  summary: { width: 385, height: 485 },
+  settings: { width: 325, height: 485 },
+};
+
+export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'customWindowSizes'",
+  );
+  if (rows.length === 0) return {};
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: CustomWindowSizes = {};
+    for (const k of ["timer", "menu", "summary", "settings"] as SizeTargetPage[]) {
+      const item = parsed[k];
+      if (item && typeof item === "object") {
+        const w = Math.round(Number(item.width));
+        const h = Math.round(Number(item.height));
+        if (Number.isFinite(w) && Number.isFinite(h) && w >= 200 && w <= 1200 && h >= 110 && h <= 1000) {
+          out[k] = { width: w, height: h };
+        }
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export async function saveCustomWindowSizes(
+  sizes: CustomWindowSizes,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('customWindowSizes', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [JSON.stringify(sizes)],
+  );
+}
+
+export async function resetCustomWindowSizes(): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM settings WHERE key = 'customWindowSizes'");
+}
+
+// ---------------------------------------------------------------------------
+// ADHD Öz-Farkındalık (Self-Realization) Analitiği
+// ---------------------------------------------------------------------------
+
+export async function getAdhdInsights(
+  onlyToday: boolean,
+): Promise<AdhdInsightsData> {
+  const db = await getDb();
+  const params: number[] = [];
+  let dayClause = "";
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    dayClause = "AND day_id = $1";
+    params.push(day.id);
+  }
+
+  // 1. Çalışma seansları
+  const workSessions = await db.select<{
+    duration_sec: number;
+    started_at: string | null;
+    created_at: string;
+    end_tag: string | null;
+    end_reason: string | null;
+  }[]>(
+    `SELECT duration_sec, started_at, created_at, end_tag, end_reason
+     FROM sessions
+     WHERE mode = 'work' ${dayClause}`,
+    params,
+  );
+
+  // 2. Mola seansları
+  const breakSessions = await db.select<{
+    duration_sec: number;
+    overtime_sec: number | null;
+  }[]>(
+    `SELECT duration_sec, overtime_sec
+     FROM sessions
+     WHERE mode = 'break' ${dayClause}`,
+    params,
+  );
+
+  // 3. Dikkat dağılmaları
+  const distRows = await db.select<{
+    tag: string | null;
+    created_at: string;
+    elapsed_work_sec: number | null;
+    trigger_type: string | null;
+  }[]>(
+    `SELECT tag, created_at, elapsed_work_sec, trigger_type
+     FROM distractions
+     ${onlyToday ? "WHERE day_id = $1" : ""}`,
+    params,
+  );
+
+  // Odak Eşiği (kaçıncı dakikada dağılıyor)
+  const validElapsed = distRows
+    .map((d) => Number(d.elapsed_work_sec ?? 0))
+    .filter((s) => s >= 30 && s <= 180 * 60);
+  const avgFocusThresholdMins =
+    validElapsed.length > 0
+      ? Math.max(
+          1,
+          Math.round(
+            validElapsed.reduce((a, b) => a + b, 0) / validElapsed.length / 60,
+          ),
+        )
+      : null;
+
+  // İçsel dürtü vs Dışsal bölünme
+  let internalCount = 0;
+  let externalCount = 0;
+  const tagFreq = new Map<string, number>();
+  const distBuckets = new Array<number>(12).fill(0); // 2 saatlik dilimler (0..11)
+
+  for (const d of distRows) {
+    if (d.trigger_type === "external") {
+      externalCount++;
+    } else {
+      internalCount++;
+    }
+    const tg = (d.tag && d.tag.trim()) || "Diğer";
+    tagFreq.set(tg, (tagFreq.get(tg) || 0) + 1);
+
+    const dt = new Date(d.created_at);
+    if (!Number.isNaN(dt.getTime())) {
+      const b = Math.floor(dt.getHours() / 2);
+      distBuckets[b] = (distBuckets[b] || 0) + 1;
+    }
+  }
+
+  const totalDist = internalCount + externalCount;
+  const internalPct =
+    totalDist > 0 ? Math.round((internalCount / totalDist) * 100) : 0;
+
+  let topTriggerTag: string | null = null;
+  let topTriggerMax = 0;
+  for (const [k, v] of tagFreq.entries()) {
+    if (v > topTriggerMax) {
+      topTriggerMax = v;
+      topTriggerTag = k;
+    }
+  }
+
+  // Verimli Saat Dilimi (2 saatlik bloklarda toplam çalışma süresi)
+  const workBuckets = new Array<number>(12).fill(0);
+  let earlyStopCount = 0;
+  let hyperfocusCount = 0;
+
+  for (const w of workSessions) {
+    const dur = Number(w.duration_sec) || 0;
+    const isEarlyStop = Boolean(w.end_tag || w.end_reason);
+    if (isEarlyStop) earlyStopCount++;
+    if (dur >= 35 * 60 && !isEarlyStop) hyperfocusCount++;
+
+    const dt = new Date(w.started_at || w.created_at);
+    if (!Number.isNaN(dt.getTime())) {
+      const b = Math.floor(dt.getHours() / 2);
+      workBuckets[b] = (workBuckets[b] || 0) + dur;
+    }
+  }
+
+  const formatBucket = (idx: number): string => {
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${pad(idx * 2)}:00–${pad(idx * 2 + 2)}:00`;
+  };
+
+  let peakBucket = -1;
+  let maxWorkSec = 0;
+  for (let i = 0; i < 12; i++) {
+    if (workBuckets[i] > maxWorkSec) {
+      maxWorkSec = workBuckets[i];
+      peakBucket = i;
+    }
+  }
+  const peakFocusHoursLabel = peakBucket >= 0 ? formatBucket(peakBucket) : null;
+
+  let worstBucket = -1;
+  let maxDistCnt = 0;
+  for (let i = 0; i < 12; i++) {
+    if (distBuckets[i] > maxDistCnt) {
+      maxDistCnt = distBuckets[i];
+      worstBucket = i;
+    }
+  }
+  const mostDistractedHoursLabel =
+    worstBucket >= 0 ? formatBucket(worstBucket) : null;
+
+  // Mola sarkması / geçiş direnci
+  const overtimeBreaks = breakSessions.filter(
+    (b) => Number(b.overtime_sec ?? 0) > 0,
+  );
+  const overtimeBreakRatePct =
+    breakSessions.length > 0
+      ? Math.round((overtimeBreaks.length / breakSessions.length) * 100)
+      : 0;
+  const avgBreakOvertimeMins =
+    overtimeBreaks.length > 0
+      ? Math.max(
+          1,
+          Math.round(
+            overtimeBreaks.reduce(
+              (a, b) => a + Number(b.overtime_sec ?? 0),
+              0,
+            ) /
+              overtimeBreaks.length /
+              60,
+          ),
+        )
+      : 0;
+
+  const completionRatePct =
+    workSessions.length > 0
+      ? Math.round(
+          ((workSessions.length - earlyStopCount) / workSessions.length) * 100,
+        )
+      : 100;
+
+  return {
+    avgFocusThresholdMins,
+    internalCount,
+    externalCount,
+    internalPct,
+    peakFocusHoursLabel,
+    mostDistractedHoursLabel,
+    avgBreakOvertimeMins,
+    overtimeBreakRatePct,
+    completionRatePct,
+    hyperfocusCount,
+    topTriggerTag,
+  };
 }
 
 // ---------------------------------------------------------------------------

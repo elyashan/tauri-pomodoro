@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
+import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
+import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   PageType,
   TimerMode,
@@ -18,6 +20,13 @@ import {
   SummaryReasonsData,
   WeekDayStat,
   WeeklySummary,
+  DistractionTrigger,
+  FeedbackCategory,
+  FeedbackItem,
+  SizeTargetPage,
+  CustomWindowSizes,
+  AdhdInsightsData,
+  DEFAULT_WINDOW_SIZES,
   DEFAULT_THEME,
   DEFAULT_WORK_SEC,
   DEFAULT_BREAK_SEC,
@@ -59,6 +68,13 @@ import {
   deleteTag,
   getPreviousReasons,
   getSummaryReasonsData,
+  addFeedback,
+  getFeedbacks,
+  deleteFeedback,
+  loadCustomWindowSizes,
+  saveCustomWindowSizes,
+  resetCustomWindowSizes,
+  getAdhdInsights,
 } from "./db";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
@@ -302,7 +318,39 @@ export default function App() {
   const [selectedDistractTag, setSelectedDistractTag] = useState<string>("Diğer");
   const [distractPreviousReasons, setDistractPreviousReasons] = useState<string[]>([]);
   const [distractReasonText, setDistractReasonText] = useState("");
+  const [distractTrigger, setDistractTrigger] =
+    useState<DistractionTrigger>("internal");
   const [isEditingDistractTags, setIsEditingDistractTags] = useState(false);
+
+  // Satır-İçi Tag Ekle / Düzenle / Sil Formu (window.prompt / window.confirm yerine)
+  const [tagForm, setTagForm] = useState<{
+    mode: "add" | "edit" | "delete";
+    kind: TagKind;
+    tagId?: number;
+    currentName?: string;
+    value: string;
+  } | null>(null);
+
+  // Çalışma <-> Mola Geçiş Animasyonu
+  const [isModeSwitching, setIsModeSwitching] = useState(false);
+  const prevTimerModeRef = useRef<TimerMode>("work");
+
+  // Sağ Alt Mini Sayaç Widget (isMiniDock) & Özel Pencere Boyutları
+  const [isMiniDock, setIsMiniDock] = useState(false);
+  const savedNormalPosRef = useRef<{ x: number; y: number } | null>(null);
+  const [customSizes, setCustomSizes] = useState<CustomWindowSizes>({});
+  const [currentWinSize, setCurrentWinSize] = useState<{ w: number; h: number }>({
+    w: 315,
+    h: 362,
+  });
+  const [sizeSavedFlash, setSizeSavedFlash] = useState(false);
+
+  // Uygulama İçi Geri Bildirim (Feedback) & ADHD Öz-Farkındalık Verisi
+  const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
+  const [feedbackCat, setFeedbackCat] = useState<FeedbackCategory>("feature");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackCopied, setFeedbackCopied] = useState(false);
+  const [adhdInsights, setAdhdInsights] = useState<AdhdInsightsData | null>(null);
 
   // Erken Durdurma Kutusu
   const [showStopBox, setShowStopBox] = useState(false);
@@ -327,7 +375,9 @@ export default function App() {
   });
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
-  const [summaryTab, setSummaryTab] = useState<"timeline" | "weekly" | "recent">("timeline");
+  const [summaryTab, setSummaryTab] = useState<
+    "timeline" | "weekly" | "recent" | "adhd"
+  >("timeline");
   const [summaryReasonsTab, setSummaryReasonsTab] = useState<
     "work" | "overtime" | "distractions" | "endings"
   >("work");
@@ -531,6 +581,11 @@ export default function App() {
 
         const timeline = await getTimelineSessions(stats.dayId);
         setTimelineSessions(timeline);
+
+        const loadedSizes = await loadCustomWindowSizes();
+        setCustomSizes(loadedSizes);
+        setFeedbacks(await getFeedbacks());
+        await getCurrentWindow().setResizable(true).catch(() => {});
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
         setLoadError(String(err));
@@ -558,6 +613,20 @@ export default function App() {
       setLoaded(true);
     })();
   }, []);
+
+  // Çalışma <-> Mola geçişlerinde yumuşak görsel geçiş animasyonu tetikle
+  useEffect(() => {
+    if (!loaded) {
+      prevTimerModeRef.current = timerMode;
+      return;
+    }
+    if (prevTimerModeRef.current !== timerMode) {
+      prevTimerModeRef.current = timerMode;
+      setIsModeSwitching(true);
+      const timer = setTimeout(() => setIsModeSwitching(false), 680);
+      return () => clearTimeout(timer);
+    }
+  }, [timerMode, loaded]);
 
   // Seans aktif değilken sayaç ekranında kalınmasını ve sayacın çalışmasını engelle
   useEffect(() => {
@@ -593,25 +662,147 @@ export default function App() {
   const anyModalOpen =
     showStopBox || showDistractBox || showBreakOverdueBox || showWorkTopicBox;
 
-  // Sayfaya ve diyaloglara göre pencere boyutunu ayarla
+  // Sağ alt mini sayaç widget'ına (saatin yanına) küçültme ve normal boyuta dönme
+  const enterMiniDock = async () => {
+    try {
+      const win = getCurrentWindow();
+      if (!isMiniDock) {
+        const pos = await win.outerPosition();
+        savedNormalPosRef.current = { x: pos.x, y: pos.y };
+      }
+      setIsMiniDock(true);
+      const scale = await win.scaleFactor();
+      const miniW = 152;
+      const miniH = 44;
+      await win.setSize(new LogicalSize(miniW, miniH));
+      const mon = await currentMonitor();
+      if (mon) {
+        const physW = Math.round(miniW * scale);
+        const physH = Math.round(miniH * scale);
+        const targetX = mon.position.x + mon.size.width - physW - Math.round(14 * scale);
+        const targetY = mon.position.y + mon.size.height - physH - Math.round(52 * scale);
+        await win.setPosition(new PhysicalPosition(targetX, targetY));
+      }
+      await win.show();
+    } catch (err) {
+      console.error("Mini widget konumlandırılamadı:", err);
+    }
+  };
+
+  const exitMiniDock = async () => {
+    try {
+      const win = getCurrentWindow();
+      setIsMiniDock(false);
+      await win.show();
+      await win.unminimize().catch(() => {});
+      if (savedNormalPosRef.current) {
+        await win.setPosition(
+          new PhysicalPosition(
+            savedNormalPosRef.current.x,
+            savedNormalPosRef.current.y,
+          ),
+        );
+      }
+      await win.setFocus().catch(() => {});
+    } catch (err) {
+      console.error("Pencere geri yüklenemedi:", err);
+    }
+  };
+
+  // Sistem tepsisi (Tray) ve pencere kapatma olaylarını dinle
   useEffect(() => {
     if (!loaded) return;
+    let unlistenMini: (() => void) | null = null;
+    let unlistenRestore: (() => void) | null = null;
+    let unlistenResize: (() => void) | null = null;
+
+    (async () => {
+      unlistenMini = await listen("request-mini-dock", () => {
+        enterMiniDock();
+      });
+      unlistenRestore = await listen("tray-restore", () => {
+        exitMiniDock();
+      });
+      const win = getCurrentWindow();
+      unlistenResize = await win.onResized(async () => {
+        try {
+          const factor = await win.scaleFactor();
+          const size = await win.innerSize();
+          setCurrentWinSize({
+            w: Math.round(size.width / factor),
+            h: Math.round(size.height / factor),
+          });
+        } catch {
+          // ignore
+        }
+      });
+    })();
+
+    return () => {
+      if (unlistenMini) unlistenMini();
+      if (unlistenRestore) unlistenRestore();
+      if (unlistenResize) unlistenResize();
+    };
+  }, [loaded, isMiniDock]);
+
+  // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
+  useEffect(() => {
+    if (!loaded || isMiniDock) return;
     const win = getCurrentWindow();
     if (anyModalOpen) {
-      win.setSize(new LogicalSize(315, 336));
-    } else if (page === "menu") {
+      win.setSize(new LogicalSize(320, 355));
+      setCurrentWinSize({ w: 320, h: 355 });
+      return;
+    }
+    const targetPage = page as SizeTargetPage;
+    const custom = customSizes[targetPage];
+    if (custom) {
+      win.setSize(new LogicalSize(custom.width, custom.height));
+      setCurrentWinSize({ w: custom.width, h: custom.height });
+      return;
+    }
+    if (page === "menu") {
       const hasBanner =
         updateStatus.kind === "available" ||
         updateStatus.kind === "downloading";
-      win.setSize(new LogicalSize(315, hasBanner ? 395 : 362));
+      const h = hasBanner ? 395 : DEFAULT_WINDOW_SIZES.menu.height;
+      win.setSize(new LogicalSize(DEFAULT_WINDOW_SIZES.menu.width, h));
+      setCurrentWinSize({ w: DEFAULT_WINDOW_SIZES.menu.width, h });
     } else if (page === "summary") {
-      win.setSize(new LogicalSize(385, 480));
+      win.setSize(
+        new LogicalSize(
+          DEFAULT_WINDOW_SIZES.summary.width,
+          DEFAULT_WINDOW_SIZES.summary.height,
+        ),
+      );
+      setCurrentWinSize({
+        w: DEFAULT_WINDOW_SIZES.summary.width,
+        h: DEFAULT_WINDOW_SIZES.summary.height,
+      });
     } else if (page === "settings") {
-      win.setSize(new LogicalSize(320, 480));
+      win.setSize(
+        new LogicalSize(
+          DEFAULT_WINDOW_SIZES.settings.width,
+          DEFAULT_WINDOW_SIZES.settings.height,
+        ),
+      );
+      setCurrentWinSize({
+        w: DEFAULT_WINDOW_SIZES.settings.width,
+        h: DEFAULT_WINDOW_SIZES.settings.height,
+      });
     } else {
-      win.setSize(new LogicalSize(284, 138));
+      win.setSize(
+        new LogicalSize(
+          DEFAULT_WINDOW_SIZES.timer.width,
+          DEFAULT_WINDOW_SIZES.timer.height,
+        ),
+      );
+      setCurrentWinSize({
+        w: DEFAULT_WINDOW_SIZES.timer.width,
+        h: DEFAULT_WINDOW_SIZES.timer.height,
+      });
     }
-  }, [page, anyModalOpen, loaded, updateStatus.kind]);
+  }, [page, anyModalOpen, loaded, updateStatus.kind, isMiniDock, customSizes]);
 
   // Renk ayarları değişince kaydet
   useEffect(() => {
@@ -803,7 +994,7 @@ export default function App() {
     const target = e.target as HTMLElement;
     if (
       target.closest(
-        "button, input, select, option, .no-drag, .clickable-timer, .bar-col, .accordion-header, .timeline-block",
+        "button, input, textarea, select, option, .no-drag, .clickable-timer, .bar-col, .accordion-header, .timeline-block",
       )
     ) {
       return;
@@ -813,6 +1004,72 @@ export default function App() {
 
   const hideToTray = () => {
     getCurrentWindow().hide();
+  };
+
+  // Özel Pencere Boyutu Kaydetme & Standart Boyuta Dönme
+  const handleSaveCurrentWindowSize = async () => {
+    const win = getCurrentWindow();
+    const factor = await win.scaleFactor();
+    const size = await win.innerSize();
+    const w = Math.max(220, Math.round(size.width / factor));
+    const h = Math.max(110, Math.round(size.height / factor));
+    const targetPage = page as SizeTargetPage;
+    const updated: CustomWindowSizes = {
+      ...customSizes,
+      [targetPage]: { width: w, height: h },
+    };
+    setCustomSizes(updated);
+    setCurrentWinSize({ w, h });
+    await saveCustomWindowSizes(updated);
+    setSizeSavedFlash(true);
+    setTimeout(() => setSizeSavedFlash(false), 1800);
+  };
+
+  const handleResetStandardSizes = async () => {
+    setCustomSizes({});
+    await resetCustomWindowSizes();
+    const win = getCurrentWindow();
+    const targetPage = page as SizeTargetPage;
+    const std = DEFAULT_WINDOW_SIZES[targetPage] || DEFAULT_WINDOW_SIZES.menu;
+    await win.setSize(new LogicalSize(std.width, std.height));
+    setCurrentWinSize({ w: std.width, h: std.height });
+  };
+
+  // Uygulama İçi Geri Bildirim (Feedback) İşlemleri
+  const handleAddFeedbackItem = async () => {
+    if (!feedbackText.trim()) return;
+    await addFeedback(feedbackCat, feedbackText.trim());
+    setFeedbackText("");
+    setFeedbacks(await getFeedbacks());
+  };
+
+  const handleDeleteFeedbackItem = async (id: number) => {
+    await deleteFeedback(id);
+    setFeedbacks(await getFeedbacks());
+  };
+
+  const handleCopyAllFeedbacks = async () => {
+    if (feedbacks.length === 0) return;
+    const lines = feedbacks.map(
+      (f, idx) =>
+        `${idx + 1}. [${f.category.toUpperCase()}] (${f.created_at.slice(0, 10)})\n${f.message}`,
+    );
+    await navigator.clipboard.writeText(lines.join("\n\n")).catch(() => {});
+    setFeedbackCopied(true);
+    setTimeout(() => setFeedbackCopied(false), 1800);
+  };
+
+  const handleOpenGithubFeedback = async () => {
+    const title = encodeURIComponent(
+      `[Feedback] ${feedbackText.trim().slice(0, 50) || "Pomodoro Widget"}`,
+    );
+    const body = encodeURIComponent(
+      feedbackText.trim() ||
+        feedbacks.map((f) => `- **[${f.category}]** ${f.message}`).join("\n"),
+    );
+    await openUrl(
+      `https://github.com/elyashan/tauri-pomodoro/issues/new?title=${title}&body=${body}`,
+    ).catch(() => {});
   };
 
   const toggleAutoStart = async () => {
@@ -980,6 +1237,8 @@ export default function App() {
     const prevReasons = await getPreviousReasons("distraction", initialTag);
     setDistractPreviousReasons(prevReasons);
     setDistractReasonText("");
+    setDistractTrigger("internal");
+    setTagForm(null);
     setShowDistractBox(true);
   };
 
@@ -991,10 +1250,16 @@ export default function App() {
 
   const submitDistraction = async () => {
     const reason = distractReasonText.trim() || selectedDistractTag;
-    await recordDistraction(reason, selectedDistractTag);
+    await recordDistraction(
+      reason,
+      selectedDistractTag,
+      workElapsedSec,
+      distractTrigger,
+    );
     setShowDistractBox(false);
     setDistractReasonText("");
     setIsEditingDistractTags(false);
+    setTagForm(null);
   };
 
   // ---------------------------------------------------------------------------
@@ -1299,13 +1564,49 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // TAG YÖNETİMİ (EKLE, DÜZENLE, SİL)
+  // TAG YÖNETİMİ (SATIR-İÇİ EKLE, DÜZENLE, SİL — OS POPUP OLMADAN)
   // ---------------------------------------------------------------------------
-  const handleAddNewTag = async (kind: TagKind) => {
-    const newName = window.prompt(t.newTagPrompt);
-    if (newName && newName.trim()) {
-      const added = await addTag(newName.trim(), kind);
-      const pickedName = added?.name || newName.trim();
+  const handleAddNewTag = (kind: TagKind) => {
+    setTagForm({ mode: "add", kind, value: "" });
+  };
+
+  const handleEditTagItem = (
+    tagId: number,
+    currentName: string,
+    kind: TagKind,
+  ) => {
+    setTagForm({
+      mode: "edit",
+      kind,
+      tagId,
+      currentName,
+      value: currentName,
+    });
+  };
+
+  const handleDeleteTagItem = (
+    tagId: number,
+    name: string,
+    kind: TagKind,
+  ) => {
+    setTagForm({
+      mode: "delete",
+      kind,
+      tagId,
+      currentName: name,
+      value: name,
+    });
+  };
+
+  const submitTagForm = async () => {
+    if (!tagForm) return;
+    const { mode, kind, tagId, currentName, value } = tagForm;
+    const trimmed = value.trim();
+
+    if (mode === "add") {
+      if (!trimmed) return;
+      const added = await addTag(trimmed, kind);
+      const pickedName = added?.name || trimmed;
       if (kind === "distraction") {
         setDistractTags(await getTags("distraction", t.defaultDistractionTags));
         setSelectedDistractTag(pickedName);
@@ -1321,40 +1622,31 @@ export default function App() {
         );
         setSelectedBreakOverdueTag(pickedName);
       }
-    }
-  };
-
-  const handleEditTagItem = async (
-    tagId: number,
-    currentName: string,
-    kind: TagKind,
-  ) => {
-    const newName = window.prompt(t.editTagPrompt(currentName), currentName);
-    if (newName && newName.trim() && newName.trim() !== currentName) {
-      await updateTag(tagId, newName.trim(), kind);
-      if (kind === "distraction") {
-        setDistractTags(await getTags("distraction", t.defaultDistractionTags));
-      } else if (kind === "ending") {
-        setEndingTags(await getTags("ending", t.defaultEndingTags));
-      } else if (kind === "work") {
-        setWorkTags(await getTags("work", t.defaultWorkTags));
-        if (currentWorkTag === currentName) {
-          setCurrentWorkTag(newName.trim());
+    } else if (mode === "edit" && tagId !== undefined && currentName) {
+      if (trimmed && trimmed !== currentName) {
+        await updateTag(tagId, trimmed, kind);
+        if (kind === "distraction") {
+          setDistractTags(
+            await getTags("distraction", t.defaultDistractionTags),
+          );
+          if (selectedDistractTag === currentName) setSelectedDistractTag(trimmed);
+        } else if (kind === "ending") {
+          setEndingTags(await getTags("ending", t.defaultEndingTags));
+          if (selectedEndingTag === currentName) setSelectedEndingTag(trimmed);
+        } else if (kind === "work") {
+          setWorkTags(await getTags("work", t.defaultWorkTags));
+          if (currentWorkTag === currentName) setCurrentWorkTag(trimmed);
+          if (selectedWorkTopicTag === currentName) setSelectedWorkTopicTag(trimmed);
+        } else if (kind === "break_overtime") {
+          setBreakOverdueTags(
+            await getTags("break_overtime", t.defaultBreakOvertimeTags),
+          );
+          if (selectedBreakOverdueTag === currentName) {
+            setSelectedBreakOverdueTag(trimmed);
+          }
         }
-      } else if (kind === "break_overtime") {
-        setBreakOverdueTags(
-          await getTags("break_overtime", t.defaultBreakOvertimeTags),
-        );
       }
-    }
-  };
-
-  const handleDeleteTagItem = async (
-    tagId: number,
-    name: string,
-    kind: TagKind,
-  ) => {
-    if (window.confirm(t.deleteTagConfirm(name))) {
+    } else if (mode === "delete" && tagId !== undefined) {
       await deleteTag(tagId);
       if (kind === "distraction") {
         setDistractTags(await getTags("distraction", t.defaultDistractionTags));
@@ -1368,6 +1660,50 @@ export default function App() {
         );
       }
     }
+    setTagForm(null);
+  };
+
+  const renderInlineTagForm = (kind: TagKind) => {
+    if (!tagForm || tagForm.kind !== kind) return null;
+    if (tagForm.mode === "delete") {
+      return (
+        <div className="inline-tag-form delete-mode">
+          <span
+            className="inline-tag-label"
+            title={t.deleteTagConfirm(tagForm.currentName || "")}
+          >
+            🗑 {t.deleteTagConfirm(tagForm.currentName || "")}
+          </span>
+          <button className="warn-btn" onClick={submitTagForm}>
+            ✓
+          </button>
+          <button onClick={() => setTagForm(null)}>{t.cancel}</button>
+        </div>
+      );
+    }
+    return (
+      <div className="inline-tag-form">
+        <input
+          className="inline-tag-input"
+          placeholder={
+            tagForm.mode === "add"
+              ? t.newTagPrompt
+              : t.editTagPrompt(tagForm.currentName || "")
+          }
+          value={tagForm.value}
+          autoFocus
+          onChange={(e) => setTagForm({ ...tagForm, value: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitTagForm();
+            if (e.key === "Escape") setTagForm(null);
+          }}
+        />
+        <button className="primary-btn" onClick={submitTagForm}>
+          {tagForm.mode === "add" ? t.add : t.doneEditing}
+        </button>
+        <button onClick={() => setTagForm(null)}>{t.cancel}</button>
+      </div>
+    );
   };
 
   // ---------------------------------------------------------------------------
@@ -1380,6 +1716,7 @@ export default function App() {
     setShowStopBox(false);
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
+    setTagForm(null);
     if (sessionActive) {
       setIsRunning(true);
     }
@@ -1397,11 +1734,13 @@ export default function App() {
     const weekly = await getWeeklySummary(locale);
     const reasonsData = await getSummaryReasonsData(freqOnlyToday);
     const timeline = await getTimelineSessions();
+    const insights = await getAdhdInsights(freqOnlyToday);
 
     setSummaryDays(days);
     setWeeklySummary(weekly);
     setSummaryReasonsData(reasonsData);
     setTimelineSessions(timeline);
+    setAdhdInsights(insights);
     setHoveredDay(days[days.length - 1] ?? null);
     const todayWeekDay =
       weekly.days.find((d) => d.is_today) ??
@@ -1421,6 +1760,7 @@ export default function App() {
     const nextVal = !freqOnlyToday;
     setFreqOnlyToday(nextVal);
     setSummaryReasonsData(await getSummaryReasonsData(nextVal));
+    setAdhdInsights(await getAdhdInsights(nextVal));
   };
 
   const toggleAccordionTag = (tagName: string) => {
@@ -1596,13 +1936,98 @@ export default function App() {
     "--timer-color": theme.timerColor,
   } as React.CSSProperties;
 
+  const isTimerModeStyle = (page === "timer" || isMiniDock) && sessionActive;
+  const modeClass = !isTimerModeStyle
+    ? ""
+    : timerMode === "work"
+      ? "mode-work"
+      : breakKind === "long"
+        ? "mode-long-break"
+        : "mode-break";
+
+  if (isMiniDock) {
+    return (
+      <div
+        className={`widget-shell mini-dock-shell ${
+          isLightColor(theme.bgColor) ? "light-theme" : ""
+        } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""}`}
+        style={shellStyle}
+        onMouseDown={handleMouseDown}
+        onDoubleClick={exitMiniDock}
+      >
+        <div className="mini-dock-row">
+          <div
+            className="mini-dock-left no-drag"
+            onClick={exitMiniDock}
+            title={t.restoreWindowTooltip}
+          >
+            <span className="mini-dock-icon">
+              {!sessionActive
+                ? "⠿"
+                : isBreakAlarm
+                  ? "🚨"
+                  : timerMode === "work"
+                    ? "💼"
+                    : breakKind === "long"
+                      ? "🎉"
+                      : "☕"}
+            </span>
+            <span
+              className={`mini-dock-clock ${isBreakAlarm ? "alarm" : ""}`}
+            >
+              {liveClockStr}
+            </span>
+          </div>
+
+          <div className="mini-dock-actions no-drag">
+            <button
+              className="mini-dock-btn"
+              onClick={exitMiniDock}
+              title={t.restoreWindowTooltip}
+            >
+              ↗
+            </button>
+            <button
+              className="mini-dock-btn"
+              onClick={hideToTray}
+              title={t.hideToTrayOnlyTooltip}
+            >
+              ▾
+            </button>
+          </div>
+        </div>
+
+        {sessionActive && (
+          <div
+            className="progress-bar-container"
+            style={{ bottom: 2, left: 10, right: 10, height: 2 }}
+          >
+            <div
+              className="progress-bar-fill"
+              style={{
+                width: `${progressPct}%`,
+                backgroundColor: isBreakAlarm
+                  ? "#ef4444"
+                  : timerMode === "work"
+                    ? "var(--timer-color, #fbbf24)"
+                    : "#38bdf8",
+              }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`widget-shell ${
         page !== "timer" || anyModalOpen ? "solid-bg" : ""
-      } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${
-        isCelebrating ? "celebrating-shell" : ""
-      } ${isTimerAlarmView ? "alarm-shell" : ""}`}
+      } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${modeClass} ${
+        isModeSwitching ? "mode-switching" : ""
+      } ${isCelebrating ? "celebrating-shell" : ""} ${
+        isTimerAlarmView ? "alarm-shell" : ""
+      }`}
       style={shellStyle}
       onMouseDown={handleMouseDown}
     >
@@ -1656,12 +2081,17 @@ export default function App() {
               </button>
               <button
                 className="ghost-btn"
-                onClick={() => setIsEditingWorkTags(!isEditingWorkTags)}
+                onClick={() => {
+                  setIsEditingWorkTags(!isEditingWorkTags);
+                  setTagForm(null);
+                }}
               >
                 {isEditingWorkTags ? t.doneEditing : t.editTags}
               </button>
             </div>
           </div>
+
+          {renderInlineTagForm("work")}
 
           <div className="section-subhead">{t.selectTagHint}</div>
           <div className="reason-chips stop-chips">
@@ -1721,14 +2151,18 @@ export default function App() {
           )}
 
           <div className="new-reason-row">
-            <input
-              className="distract-input"
+            <textarea
+              className="distract-textarea"
+              rows={2}
               placeholder={t.workTopicPlaceholder}
               value={workTopicReasonText}
               autoFocus
               onChange={(e) => setWorkTopicReasonText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitWorkTopic();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitWorkTopic();
+                }
                 if (e.key === "Escape") setShowWorkTopicBox(false);
               }}
             />
@@ -1741,7 +2175,12 @@ export default function App() {
             <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
               Tag: <b>{selectedWorkTopicTag}</b>
             </span>
-            <button onClick={() => setShowWorkTopicBox(false)}>
+            <button
+              onClick={() => {
+                setShowWorkTopicBox(false);
+                setTagForm(null);
+              }}
+            >
               {t.cancel}
             </button>
           </div>
@@ -1760,11 +2199,40 @@ export default function App() {
               </button>
               <button
                 className="ghost-btn"
-                onClick={() => setIsEditingDistractTags(!isEditingDistractTags)}
+                onClick={() => {
+                  setIsEditingDistractTags(!isEditingDistractTags);
+                  setTagForm(null);
+                }}
               >
                 {isEditingDistractTags ? t.doneEditing : t.editTags}
               </button>
             </div>
+          </div>
+
+          {renderInlineTagForm("distraction")}
+
+          {/* İçsel Dürtü vs Dışsal Etken Seçici */}
+          <div className="trigger-toggle-row">
+            <button
+              type="button"
+              className={`trigger-btn ${
+                distractTrigger === "internal" ? "active-internal" : ""
+              }`}
+              onClick={() => setDistractTrigger("internal")}
+              title={t.triggerInternalTooltip}
+            >
+              {t.triggerInternal}
+            </button>
+            <button
+              type="button"
+              className={`trigger-btn ${
+                distractTrigger === "external" ? "active-external" : ""
+              }`}
+              onClick={() => setDistractTrigger("external")}
+              title={t.triggerExternalTooltip}
+            >
+              {t.triggerExternal}
+            </button>
           </div>
 
           <div className="section-subhead">{t.selectTagHint}</div>
@@ -1825,14 +2293,18 @@ export default function App() {
           )}
 
           <div className="new-reason-row">
-            <input
-              className="distract-input"
+            <textarea
+              className="distract-textarea"
+              rows={2}
               placeholder={t.distractExplanationPlaceholder}
               value={distractReasonText}
               autoFocus
               onChange={(e) => setDistractReasonText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitDistraction();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitDistraction();
+                }
                 if (e.key === "Escape") setShowDistractBox(false);
               }}
             />
@@ -1845,7 +2317,12 @@ export default function App() {
             <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
               Tag: <b>{selectedDistractTag}</b>
             </span>
-            <button onClick={() => setShowDistractBox(false)}>
+            <button
+              onClick={() => {
+                setShowDistractBox(false);
+                setTagForm(null);
+              }}
+            >
               {t.cancel}
             </button>
           </div>
@@ -1864,7 +2341,10 @@ export default function App() {
               </button>
               <button
                 className="ghost-btn"
-                onClick={() => setIsEditingEndingTags(!isEditingEndingTags)}
+                onClick={() => {
+                  setIsEditingEndingTags(!isEditingEndingTags);
+                  setTagForm(null);
+                }}
               >
                 {isEditingEndingTags ? t.doneEditing : t.editTags}
               </button>
@@ -1873,6 +2353,8 @@ export default function App() {
           <div className="stop-box-hint">
             {t.earlyStopWorkedTime(Math.floor(workElapsedSec / 60))}
           </div>
+
+          {renderInlineTagForm("ending")}
 
           <div className="reason-chips stop-chips">
             {endingTags.map((tag) => {
@@ -1931,14 +2413,18 @@ export default function App() {
           )}
 
           <div className="new-reason-row">
-            <input
-              className="distract-input"
+            <textarea
+              className="distract-textarea"
+              rows={2}
               placeholder={t.endingExplanationPlaceholder}
               value={endingReasonText}
               autoFocus
               onChange={(e) => setEndingReasonText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitEnding(true);
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitEnding(true);
+                }
                 if (e.key === "Escape") cancelStopBox();
               }}
             />
@@ -1970,9 +2456,10 @@ export default function App() {
               </button>
               <button
                 className="ghost-btn"
-                onClick={() =>
-                  setIsEditingBreakOverdueTags(!isEditingBreakOverdueTags)
-                }
+                onClick={() => {
+                  setIsEditingBreakOverdueTags(!isEditingBreakOverdueTags);
+                  setTagForm(null);
+                }}
               >
                 {isEditingBreakOverdueTags ? t.doneEditing : t.editTags}
               </button>
@@ -1984,6 +2471,8 @@ export default function App() {
               formatClock(breakOvertimeAccumSec + breakOverdueSec),
             )}
           </div>
+
+          {renderInlineTagForm("break_overtime")}
 
           <div className="reason-chips stop-chips">
             {breakOverdueTags.map((tag) => {
@@ -2050,14 +2539,18 @@ export default function App() {
           )}
 
           <div className="new-reason-row">
-            <input
-              className="distract-input"
+            <textarea
+              className="distract-textarea"
+              rows={2}
               placeholder={t.distractExplanationPlaceholder}
               value={breakOverdueReasonText}
               autoFocus
               onChange={(e) => setBreakOverdueReasonText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") submitBreakOverdue(false);
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitBreakOverdue(false);
+                }
                 if (e.key === "Escape") submitBreakOverdue(true);
               }}
             />
@@ -2188,8 +2681,8 @@ export default function App() {
                   </button>
                   <button
                     className="icon-btn"
-                    title={t.hideToTray}
-                    onClick={hideToTray}
+                    title={t.miniDockTooltip}
+                    onClick={enterMiniDock}
                   >
                     ✕
                   </button>
@@ -2299,8 +2792,8 @@ export default function App() {
                   </button>
                   <button
                     className="icon-btn"
-                    title={t.hideToTray}
-                    onClick={hideToTray}
+                    title={t.miniDockTooltip}
+                    onClick={enterMiniDock}
                   >
                     ✕
                   </button>
@@ -2887,6 +3380,175 @@ export default function App() {
                 </button>
               </div>
 
+              {/* PENCERE BOYUTU ÖZELLEŞTİRME & STANDART BOYUTA DÖN */}
+              <div className="settings-section">
+                <div
+                  className="settings-label"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>📐 {t.windowSizeTitle}</span>
+                  {sizeSavedFlash && (
+                    <span
+                      style={{
+                        fontSize: "9px",
+                        color: "#4ade80",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {t.sizeSavedBadge}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: "9.5px", color: "#a1a1aa" }}>
+                  {t.windowSizeHint(currentWinSize.w, currentWinSize.h)}
+                </div>
+                <div className="settings-actions">
+                  <button
+                    className="primary-btn"
+                    onClick={handleSaveCurrentWindowSize}
+                  >
+                    {t.saveCurrentSizeBtn}
+                  </button>
+                  <button onClick={handleResetStandardSizes}>
+                    {t.resetStandardSizeBtn}
+                  </button>
+                </div>
+              </div>
+
+              {/* UYGULAMA İÇİ GERİ BİLDİRİM (FEEDBACK) BÖLÜMÜ */}
+              <div className="settings-section no-drag">
+                <div
+                  className="settings-label"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>💬 {t.feedbackSectionTitle}</span>
+                  {feedbackCopied && (
+                    <span
+                      style={{
+                        fontSize: "9px",
+                        color: "#4ade80",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {t.feedbackCopiedMsg}
+                    </span>
+                  )}
+                </div>
+
+                <div className="feedback-cat-row">
+                  <button
+                    type="button"
+                    className={`feedback-cat-btn ${
+                      feedbackCat === "bug" ? "active" : ""
+                    }`}
+                    onClick={() => setFeedbackCat("bug")}
+                  >
+                    {t.feedbackCatBug}
+                  </button>
+                  <button
+                    type="button"
+                    className={`feedback-cat-btn ${
+                      feedbackCat === "feature" ? "active" : ""
+                    }`}
+                    onClick={() => setFeedbackCat("feature")}
+                  >
+                    {t.feedbackCatFeature}
+                  </button>
+                  <button
+                    type="button"
+                    className={`feedback-cat-btn ${
+                      feedbackCat === "ui" ? "active" : ""
+                    }`}
+                    onClick={() => setFeedbackCat("ui")}
+                  >
+                    {t.feedbackCatUi}
+                  </button>
+                </div>
+
+                <div className="new-reason-row">
+                  <textarea
+                    className="distract-textarea"
+                    rows={2}
+                    placeholder={t.feedbackPlaceholder}
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAddFeedbackItem();
+                      }
+                    }}
+                  />
+                  <button
+                    className="primary-btn"
+                    onClick={handleAddFeedbackItem}
+                  >
+                    {t.feedbackSaveBtn}
+                  </button>
+                </div>
+
+                <div className="settings-actions">
+                  <button
+                    className="ghost-btn"
+                    disabled={feedbacks.length === 0}
+                    onClick={handleCopyAllFeedbacks}
+                  >
+                    {t.feedbackCopyAllBtn} ({feedbacks.length})
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    onClick={handleOpenGithubFeedback}
+                  >
+                    {t.feedbackGithubBtn}
+                  </button>
+                </div>
+
+                <div className="feedback-list">
+                  {feedbacks.length === 0 ? (
+                    <div
+                      style={{
+                        fontSize: "9.5px",
+                        color: "#a1a1aa",
+                        textAlign: "center",
+                        padding: "4px",
+                      }}
+                    >
+                      {t.feedbackEmpty}
+                    </div>
+                  ) : (
+                    feedbacks.map((f) => (
+                      <div key={f.id} className="feedback-item">
+                        <div className="feedback-item-text">
+                          <b>
+                            {f.category === "bug"
+                              ? "🐛"
+                              : f.category === "feature"
+                                ? "💡"
+                                : "🎨"}
+                          </b>{" "}
+                          {f.message}
+                        </div>
+                        <button
+                          className="tag-icon-btn del-btn"
+                          onClick={() => handleDeleteFeedbackItem(f.id)}
+                          title={t.cancel}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
               <div className="update-row">
                 <span>{t.versionLabel(appVersion)}</span>
                 {updateStatus.kind === "available" ? (
@@ -2949,6 +3611,12 @@ export default function App() {
                       onClick={() => setSummaryTab("recent")}
                     >
                       {t.viewRecentDays}
+                    </button>
+                    <button
+                      className={`tab-btn ${summaryTab === "adhd" ? "active" : ""}`}
+                      onClick={() => setSummaryTab("adhd")}
+                    >
+                      {t.adhdTab}
                     </button>
                   </div>
                 </div>
@@ -3084,9 +3752,8 @@ export default function App() {
                                       style={{
                                         color: "#a1a1aa",
                                         fontSize: "9px",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
+                                        whiteSpace: "pre-wrap",
+                                        wordBreak: "break-word",
                                       }}
                                     >
                                       ({s.reason})
@@ -3289,6 +3956,82 @@ export default function App() {
                     </>
                   )}
 
+                  {/* ADHD ÖZ-FARKINDALIK (SELF-REALIZATION) GÖRÜNÜMÜ */}
+                  {summaryTab === "adhd" && (
+                    <div className="adhd-insights-wrap">
+                      <div className="adhd-cards-grid">
+                        <div className="adhd-card">
+                          <div className="adhd-card-title">
+                            ⏱ {t.adhdFocusThresholdTitle}
+                          </div>
+                          <div className="adhd-card-desc">
+                            {t.adhdFocusThresholdDesc(
+                              adhdInsights?.avgFocusThresholdMins ?? null,
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="adhd-card">
+                          <div className="adhd-card-title">
+                            🧭 {t.adhdTriggerRatioTitle}
+                          </div>
+                          <div className="adhd-card-desc">
+                            {t.adhdTriggerRatioDesc(
+                              adhdInsights?.internalPct ?? 50,
+                              adhdInsights?.internalCount ?? 0,
+                              adhdInsights?.externalCount ?? 0,
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="adhd-card">
+                          <div className="adhd-card-title">
+                            ⏳ {t.adhdTransitionTitle}
+                          </div>
+                          <div className="adhd-card-desc">
+                            {t.adhdTransitionDesc(
+                              adhdInsights?.avgBreakOvertimeMins ?? 0,
+                              adhdInsights?.overtimeBreakRatePct ?? 0,
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="adhd-card">
+                          <div className="adhd-card-title">
+                            🔥 {t.adhdCompletionTitle}
+                          </div>
+                          <div className="adhd-card-desc">
+                            {t.adhdCompletionDesc(
+                              adhdInsights?.completionRatePct ?? 100,
+                              adhdInsights?.hyperfocusCount ?? 0,
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="adhd-card full">
+                          <div className="adhd-card-title">
+                            🌅 {t.adhdChronoTitle}
+                          </div>
+                          <div className="adhd-card-desc">
+                            {t.adhdChronoDesc(
+                              adhdInsights?.peakFocusHoursLabel ?? null,
+                              adhdInsights?.mostDistractedHoursLabel ?? null,
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="adhd-tip-box">
+                        {t.adhdDynamicTip(
+                          adhdInsights?.avgFocusThresholdMins ?? null,
+                          adhdInsights?.internalPct ?? 50,
+                          adhdInsights?.overtimeBreakRatePct ?? 0,
+                          adhdInsights?.topTriggerTag ?? null,
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* KOMPAKT KATEGORİ KIRILIMI (Üzerine gelince detaylı açıklama) */}
                   <div className="summary-subtabs">
                     <button
@@ -3404,7 +4147,7 @@ export default function App() {
                               <div className="accordion-body">
                                 {item.explanations.map((exp, idx) => (
                                   <div key={idx} className="explanation-row">
-                                    <span>
+                                    <span className="explanation-text">
                                       <span className="explanation-bullet">
                                         •
                                       </span>

@@ -197,6 +197,51 @@ export interface Translations {
   filterTodayShort: string;
   filterAllShort: string;
 
+  // Geri Bildirim (Feedback), Pencere Boyutu, Mini Widget & ADHD Öz-Farkındalık
+  feedbackSectionTitle: string;
+  feedbackPlaceholder: string;
+  feedbackCatBug: string;
+  feedbackCatFeature: string;
+  feedbackCatUi: string;
+  feedbackSaveBtn: string;
+  feedbackCopyAllBtn: string;
+  feedbackCopiedMsg: string;
+  feedbackGithubBtn: string;
+  feedbackEmpty: string;
+
+  windowSizeTitle: string;
+  windowSizeHint: (w: number, h: number) => string;
+  saveCurrentSizeBtn: string;
+  resetStandardSizeBtn: string;
+  sizeSavedBadge: string;
+
+  miniDockTooltip: string;
+  restoreWindowTooltip: string;
+  hideToTrayOnlyTooltip: string;
+
+  triggerInternal: string;
+  triggerExternal: string;
+  triggerInternalTooltip: string;
+  triggerExternalTooltip: string;
+
+  adhdTab: string;
+  adhdFocusThresholdTitle: string;
+  adhdFocusThresholdDesc: (mins: number | null) => string;
+  adhdTriggerRatioTitle: string;
+  adhdTriggerRatioDesc: (intPct: number, intCnt: number, extCnt: number) => string;
+  adhdChronoTitle: string;
+  adhdChronoDesc: (peak: string | null, worst: string | null) => string;
+  adhdTransitionTitle: string;
+  adhdTransitionDesc: (avgMins: number, ratePct: number) => string;
+  adhdCompletionTitle: string;
+  adhdCompletionDesc: (pct: number, hyperCnt: number) => string;
+  adhdDynamicTip: (
+    thresholdMins: number | null,
+    intPct: number,
+    overtimeRate: number,
+    topTag: string | null,
+  ) => string;
+
   defaultDistractionTags: string[];
   defaultEndingTags: string[];
   defaultWorkTags: string[];
@@ -414,6 +459,87 @@ const tr: Translations = {
   endingShortTab: "Bitirme",
   filterTodayShort: "Bugün",
   filterAllShort: "Tümü",
+
+  // Geri Bildirim (Feedback), Pencere Boyutu, Mini Widget & ADHD Öz-Farkındalık
+  feedbackSectionTitle: "💬 Geri Bildirim & Notlarım",
+  feedbackPlaceholder:
+    "Uygulama hakkındaki hata, fikir veya tasarım notlarını buraya yaz (birden fazla satır yazabilirsin)...",
+  feedbackCatBug: "🐛 Hata",
+  feedbackCatFeature: "💡 Özellik",
+  feedbackCatUi: "🎨 Tasarım",
+  feedbackSaveBtn: "Kaydet",
+  feedbackCopyAllBtn: "📋 Tümünü Kopyala",
+  feedbackCopiedMsg: "Kopyalandı ✓",
+  feedbackGithubBtn: "🐙 GitHub Issue",
+  feedbackEmpty: "Henüz kayıtlı geri bildirim yok.",
+
+  windowSizeTitle: "📐 Pencere Boyutu",
+  windowSizeHint: (w, h) =>
+    `Pencereyi kenarlarından sürükleyip büyütebilir/küçültebilirsin (Şu an: ${w}×${h}px)`,
+  saveCurrentSizeBtn: "💾 Mevcut Boyutu Kaydet",
+  resetStandardSizeBtn: "↺ Standart Boyuta Dön",
+  sizeSavedBadge: "Boyut kaydedildi ✓",
+
+  miniDockTooltip: "Sağ alt mini sayaç moduna küçült",
+  restoreWindowTooltip: "Normal pencere boyutuna geri dön",
+  hideToTrayOnlyTooltip: "Tamamen sistem tepsisine (tray) gizle",
+
+  triggerInternal: "🧠 İçsel Dürtü",
+  triggerExternal: "🔔 Dışsal Etken",
+  triggerInternalTooltip:
+    "Kendi aklına gelen düşünce, sıkılma, merak veya dürtüyle bölündün",
+  triggerExternalTooltip:
+    "Bildirim, telefon çalması, dış gürültü veya başka biri yüzünden bölündün",
+
+  adhdTab: "🧠 Farkındalık",
+  adhdFocusThresholdTitle: "⏱ Doğal Odak Eşiğin",
+  adhdFocusThresholdDesc: (mins) =>
+    mins !== null
+      ? `Ortalama ${mins}. dakikada dikkatin dağılıyor`
+      : "Veri için birkaç dağılma kaydı gerekiyor",
+  adhdTriggerRatioTitle: "🧠 İçsel vs 🔔 Dışsal Bölünme",
+  adhdTriggerRatioDesc: (intPct, intCnt, extCnt) =>
+    `%${intPct} İçsel (${intCnt}) • %${100 - intPct} Dışsal (${extCnt})`,
+  adhdChronoTitle: "☀️ Biyolojik Odak Saatlerin",
+  adhdChronoDesc: (peak, worst) =>
+    `Zirve: ${peak || "—"} • En Dağınık: ${worst || "—"}`,
+  adhdTransitionTitle: "☕ Moladan Dönüş Direnci",
+  adhdTransitionDesc: (avgMins, ratePct) =>
+    ratePct > 0
+      ? `Molaların %${ratePct}'i sarkıyor (Ort. +${avgMins} dk)`
+      : "Molalardan zamanında dönüyorsun ✓",
+  adhdCompletionTitle: "🎯 Tamamlama & Hiperodak",
+  adhdCompletionDesc: (pct, hyperCnt) =>
+    `%${pct} tamamlama • ${hyperCnt} hiperodak (35+ dk)`,
+  adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
+    const parts: string[] = [];
+    if (thresholdMins !== null && thresholdMins < 25) {
+      parts.push(
+        `💡 Dikkatin genelde ${thresholdMins}. dakikada dağılıyor; çalışma süreni ${Math.max(15, thresholdMins + 2)} dk yapıp döngüyü sıklaştırmak ADHD odak eşiğinle daha uyumlu olabilir.`,
+      );
+    } else if (thresholdMins !== null) {
+      parts.push(
+        `✨ Doğal odak eşiğin ${thresholdMins} dakika civarında — derin odak (Geliştirici) ritmine oldukça uygunsun.`,
+      );
+    }
+    if (intPct >= 65) {
+      parts.push(
+        `🧠 Bölünmelerinin %${intPct}'i içsel dürtü kaynaklı${topTag ? ` (en sık: ${topTag})` : ""}. Aklına gelen şeyi "sonra bakılacaklar" notuna yazıp sayaca dönmeyi dene.`,
+      );
+    } else if (intPct > 0 && intPct <= 35) {
+      parts.push(
+        `🔔 Bölünmelerinin çoğu dışsal uyaranlardan geliyor${topTag ? ` (${topTag})` : ""}. Seans başında bildirimleri sessize almak odak süreni ciddi artıracaktır.`,
+      );
+    }
+    if (overtimeRate >= 40) {
+      parts.push(
+        `⏰ Moladan çalışmaya geçişte "başlatma direnci" yaşıyorsun (%${overtimeRate} sarkma). Molada ekrana/sosyal medyaya girmek yerine hareket etmeyi dene.`,
+      );
+    }
+    return parts.length > 0
+      ? parts.join("\n\n")
+      : "🌱 Seansların ve dikkat dağılma kayıtların biriktikçe burada senin ADHD odak profiline özel kişisel çıkarımlar belirecek.";
+  },
 
   defaultDistractionTags: [
     "Telefon",
@@ -662,6 +788,87 @@ const en: Translations = {
   endingShortTab: "Stopped",
   filterTodayShort: "Today",
   filterAllShort: "All",
+
+  // Feedback, Window Size, Mini Widget & ADHD Self-Realization
+  feedbackSectionTitle: "💬 Feedback & My Notes",
+  feedbackPlaceholder:
+    "Write your bug reports, feature ideas, or UI notes here (multi-line supported)...",
+  feedbackCatBug: "🐛 Bug",
+  feedbackCatFeature: "💡 Feature",
+  feedbackCatUi: "🎨 UI/Design",
+  feedbackSaveBtn: "Save",
+  feedbackCopyAllBtn: "📋 Copy All",
+  feedbackCopiedMsg: "Copied ✓",
+  feedbackGithubBtn: "🐙 GitHub Issue",
+  feedbackEmpty: "No feedback notes saved yet.",
+
+  windowSizeTitle: "📐 Window Size",
+  windowSizeHint: (w, h) =>
+    `Drag window edges to resize freely (Current: ${w}×${h}px)`,
+  saveCurrentSizeBtn: "💾 Save Current Size",
+  resetStandardSizeBtn: "↺ Reset Standard Size",
+  sizeSavedBadge: "Size saved ✓",
+
+  miniDockTooltip: "Minimize to bottom-right mini counter widget",
+  restoreWindowTooltip: "Restore normal window size",
+  hideToTrayOnlyTooltip: "Hide completely to system tray",
+
+  triggerInternal: "🧠 Internal Impulse",
+  triggerExternal: "🔔 External Trigger",
+  triggerInternalTooltip:
+    "Interrupted by your own thoughts, boredom, curiosity, or internal urge",
+  triggerExternalTooltip:
+    "Interrupted by a notification, phone call, noise, or another person",
+
+  adhdTab: "🧠 Insights",
+  adhdFocusThresholdTitle: "⏱ Natural Focus Threshold",
+  adhdFocusThresholdDesc: (mins) =>
+    mins !== null
+      ? `You typically get distracted around minute ${mins}`
+      : "Log a few distractions to discover your threshold",
+  adhdTriggerRatioTitle: "🧠 Internal vs 🔔 External",
+  adhdTriggerRatioDesc: (intPct, intCnt, extCnt) =>
+    `${intPct}% Internal (${intCnt}) • ${100 - intPct}% External (${extCnt})`,
+  adhdChronoTitle: "☀️ Peak Focus vs Distraction Hours",
+  adhdChronoDesc: (peak, worst) =>
+    `Peak: ${peak || "—"} • Most Distracted: ${worst || "—"}`,
+  adhdTransitionTitle: "☕ Break-to-Work Friction",
+  adhdTransitionDesc: (avgMins, ratePct) =>
+    ratePct > 0
+      ? `${ratePct}% of breaks run overtime (Avg +${avgMins} min)`
+      : "Returning from breaks on time ✓",
+  adhdCompletionTitle: "🎯 Completion & Hyperfocus",
+  adhdCompletionDesc: (pct, hyperCnt) =>
+    `${pct}% completed • ${hyperCnt} hyperfocus (35+ min)`,
+  adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
+    const parts: string[] = [];
+    if (thresholdMins !== null && thresholdMins < 25) {
+      parts.push(
+        `💡 Your attention usually drifts around minute ${thresholdMins}. Setting work intervals to ~${Math.max(15, thresholdMins + 2)} min can help you finish cycles before focus drops.`,
+      );
+    } else if (thresholdMins !== null) {
+      parts.push(
+        `✨ Your natural focus threshold is ~${thresholdMins} min — well suited for deep focus blocks.`,
+      );
+    }
+    if (intPct >= 65) {
+      parts.push(
+        `🧠 ${intPct}% of your distractions are internal impulses${topTag ? ` (top: ${topTag})` : ""}. Keep a quick "parking lot" scratchpad for sudden thoughts.`,
+      );
+    } else if (intPct > 0 && intPct <= 35) {
+      parts.push(
+        `🔔 Most distractions are external triggers${topTag ? ` (${topTag})` : ""}. Silencing notifications before starting will protect your flow.`,
+      );
+    }
+    if (overtimeRate >= 40) {
+      parts.push(
+        `⏰ You experience transition friction returning from breaks (${overtimeRate}% overtime). Avoiddopamine traps (scrolling) during short breaks.`,
+      );
+    }
+    return parts.length > 0
+      ? parts.join("\n\n")
+      : "🌱 As you complete sessions and log distractions, personalized ADHD self-realization insights will appear here.";
+  },
 
   defaultDistractionTags: [
     "Phone",
