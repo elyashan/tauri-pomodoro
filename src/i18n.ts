@@ -306,6 +306,11 @@ export interface Translations {
   keepSyncAllBtn: string;
   keepSyncSingleBtn: string;
   keepSyncedBadge: string;
+  docsSyncAllBtn: string;
+  docsSyncSingleBtn: string;
+  docsSyncedBadge: string;
+  openGoogleDocBtn: string;
+  googleDocUrlHint: string;
 
   workStoryTab: string;
   workStoryTitle: string;
@@ -762,9 +767,14 @@ const tr: Translations = {
   parkingMarkUnimportant: "💤 Önemsiz",
   parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev, fikir veya ekran notu yok.",
 
-  keepSyncAllBtn: "🟨 Google Keep'e Aktar / Senkronize Et",
-  keepSyncSingleBtn: "🟨 Keep'e Gönder",
-  keepSyncedBadge: "Keep ✓",
+  keepSyncAllBtn: "📄 Google Dokümanlara Aktar",
+  keepSyncSingleBtn: "📄 Docs'a Gönder",
+  keepSyncedBadge: "Docs ✓",
+  docsSyncAllBtn: "📄 Google Dokümanlara Aktar",
+  docsSyncSingleBtn: "📄 Docs'a Gönder",
+  docsSyncedBadge: "Docs ✓",
+  openGoogleDocBtn: "📄 Odak Defteri Dokümanını Aç",
+  googleDocUrlHint: "Google Docs ve Drive API ile canlı senkronize edilen dokümanınız",
 
   workStoryTab: "📸 Hikaye",
   workStoryTitle: "📸 Çalışma Hikayesi (5 dk'da 1 SS + Açık Pencere + Context)",
@@ -781,7 +791,7 @@ const tr: Translations = {
   cloudAuthTitle: "☁️ Google Hesabı & Bulut Senkronizasyonu (Çevrimdışı Destekli)",
   cloudEmailPlaceholder: "Google E-posta (örn: ad.soyad@gmail.com)",
   cloudNamePlaceholder: "Görünen İsim (örn: Elyas)",
-  cloudTokenPlaceholder: "Google OAuth Access Token (opsiyonel, doğrudan Keep API için)",
+  cloudTokenPlaceholder: "Google OAuth Access Token (Docs & Drive API için)",
   cloudServerPlaceholder: "Sunucu URL (varsayılan: http://localhost:4000)",
   cloudSignInBtn: "🔐 Google ile Bağlan",
   cloudSignOutBtn: "Çıkış",
@@ -795,7 +805,7 @@ const tr: Translations = {
   cloudAuthSignOut: "Çıkış Yap",
   cloudAuthSignIn: "Giriş Yap",
   cloudAuthHint:
-    "Google OAuth Access Token opsiyoneldir. Girildiğinde Google Keep REST API ile doğrudan, girilmediğinde ise sunucu ve Web Bridge ile senkronize olur.",
+    "Google OAuth Access Token girildiğinde '🎯 Pomodoro Odak & Fikir Defteri' Google Dokümanı ve Drive resimleri doğrudan resmi Google API ile güncellenir.",
   pendingSyncQueueBadge: (cnt) => `Bekleyen kuyruk: ${cnt}`,
   lastSyncLabel: "Son senkronizasyon",
   dashboardUnfinishedTasks: "Yapılmayan Görevler",
@@ -1228,9 +1238,14 @@ const en: Translations = {
   parkingMarkUnimportant: "💤 Minor",
   parkingEmpty: "No impulsive tasks, ideas, or screenshot notes in your parking lot yet.",
 
-  keepSyncAllBtn: "🟨 Sync / Send to Google Keep",
-  keepSyncSingleBtn: "🟨 Send to Keep",
-  keepSyncedBadge: "Keep ✓",
+  keepSyncAllBtn: "📄 Sync to Google Docs",
+  keepSyncSingleBtn: "📄 Send to Docs",
+  keepSyncedBadge: "Docs ✓",
+  docsSyncAllBtn: "📄 Sync to Google Docs",
+  docsSyncSingleBtn: "📄 Send to Docs",
+  docsSyncedBadge: "Docs ✓",
+  openGoogleDocBtn: "📄 Open Focus Notebook Doc",
+  googleDocUrlHint: "Your living Google Doc synchronized via Google Docs & Drive API",
 
   workStoryTab: "📸 Story",
   workStoryTitle: "📸 Work Story (5m Screenshot + Active Window + Context)",
@@ -1247,7 +1262,7 @@ const en: Translations = {
   cloudAuthTitle: "☁️ Google Account & Cloud Sync (Offline-First)",
   cloudEmailPlaceholder: "Google Email (e.g. name@gmail.com)",
   cloudNamePlaceholder: "Display Name",
-  cloudTokenPlaceholder: "Google OAuth Access Token (optional, for direct Keep API)",
+  cloudTokenPlaceholder: "Google OAuth Access Token (for Docs & Drive API)",
   cloudServerPlaceholder: "Server URL (default: http://localhost:4000)",
   cloudSignInBtn: "🔐 Connect with Google",
   cloudSignOutBtn: "Sign Out",
@@ -1261,7 +1276,7 @@ const en: Translations = {
   cloudAuthSignOut: "Sign Out",
   cloudAuthSignIn: "Sign In",
   cloudAuthHint:
-    "Google OAuth Access Token is optional. When provided, direct Keep API is used; otherwise synced via Server & Web Bridge.",
+    "When a Google OAuth Access Token is provided, your '🎯 Pomodoro Odak & Fikir Defteri' Google Document and Drive screenshots are updated directly via official Google REST API.",
   pendingSyncQueueBadge: (cnt) => `Pending queue: ${cnt}`,
   lastSyncLabel: "Last sync",
   dashboardUnfinishedTasks: "Unfinished Tasks",

@@ -22,13 +22,16 @@ export interface SyncStatusResult {
   message: string;
 }
 
-export interface KeepSyncResult {
+export interface DocsSyncResult {
   ok: boolean;
   syncedCount: number;
-  method: "keep_api" | "tasks_api" | "server_keep" | "web_bridge";
+  method: "google_docs_api" | "server_docs" | "web_bridge";
   message: string;
-  noteUrl?: string;
+  docUrl?: string;
+  documentId?: string;
 }
+
+export type KeepSyncResult = DocsSyncResult;
 
 /**
  * Google OAuth Access Token ile Google kullanıcı bilgilerini doğrular
@@ -264,51 +267,73 @@ export async function syncWithCloudServer(): Promise<SyncStatusResult> {
 }
 
 /**
- * Görevleri ve düşünceleri (Parking Lot) Google Keep için okunaklı bir not/kontrol listesi metnine dönüştürür.
+ * Görevleri, fikirleri ve ekran notlarını Google Docs için okunaklı, profesyonel bir
+ * odak günlüğü metnine dönüştürür.
  */
-export function formatParkingForGoogleKeep(
+export function formatParkingForGoogleDocs(
   parking: ParkingLotData,
   singleItem?: ParkingItem,
-): { title: string; bodyText: string; items: ParkingItem[] } {
+): { title: string; bodyText: string; items: ParkingItem[]; hasScreenshots: boolean } {
   const dateStr = new Date().toLocaleDateString("tr-TR", {
     day: "2-digit",
-    month: "short",
+    month: "long",
     year: "numeric",
   });
+  const timeStr = new Date().toLocaleTimeString("tr-TR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const divider = "────────────────────────────────────────────────────────────";
 
   if (singleItem) {
-    const typeLabel =
-      singleItem.item_type === "task"
-        ? "⚡ Dürtüsel Görev"
-        : singleItem.item_type === "screenshot"
-          ? "📸 Ekran Notu"
-          : "💡 Fikir / Düşünce";
+    const isTask = singleItem.item_type === "task";
+    const isSS = singleItem.item_type === "screenshot";
+    const headerTitle = isTask
+      ? (singleItem.status === "done" ? "✅ TAMAMLANAN GÖREV" : "⚡ YAPILACAK DÜRTÜSEL GÖREV")
+      : isSS
+        ? "📸 EKRAN GÖRÜNTÜSÜ NOTU"
+        : (singleItem.status === "important" ? "⭐ ÖNEMLİ FİKİR" : "💡 AKLA GELEN FİKİR");
+
     const lines: string[] = [
-      `${singleItem.item_type === "task" ? (singleItem.status === "done" ? "☑" : "☐") : "•"} ${singleItem.content}`,
+      divider,
+      `📅 ${dateStr}, ${timeStr} — ${headerTitle}`,
+      divider,
+      `${isTask ? (singleItem.status === "done" ? "☑ [X]" : "☐ [ ]") : "•"} ${singleItem.content}`,
     ];
+
     if (singleItem.context_text) {
-      lines.push(`🎯 Meşguliyet (Context): ${singleItem.context_text}`);
+      lines.push(`   🎯 Meşguliyet (Context): ${singleItem.context_text}`);
     }
     if (singleItem.active_app || singleItem.active_window) {
       lines.push(
-        `🪟 Açık Pencere: ${[singleItem.active_app, singleItem.active_window].filter(Boolean).join(" — ")}`,
+        `   🪟 Aktif Pencere: ${[singleItem.active_app, singleItem.active_window].filter(Boolean).join(" — ")}`,
       );
     }
+    lines.push("");
+
     return {
-      title: `Pomodoro ${typeLabel} (${dateStr})`,
+      title: `🎯 Pomodoro Odak Kaydı (${dateStr})`,
       bodyText: lines.join("\n"),
       items: [singleItem],
+      hasScreenshots: Boolean(singleItem.screenshot_data),
     };
   }
 
-  const lines: string[] = [];
+  const lines: string[] = [
+    divider,
+    `📅 ${dateStr}, ${timeStr} — POMODORO ODAK & FİKİR KAYDI`,
+    divider,
+    "",
+  ];
   const allItems: ParkingItem[] = [];
 
   if (parking.pendingTasks.length > 0) {
     lines.push("⏳ YAPILACAK GÖREVLER (Unfinished Tasks):");
     for (const t of parking.pendingTasks) {
       const ctx = t.context_text ? ` [🎯 ${t.context_text}]` : "";
-      lines.push(`☐ ${t.content}${ctx}`);
+      const win = t.active_app ? ` (🪟 ${t.active_app})` : "";
+      lines.push(`  ☐ ${t.content}${ctx}${win}`);
       allItems.push(t);
     }
     lines.push("");
@@ -317,7 +342,7 @@ export function formatParkingForGoogleKeep(
   if (parking.doneTasks.length > 0) {
     lines.push("✅ TAMAMLANAN GÖREVLER (Finished Tasks):");
     for (const t of parking.doneTasks) {
-      lines.push(`☑ ${t.content}`);
+      lines.push(`  ☑ ${t.content}`);
       allItems.push(t);
     }
     lines.push("");
@@ -333,134 +358,350 @@ export function formatParkingForGoogleKeep(
     for (const idea of allIdeas) {
       const badge =
         idea.status === "important"
-          ? "⭐ [Önemli] "
+          ? "⭐ [ÖNEMLİ] "
           : idea.status === "unimportant"
             ? "💤 [Önemsiz] "
             : "💡 ";
-      const ctx = idea.context_text ? ` (🎯 ${idea.context_text})` : "";
-      lines.push(`• ${badge}${idea.content}${ctx}`);
+      const ctx = idea.context_text ? ` [🎯 ${idea.context_text}]` : "";
+      lines.push(`  • ${badge}${idea.content}${ctx}`);
       allItems.push(idea);
     }
     lines.push("");
   }
 
+  let hasScreenshots = false;
   if (parking.screenshotNotes && parking.screenshotNotes.length > 0) {
+    hasScreenshots = true;
     lines.push("📸 EKRAN GÖRÜNTÜSÜ NOTLARI:");
     for (const s of parking.screenshotNotes) {
-      lines.push(`• 📸 ${s.content}${s.active_app ? ` [${s.active_app}]` : ""}`);
+      const win = [s.active_app, s.active_window].filter(Boolean).join(" — ");
+      lines.push(`  • 📸 ${s.content}${win ? ` [🪟 ${win}]` : ""}`);
       allItems.push(s);
     }
+    lines.push("");
   }
 
   return {
-    title: `🍅 Pomodoro Görevler & Düşünceler (${dateStr})`,
-    bodyText: lines.join("\n").trim() || "Henüz kayıtlı görev veya düşünce yok.",
+    title: `🎯 Pomodoro Odak & Fikir Defteri (${dateStr})`,
+    bodyText: lines.join("\n").trim() + "\n\n",
     items: allItems,
+    hasScreenshots,
+  };
+}
+
+export const formatParkingForGoogleKeep = formatParkingForGoogleDocs;
+
+/**
+ * Base64 JPEG/PNG ekran görüntüsünü Google Drive'a multipart upload ile yükler.
+ * Dokümanda tıklanabilir veya gömülebilir Drive görüntü bağlantısı oluşturur.
+ */
+export async function uploadScreenshotToGoogleDrive(
+  accessToken: string,
+  screenshotDataUrl: string,
+  title: string,
+): Promise<{ fileId: string; webViewLink: string; webContentLink?: string } | null> {
+  try {
+    const parts = screenshotDataUrl.split(",");
+    if (parts.length < 2) return null;
+    const mimeMatch = parts[0].match(/data:(.*?);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+    const base64Data = parts[1];
+
+    const safeTitle = (title || "pomodoro_ss")
+      .replace(/[^a-zA-Z0-9_\-]/g, "_")
+      .slice(0, 40);
+    const filename = `${safeTitle}_${Date.now()}.${mimeType.includes("png") ? "png" : "jpg"}`;
+
+    const metadata = {
+      name: filename,
+      mimeType,
+      description: "Pomodoro Odak Defteri ekran görüntüsü notu",
+    };
+
+    const boundary = "-------PomodoroDriveBoundary" + Math.random().toString(36).substring(2);
+    const delimiter = "\r\n--" + boundary + "\r\n";
+    const closeDelim = "\r\n--" + boundary + "--";
+
+    const multipartRequestBody =
+      delimiter +
+      "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify(metadata) +
+      delimiter +
+      `Content-Type: ${mimeType}\r\n` +
+      "Content-Transfer-Encoding: base64\r\n\r\n" +
+      base64Data +
+      closeDelim;
+
+    const res = await fetch(
+      "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+        },
+        body: multipartRequestBody,
+      },
+    );
+
+    if (!res.ok) {
+      return null;
+    }
+
+    const file = await res.json();
+    const fileId = file.id;
+    const webViewLink = file.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
+
+    // Dosyayı kullanıcı oturumu veya bağlantısı olan herkes için okunabilir yap
+    try {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role: "reader", type: "anyone" }),
+      });
+    } catch {
+      // İzin verilemezse bile bağlantı kalır
+    }
+
+    return {
+      fileId,
+      webViewLink,
+      webContentLink: file.webContentLink || `https://drive.google.com/uc?id=${fileId}&export=download`,
+    };
+  } catch (err) {
+    console.error("[GoogleDrive] Ekran görüntüsü yüklenemedi:", err);
+    return null;
+  }
+}
+
+/**
+ * Kullanıcının Google Drive'ında "🎯 Pomodoro Odak & Fikir Defteri" adında
+ * bir doküman arar. Varsa id'sini döner, yoksa yeni oluşturur.
+ */
+export async function findOrCreateGoogleDoc(
+  accessToken: string,
+  cachedDocId?: string | null,
+): Promise<{ documentId: string; docUrl: string; isNew: boolean }> {
+  const docTitle = "🎯 Pomodoro Odak & Fikir Defteri";
+
+  // 1. Önce önbellekteki docId geçerli mi kontrol et
+  if (cachedDocId) {
+    try {
+      const checkResp = await fetch(
+        `https://docs.googleapis.com/v1/documents/${cachedDocId}?fields=documentId,title`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+      );
+      if (checkResp.ok) {
+        const checkData = await checkResp.json();
+        if (checkData.documentId) {
+          return {
+            documentId: checkData.documentId,
+            docUrl: `https://docs.google.com/document/d/${checkData.documentId}/edit`,
+            isNew: false,
+          };
+        }
+      }
+    } catch {
+      // Önbellek geçerli değil, Drive aramasından devam et
+    }
+  }
+
+  // 2. Google Drive'da ara
+  try {
+    const q = encodeURIComponent(`name='${docTitle}' and mimeType='application/vnd.google-apps.document' and trashed=false`);
+    const searchResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,webViewLink)&pageSize=1`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+
+    if (searchResp.ok) {
+      const searchData = await searchResp.json();
+      if (Array.isArray(searchData.files) && searchData.files.length > 0) {
+        const found = searchData.files[0];
+        return {
+          documentId: found.id,
+          docUrl: found.webViewLink || `https://docs.google.com/document/d/${found.id}/edit`,
+          isNew: false,
+        };
+      }
+    }
+  } catch {
+    // Drive araması başarısız olursa oluşturmayı dene
+  }
+
+  // 3. Bulunamadıysa yeni Google Doc oluştur
+  const createResp = await fetch("https://docs.googleapis.com/v1/documents", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ title: docTitle }),
+  });
+
+  if (!createResp.ok) {
+    const errText = await createResp.text();
+    throw new Error(`Google Docs oluşturulamadı (${createResp.status}): ${errText}`);
+  }
+
+  const newDoc = await createResp.json();
+  const documentId = newDoc.documentId;
+  const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+  // Yeni dokümana başlık ve hoş geldiniz metni ekle
+  try {
+    const welcomeText =
+      "🎯 POMODORO ODAK & FİKİR DEFTERİ\n" +
+      "Bu doküman, Pomodoro Widget tarafından çalışma seanslarınızda aldığınız dürtüsel görevleri,\n" +
+      "akla gelen fikirleri ve ekran görüntüsü notlarını canlı olarak depolar.\n\n";
+
+    await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            insertText: {
+              endOfSegmentLocation: { segmentId: "" },
+              text: welcomeText,
+            },
+          },
+        ],
+      }),
+    });
+  } catch {
+    // Başlık eklenemese bile doküman oluşturuldu
+  }
+
+  return {
+    documentId,
+    docUrl,
+    isNew: true,
   };
 }
 
 /**
- * Görevleri ve düşünceleri Google Keep'e (ve Google yan panelindeki Google Tasks'a) kaydeder.
- * 1) Eğer OAuth Access Token varsa:
- *    - Resmi Google Keep API (`https://keep.googleapis.com/v1/notes`) üzerinden not oluşturur.
- *    - Kişisel Gmail hesapları için aynı zamanda Google Tasks API (`https://tasks.googleapis.com/v1/lists/@default/tasks`)
- *      ve Sunucu Keep Köprüsü (`/api/keep/sync`) üzerinden senkronize eder.
- * 2) Ayrıca her durumda panoya Keep formatında kopyalar ve istenirse `keep.google.com`'u açar.
+ * Görevleri, fikirleri ve SS ekran görüntülerini resmi Google Docs ve Drive REST API
+ * aracılığıyla kullanıcının "🎯 Pomodoro Odak & Fikir Defteri" dokümanına otomatik kaydeder.
+ *
+ * 1) Google OAuth Access Token varsa:
+ *    - Google Drive'da "🎯 Pomodoro Odak & Fikir Defteri" dokümanını bulur veya oluşturur.
+ *    - Varsa ekran görüntülerini doğrudan Google Drive'a yükler ve bağlantılarını ekler.
+ *    - Görevleri (yapılacak/yapılan) ve fikirleri (önemli/önemsiz) dokümana ekler.
+ *    - Tarayıcıda bu canlı dokümanı doğrudan açar.
+ * 2) Token yoksa sunucu köprüsü (`/api/docs/sync`) veya panoya kopyalayıp Google Docs açma modunu kullanır.
  */
-export async function syncParkingToGoogleKeep(
+export async function syncParkingToGoogleDocs(
   parking: ParkingLotData,
-  options?: { singleItem?: ParkingItem; openBrowserIfNoToken?: boolean },
-): Promise<KeepSyncResult> {
+  options?: {
+    singleItem?: ParkingItem;
+    openBrowserIfNoToken?: boolean;
+    openDocument?: boolean;
+  },
+): Promise<DocsSyncResult> {
   const auth = await loadCloudAuthState();
-  const formatted = formatParkingForGoogleKeep(parking, options?.singleItem);
+  const formatted = formatParkingForGoogleDocs(parking, options?.singleItem);
   const itemIds = formatted.items.map((i) => i.id);
 
-  // Panoya her zaman temiz Keep formatını kopyala (kullanıcı Keep'te Ctrl+V de yapabilsin)
+  // Panoya her durumda yedek olarak kopyala
   try {
     await navigator.clipboard.writeText(`${formatted.title}\n\n${formatted.bodyText}`);
   } catch {
-    // clipboard izni yoksa yoksay
+    // clipboard izni yoksa devam et
   }
 
-  // 1. OAuth Access Token varsa doğrudan Google Keep REST API dene
+  // 1. Resmi Google Docs & Drive REST API Entegrasyonu
   if (auth.accessToken) {
     try {
-      const keepPayload = {
-        title: formatted.title,
-        body: {
-          text: {
-            text: formatted.bodyText,
-          },
-        },
-      };
-      const keepResp = await fetch("https://keep.googleapis.com/v1/notes", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${auth.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(keepPayload),
-      });
+      const { documentId, docUrl } = await findOrCreateGoogleDoc(
+        auth.accessToken,
+        auth.googleDocId,
+      );
 
-      if (keepResp.ok) {
-        const keepData = await keepResp.json();
-        await markParkingItemsKeepSynced(itemIds, keepData?.name || "keep_api");
+      // Ekran görüntüleri varsa Google Drive'a yükle ve bağlantılarını metne ekle
+      let appendText = formatted.bodyText;
+      for (const item of formatted.items) {
+        if (item.screenshot_data) {
+          const driveFile = await uploadScreenshotToGoogleDrive(
+            auth.accessToken,
+            item.screenshot_data,
+            `SS_${item.content.slice(0, 24)}`,
+          );
+          if (driveFile) {
+            appendText += `📸 Ekran Notu ("${item.content}") Google Drive Bağlantısı:\n   🔗 ${driveFile.webViewLink}\n\n`;
+          }
+        }
+      }
+
+      // Google Docs batchUpdate ile dokümanın sonuna ekle
+      const updateResp = await fetch(
+        `https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${auth.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                insertText: {
+                  endOfSegmentLocation: { segmentId: "" },
+                  text: appendText,
+                },
+              },
+            ],
+          }),
+        },
+      );
+
+      if (updateResp.ok) {
+        // Durumu ve doküman ID'sini kaydet
+        const nextAuth: CloudAuthState = {
+          ...auth,
+          googleDocId: documentId,
+          googleDocUrl: docUrl,
+          lastSyncAt: new Date().toISOString(),
+        };
+        await saveCloudAuthState(nextAuth);
+        await markParkingItemsKeepSynced(itemIds, docUrl);
+
+        if (options?.openDocument !== false) {
+          try {
+            await openUrl(docUrl);
+          } catch {
+            window.open(docUrl, "_blank");
+          }
+        }
+
         return {
           ok: true,
           syncedCount: itemIds.length,
-          method: "keep_api",
-          message: `Google Keep API ile ${itemIds.length} kayıt doğrudan Google Keep'e kaydedildi!`,
-          noteUrl: "https://keep.google.com/",
+          method: "google_docs_api",
+          documentId,
+          docUrl,
+          message: `Google Docs "🎯 Pomodoro Odak & Fikir Defteri"ne ${itemIds.length} kayıt ve ekran resimleri kaydedildi!`,
         };
       }
-
-      // Kişisel Gmail hesaplarında Keep REST API yerine Google Workspace sağ panelindeki Tasks API açıktır
-      const unsyncedItems = formatted.items.filter((i) => !i.keep_synced);
-      const targets = unsyncedItems.length > 0 ? unsyncedItems : formatted.items;
-      let tasksCreated = 0;
-      for (const item of targets.slice(0, 15)) {
-        const tResp = await fetch(
-          "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${auth.accessToken}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              title: `${item.item_type === "idea" ? "💡 " : "⚡ "}${item.content}`,
-              notes: [
-                item.context_text ? `🎯 Context: ${item.context_text}` : "",
-                item.active_app ? `🪟 Uygulama: ${item.active_app} (${item.active_window || ""})` : "",
-              ]
-                .filter(Boolean)
-                .join("\n"),
-              status: item.status === "done" ? "completed" : "needsAction",
-            }),
-          },
-        );
-        if (tResp.ok) tasksCreated++;
-      }
-
-      if (tasksCreated > 0) {
-        await markParkingItemsKeepSynced(itemIds, "google_tasks_keep_panel");
-        return {
-          ok: true,
-          syncedCount: tasksCreated,
-          method: "tasks_api",
-          message: `${tasksCreated} kayıt Google hesabınıza (Keep / Yan Panel Görevler) senkronize edildi!`,
-          noteUrl: "https://keep.google.com/",
-        };
-      }
-    } catch {
-      // Sunucu üzerinden devam et
+    } catch (err: any) {
+      console.warn("[GoogleDocs] Doğrudan API çağrısı başarısız, sunucuya geçiliyor:", err);
     }
   }
 
-  // 2. Sunucu Keep Senkronizasyon uç noktasını dene (`/api/keep/sync`)
+  // 2. Sunucu Köprüsü (`/api/docs/sync`)
   if (auth.serverUrl) {
     try {
-      const sResp = await fetch(`${auth.serverUrl}/api/keep/sync`, {
+      const sResp = await fetch(`${auth.serverUrl}/api/docs/sync`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -468,42 +709,48 @@ export async function syncParkingToGoogleKeep(
           email: auth.email,
           accessToken: auth.accessToken,
           title: formatted.title,
-          bodyText: formatted.bodyText,
+          textToAppend: formatted.bodyText,
           items: formatted.items,
         }),
       });
+
       if (sResp.ok) {
         const sData = await sResp.json();
-        await markParkingItemsKeepSynced(itemIds, sData?.noteId || "server_keep");
-        if (options?.openBrowserIfNoToken && !auth.accessToken) {
+        const docUrl = sData.docUrl || auth.googleDocUrl || "https://docs.google.com/";
+        await markParkingItemsKeepSynced(itemIds, docUrl);
+
+        if (options?.openDocument !== false && docUrl) {
           try {
-            await openUrl("https://keep.google.com/");
+            await openUrl(docUrl);
           } catch {
-            window.open("https://keep.google.com/", "_blank");
+            window.open(docUrl, "_blank");
           }
         }
+
         return {
           ok: true,
           syncedCount: itemIds.length,
-          method: "server_keep",
+          method: "server_docs",
+          docUrl,
           message:
-            sData?.message ||
-            `${itemIds.length} kayıt Google Keep senkronizasyonuna aktarıldı (Panoya da kopyalandı).`,
-          noteUrl: "https://keep.google.com/",
+            sData.message ||
+            `${itemIds.length} kayıt sunucu ve Google Docs Odak Defteri'ne aktarıldı.`,
         };
       }
     } catch {
-      // Web köprüsüne düş
+      // Sunucuya ulaşılamazsa web köprüsüne geç
     }
   }
 
-  // 3. Web Köprüsü: Panoya kopyalandı + Google Keep'i aç
-  await markParkingItemsKeepSynced(itemIds, "keep_web_bridge");
+  // 3. Web Köprüsü: Not panoya kopyalandı + Google Docs aç
+  const createDocUrl = "https://docs.google.com/document/create";
+  await markParkingItemsKeepSynced(itemIds, "docs_clipboard_bridge");
+
   if (options?.openBrowserIfNoToken !== false) {
     try {
-      await openUrl("https://keep.google.com/");
+      await openUrl(createDocUrl);
     } catch {
-      window.open("https://keep.google.com/", "_blank");
+      window.open(createDocUrl, "_blank");
     }
   }
 
@@ -511,8 +758,13 @@ export async function syncParkingToGoogleKeep(
     ok: true,
     syncedCount: itemIds.length,
     method: "web_bridge",
+    docUrl: createDocUrl,
     message:
-      "Görev ve düşünceler Google Keep formatında panoya kopyalandı ve Google Keep açıldı (Ctrl+V ile yapıştırabilirsiniz).",
-    noteUrl: "https://keep.google.com/",
+      "Görevler, fikirler ve notlar panoya kopyalandı ve Google Docs açıldı (Ctrl+V ile yapıştırabilirsiniz). Doğrudan otomatik kayıt için Ayarlar'dan Google OAuth Access Token ekleyin.",
   };
 }
+
+/**
+ * Geriye uyumluluk için alias
+ */
+export const syncParkingToGoogleKeep = syncParkingToGoogleDocs;

@@ -103,6 +103,7 @@ import {
   getWorkStoryEntries,
   deleteWorkStoryEntry,
   loadCloudAuthState,
+  saveCloudAuthState,
   markParkingItemsKeepSynced,
   getPendingSyncCount,
 } from "./db";
@@ -116,7 +117,7 @@ import {
   signInWithGoogleAccount,
   signOutGoogleAccount,
   syncWithCloudServer,
-  syncParkingToGoogleKeep,
+  syncParkingToGoogleDocs,
 } from "./cloudSync";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
@@ -2555,11 +2556,11 @@ export default function App() {
         <div className="parking-row-right">
           <button
             type="button"
-            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
             onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
           >
-            {item.keep_synced ? "✓" : "🟨"}
+            {item.keep_synced ? "✓" : "📄"}
           </button>
           <button
             type="button"
@@ -2611,11 +2612,11 @@ export default function App() {
           </button>
           <button
             type="button"
-            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
             onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
           >
-            {item.keep_synced ? "✓" : "🟨"}
+            {item.keep_synced ? "✓" : "📄"}
           </button>
           <button
             type="button"
@@ -2661,11 +2662,11 @@ export default function App() {
         <div className="parking-row-right">
           <button
             type="button"
-            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
             onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
           >
-            {item.keep_synced ? "✓" : "🟨"}
+            {item.keep_synced ? "✓" : "📄"}
           </button>
           <button
             type="button"
@@ -2696,15 +2697,15 @@ export default function App() {
           )}
           <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
             {keepStatusMsg && (
-              <span className="keep-status-pill">{keepStatusMsg}</span>
+              <span className="docs-status-pill">{keepStatusMsg}</span>
             )}
             <button
               type="button"
-              className="keep-sync-btn"
+              className="docs-sync-btn"
               onClick={handleSyncParkingToKeep}
-              title={t.keepSyncAllBtn}
+              title={t.docsSyncAllBtn}
             >
-              🟨 Keep
+              📄 Docs
             </button>
           </div>
         </div>
@@ -2782,15 +2783,22 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // GOOGLE KEEP & BULUT SENKRONİZASYON İŞLEMLERİ
+  // GOOGLE DOCS / DRIVE DEFTERİ & BULUT SENKRONİZASYON İŞLEMLERİ
   // ---------------------------------------------------------------------------
   const handleSyncParkingToKeep = async () => {
     setKeepStatusMsg("...");
     try {
       const pData = await getParkingLotData(false);
-      const res = await syncParkingToGoogleKeep(pData);
+      const res = await syncParkingToGoogleDocs(pData);
       setKeepStatusMsg(res.message);
       if (res.ok) {
+        if (res.docUrl) {
+          setCloudAuth((prev) => ({
+            ...prev,
+            googleDocUrl: res.docUrl || prev.googleDocUrl,
+            googleDocId: res.documentId || prev.googleDocId,
+          }));
+        }
         const allIds = [
           ...pData.pendingTasks,
           ...pData.doneTasks,
@@ -2799,13 +2807,13 @@ export default function App() {
           ...pData.unimportantIdeas,
           ...pData.screenshotNotes,
         ].map((it) => it.id);
-        await markParkingItemsKeepSynced(allIds);
+        await markParkingItemsKeepSynced(allIds, res.docUrl);
         await refreshParkingViews();
       }
-      setTimeout(() => setKeepStatusMsg(null), 3500);
+      setTimeout(() => setKeepStatusMsg(null), 4000);
     } catch (err) {
       setKeepStatusMsg(String(err));
-      setTimeout(() => setKeepStatusMsg(null), 3500);
+      setTimeout(() => setKeepStatusMsg(null), 4000);
     }
   };
 
@@ -2832,18 +2840,25 @@ export default function App() {
             : [],
         screenshotNotes: item.item_type === "screenshot" ? [item] : [],
       };
-      const res = await syncParkingToGoogleKeep(singleData, {
+      const res = await syncParkingToGoogleDocs(singleData, {
         singleItem: item,
       });
       setKeepStatusMsg(res.message);
       if (res.ok) {
-        await markParkingItemsKeepSynced([item.id]);
+        if (res.docUrl) {
+          setCloudAuth((prev) => ({
+            ...prev,
+            googleDocUrl: res.docUrl || prev.googleDocUrl,
+            googleDocId: res.documentId || prev.googleDocId,
+          }));
+        }
+        await markParkingItemsKeepSynced([item.id], res.docUrl);
         await refreshParkingViews();
       }
-      setTimeout(() => setKeepStatusMsg(null), 3500);
+      setTimeout(() => setKeepStatusMsg(null), 4000);
     } catch (err) {
       setKeepStatusMsg(String(err));
-      setTimeout(() => setKeepStatusMsg(null), 3500);
+      setTimeout(() => setKeepStatusMsg(null), 4000);
     }
   };
 
@@ -6355,10 +6370,21 @@ export default function App() {
                       </div>
                       <div className="cloud-auth-actions">
                         {syncStatusMsg && (
-                          <span className="keep-status-pill">
+                          <span className="docs-status-pill">
                             {syncStatusMsg}
                           </span>
                         )}
+                        <button
+                          type="button"
+                          className="docs-sync-btn"
+                          onClick={() => {
+                            const url = cloudAuth.googleDocUrl || "https://docs.google.com/";
+                            openUrl(url).catch(() => window.open(url, "_blank"));
+                          }}
+                          title={t.googleDocUrlHint}
+                        >
+                          {t.openGoogleDocBtn}
+                        </button>
                         <button
                           type="button"
                           className="primary-btn"
@@ -6374,6 +6400,29 @@ export default function App() {
                           onClick={handleGoogleSignOut}
                         >
                           {t.cloudAuthSignOut}
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "6px" }}>
+                        <input
+                          type="password"
+                          className="cloud-input"
+                          style={{ flex: 1 }}
+                          placeholder={t.cloudTokenPlaceholder}
+                          value={cloudTokenInput}
+                          onChange={(e) => setCloudTokenInput(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={async () => {
+                            const nextAuth = { ...cloudAuth, accessToken: cloudTokenInput.trim() };
+                            await saveCloudAuthState(nextAuth);
+                            setCloudAuth(nextAuth);
+                            setSyncStatusMsg("Google Token kaydedildi!");
+                            setTimeout(() => setSyncStatusMsg(null), 3000);
+                          }}
+                        >
+                          💾 Token Kaydet
                         </button>
                       </div>
                     </div>
@@ -6402,6 +6451,13 @@ export default function App() {
                           placeholder={t.cloudNamePlaceholder}
                           value={cloudNameInput}
                           onChange={(e) => setCloudNameInput(e.target.value)}
+                        />
+                        <input
+                          type="password"
+                          className="cloud-input"
+                          placeholder={t.cloudTokenPlaceholder}
+                          value={cloudTokenInput}
+                          onChange={(e) => setCloudTokenInput(e.target.value)}
                         />
                         <input
                           type="text"
@@ -6465,11 +6521,11 @@ export default function App() {
                         </span>
                         <button
                           type="button"
-                          className="keep-sync-btn"
+                          className="docs-sync-btn"
                           onClick={handleSyncParkingToKeep}
-                          title={t.keepSyncAllBtn}
+                          title={t.docsSyncAllBtn}
                         >
-                          🟨 Keep
+                          📄 Docs
                         </button>
                       </div>
                       <div className="dashboard-list">
@@ -6499,15 +6555,15 @@ export default function App() {
                               <div className="parking-row-right">
                                 <button
                                   type="button"
-                                  className={`keep-chip-btn ${
+                                  className={`docs-chip-btn ${
                                     it.keep_synced ? "synced" : ""
                                   }`}
                                   onClick={() =>
                                     handleSyncSingleItemToKeep(it)
                                   }
-                                  title="Google Keep"
+                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
                                 >
-                                  {it.keep_synced ? "✓" : "🟨"}
+                                  {it.keep_synced ? "✓" : "📄"}
                                 </button>
                                 <button
                                   type="button"
@@ -6559,15 +6615,15 @@ export default function App() {
                               <div className="parking-row-right">
                                 <button
                                   type="button"
-                                  className={`keep-chip-btn ${
+                                  className={`docs-chip-btn ${
                                     it.keep_synced ? "synced" : ""
                                   }`}
                                   onClick={() =>
                                     handleSyncSingleItemToKeep(it)
                                   }
-                                  title="Google Keep"
+                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
                                 >
-                                  {it.keep_synced ? "✓" : "🟨"}
+                                  {it.keep_synced ? "✓" : "📄"}
                                 </button>
                                 <button
                                   type="button"
@@ -6619,15 +6675,15 @@ export default function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  className={`keep-chip-btn ${
+                                  className={`docs-chip-btn ${
                                     it.keep_synced ? "synced" : ""
                                   }`}
                                   onClick={() =>
                                     handleSyncSingleItemToKeep(it)
                                   }
-                                  title="Google Keep"
+                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
                                 >
-                                  {it.keep_synced ? "✓" : "🟨"}
+                                  {it.keep_synced ? "✓" : "📄"}
                                 </button>
                                 <button
                                   type="button"
@@ -6691,15 +6747,15 @@ export default function App() {
                                 </button>
                                 <button
                                   type="button"
-                                  className={`keep-chip-btn ${
+                                  className={`docs-chip-btn ${
                                     it.keep_synced ? "synced" : ""
                                   }`}
                                   onClick={() =>
                                     handleSyncSingleItemToKeep(it)
                                   }
-                                  title="Google Keep"
+                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
                                 >
-                                  {it.keep_synced ? "✓" : "🟨"}
+                                  {it.keep_synced ? "✓" : "📄"}
                                 </button>
                                 <button
                                   type="button"

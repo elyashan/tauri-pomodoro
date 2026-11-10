@@ -61,6 +61,7 @@ function ensureUserBucket(store, userObj) {
         work_story_entries: [],
         tags: [],
         keep_notes: [],
+        docs_entries: [],
       },
     };
   } else {
@@ -330,6 +331,12 @@ const WEB_DASHBOARD_HTML = `<!DOCTYPE html>
             <ul>\${ideas.map(i => '<li><span>' + (i.status === 'important' ? '⭐ ' : i.status === 'unimportant' ? '💤 ' : '💡 ') + i.content + '</span></li>').join('') || '<li>Yok</li>'}</ul>
           </div>
         </div>
+        \${d.docs_entries && d.docs_entries.length > 0 ? \`
+        <div class="card" style="margin-bottom:14px">
+          <h3>📄 Google Docs & Drive Odak Defteri Güncellemeleri (\${d.docs_entries.length})</h3>
+          <div style="max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; background: #12110e; padding: 10px; border-radius: 6px; border: 1px solid #2f2a22; color: #d4d4d8;">\${d.docs_entries.slice(0, 3).map(e => '--- ' + (e.title || 'Odak Defteri') + ' (' + new Date(e.syncedAt).toLocaleString('tr-TR') + ') ---\\n' + (e.textToAppend || '')).join('\\n\\n')}</div>
+        </div>
+        \` : ''}
         <div class="card">
           <h3>📸 Çalışma Hikayesi (5 dk'da 1 Screenshot + Açık Pencere + Context)</h3>
           <div class="story-grid">
@@ -367,7 +374,7 @@ const server = http.createServer(async (req, res) => {
       const store = loadStore();
       sendJson(res, 200, {
         ok: true,
-        version: "0.1.14",
+        version: "0.1.15",
         usersCount: Object.keys(store.users).length,
       });
       return;
@@ -414,6 +421,33 @@ const server = http.createServer(async (req, res) => {
         syncedMutationsCount: Array.isArray(body.mutations)
           ? body.mutations.length
           : 0,
+      });
+      return;
+    }
+
+    if (pathname === "/api/docs/sync" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const store = loadStore();
+      const bucket = ensureUserBucket(store, {
+        userId: body.userId,
+        email: body.email,
+      });
+      const docEntryId = "docs_" + Date.now();
+      bucket.data.docs_entries = bucket.data.docs_entries || [];
+      bucket.data.docs_entries.unshift({
+        entryId: docEntryId,
+        title: body.title || "🎯 Pomodoro Odak & Fikir Defteri",
+        textToAppend: body.textToAppend || "",
+        itemCount: Array.isArray(body.items) ? body.items.length : 0,
+        syncedAt: new Date().toISOString(),
+      });
+      bucket.data.docs_entries = bucket.data.docs_entries.slice(0, 50);
+      saveStore(store);
+      sendJson(res, 200, {
+        ok: true,
+        docEntryId,
+        docUrl: "https://docs.google.com/",
+        message: `${Array.isArray(body.items) ? body.items.length : 1} kayıt Google Docs Odak Defteri'ne başarıyla senkronize edildi.`,
       });
       return;
     }

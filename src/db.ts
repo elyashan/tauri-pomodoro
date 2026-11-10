@@ -153,6 +153,8 @@ export interface CloudAuthState {
   serverUrl: string;
   googleClientId?: string;
   autoSyncKeep: boolean;
+  googleDocId?: string | null;
+  googleDocUrl?: string | null;
   lastSyncAt: string | null;
 }
 
@@ -165,6 +167,8 @@ export const DEFAULT_CLOUD_AUTH: CloudAuthState = {
   serverUrl: "http://localhost:4000",
   googleClientId: "",
   autoSyncKeep: true,
+  googleDocId: null,
+  googleDocUrl: null,
   lastSyncAt: null,
 };
 
@@ -2787,6 +2791,10 @@ export async function loadCloudAuthState(): Promise<CloudAuthState> {
         typeof parsed.googleClientId === "string" ? parsed.googleClientId.trim() : "",
       autoSyncKeep:
         typeof parsed.autoSyncKeep === "boolean" ? parsed.autoSyncKeep : true,
+      googleDocId:
+        typeof parsed.googleDocId === "string" ? parsed.googleDocId : null,
+      googleDocUrl:
+        typeof parsed.googleDocUrl === "string" ? parsed.googleDocUrl : null,
       lastSyncAt: typeof parsed.lastSyncAt === "string" ? parsed.lastSyncAt : null,
     };
   } catch {

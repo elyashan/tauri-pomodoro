@@ -2981,7 +2981,7 @@ button.qc-mini-btn:hover {
   pointer-events: none;
 }
 
-/* Otopark & Google Keep Entegrasyonu */
+/* Otopark & Google Docs / Drive Entegrasyonu */
 .parking-header-bar {
   display: flex;
   justify-content: space-between;
@@ -2989,26 +2989,29 @@ button.qc-mini-btn:hover {
   margin-bottom: 4px;
 }
 
-button.keep-sync-btn {
+button.keep-sync-btn,
+button.docs-sync-btn {
   font-size: 9px;
   font-weight: 700;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 5px;
-  background: #ca8a04;
-  border: 1px solid #facc15;
+  background: #2563eb;
+  border: 1px solid #60a5fa;
   color: #ffffff;
   cursor: pointer;
 }
 
-button.keep-sync-btn:hover {
-  background: #eab308;
+button.keep-sync-btn:hover,
+button.docs-sync-btn:hover {
+  background: #1d4ed8;
 }
 
-.keep-status-pill {
+.keep-status-pill,
+.docs-status-pill {
   font-size: 8.5px;
-  color: #fef08a;
-  background: #713f12;
-  padding: 1px 5px;
+  color: #dbeafe;
+  background: #1e3a8a;
+  padding: 1px 6px;
   border-radius: 4px;
 }
 
@@ -3019,17 +3022,24 @@ button.keep-sync-btn:hover {
   flex-shrink: 0;
 }
 
-button.keep-chip-btn {
+button.keep-chip-btn,
+button.docs-chip-btn {
   font-size: 8.5px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   border-radius: 4px;
   background: #27272a;
-  border: 1px solid #52525b;
-  color: #fbbf24;
+  border: 1px solid #3f3f46;
+  color: #93c5fd;
   cursor: pointer;
 }
 
-button.keep-chip-btn.synced {
+button.keep-chip-btn:hover,
+button.docs-chip-btn:hover {
+  background: #3f3f46;
+}
+
+button.keep-chip-btn.synced,
+button.docs-chip-btn.synced {
   background: #14532d;
   border-color: #22c55e;
   color: #bbf7d0;
