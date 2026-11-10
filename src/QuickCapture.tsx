@@ -5,6 +5,11 @@ import {
   DistractionCategory,
   doesCategoryAddPenalty,
 } from "./db";
+import {
+  CropRegionPct,
+  captureScreenSnapshotRaw,
+  compressAndCropDataUrl,
+} from "./screenshot";
 import { ActiveLang, translations } from "./i18n";
 import "./App.css";
 
@@ -34,11 +39,13 @@ export interface CaptureSubmittedEvent {
   text: string;
   activeApp: string;
   activeWindow: string;
+  screenshotData?: string;
 }
 
 const CATEGORIES_ORDER: DistractionCategory[] = [
   "impulsive_task",
   "idea",
+  "screenshot_note",
   "internal",
   "external",
   "escape",
@@ -57,9 +64,10 @@ function matchCategoryKey(key: string): DistractionCategory | null {
   const k = key.toLocaleLowerCase("tr-TR");
   if (k === "1" || k === "g" || k === "t") return "impulsive_task";
   if (k === "2" || k === "f") return "idea";
-  if (k === "3" || k === "i" || k === "ı" || k === "n") return "internal";
-  if (k === "4" || k === "d" || k === "e") return "external";
-  if (k === "5" || k === "z" || k === "k" || k === "s") return "escape";
+  if (k === "3" || k === "s") return "screenshot_note";
+  if (k === "4" || k === "i" || k === "ı" || k === "n") return "internal";
+  if (k === "5" || k === "d" || k === "e") return "external";
+  if (k === "6" || k === "z" || k === "k") return "escape";
   return null;
 }
 
@@ -88,8 +96,17 @@ export default function QuickCapture() {
   const [text, setText] = useState("");
   const [recentIdx, setRecentIdx] = useState<number>(-1);
 
+  // 3. Şık (3·S): Ufak Ekran Görüntüsü Önizleme & Bölge Kırpma (Crop) durumu
+  const [rawShotUrl, setRawShotUrl] = useState<string>("");
+  const [previewShotUrl, setPreviewShotUrl] = useState<string>("");
+  const [cropBox, setCropBox] = useState<CropRegionPct | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
   const shellRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const previewWrapRef = useRef<HTMLDivElement | null>(null);
   const reminderTimerRef = useRef<number | null>(null);
 
   const lang: ActiveLang = payload.snapshot.lang === "en" ? "en" : "tr";
@@ -103,6 +120,16 @@ export default function QuickCapture() {
     invoke("close_capture_and_restore_focus").catch(() => {});
   };
 
+  const loadScreenshotPreview = async (fresh: boolean) => {
+    const res = await captureScreenSnapshotRaw(fresh);
+    if (res.dataUrl) {
+      setRawShotUrl(res.dataUrl);
+      const compressed = await compressAndCropDataUrl(res.dataUrl, null, 760, 0.72);
+      setPreviewShotUrl(compressed);
+      setCropBox(null);
+    }
+  };
+
   const applyOpenPayload = (next: CaptureOpenPayload) => {
     if (reminderTimerRef.current) {
       window.clearTimeout(reminderTimerRef.current);
@@ -111,14 +138,20 @@ export default function QuickCapture() {
     setPayload(next);
     setText("");
     setRecentIdx(-1);
+    setCropBox(null);
+    setDragStart(null);
     if (next.mode === "context") {
       setStage("input");
+      invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
       requestAnimationFrame(() => {
         inputRef.current?.focus();
       });
     } else {
       setCategory("impulsive_task");
       setStage("select");
+      invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
+      // Arka planda kısayol basıldığı andaki ekran görüntüsünü hazırla
+      loadScreenshotPreview(false);
       requestAnimationFrame(() => {
         shellRef.current?.focus();
       });
@@ -147,6 +180,20 @@ export default function QuickCapture() {
     };
   }, []);
 
+  // 3. şık (screenshot_note) seçildiğinde pencereyi önizleme için büyüt, diğerlerinde küçült
+  useEffect(() => {
+    if (payload.mode === "distraction" && stage !== "reminder") {
+      if (category === "screenshot_note") {
+        invoke("set_capture_window_size", { width: 560, height: 390 }).catch(() => {});
+        if (!previewShotUrl) {
+          loadScreenshotPreview(false);
+        }
+      } else {
+        invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
+      }
+    }
+  }, [category, stage, payload.mode]);
+
   useEffect(() => {
     if (stage === "input") {
       requestAnimationFrame(() => {
@@ -165,6 +212,8 @@ export default function QuickCapture() {
         return t.catImpulsiveTask;
       case "idea":
         return t.catIdea;
+      case "screenshot_note":
+        return t.catScreenshotNote;
       case "internal":
         return t.catInternal;
       case "external":
@@ -195,13 +244,25 @@ export default function QuickCapture() {
         activeApp: payload.activeApp,
         activeWindow: payload.activeWindow,
       };
-      // Salisede pencereyi kapat ve önceki uygulamaya dön
       closeAndRestore();
       await emitTo("main", "capture-submitted", msg).catch(() => {});
       return;
     }
 
-    // Distraction / Görev / Fikir modu
+    // Distraction / Görev / Fikir / SS Notu modu
+    let finalScreenshotData: string | undefined;
+    if (category === "screenshot_note") {
+      const srcUrl = rawShotUrl || previewShotUrl;
+      if (srcUrl) {
+        finalScreenshotData = await compressAndCropDataUrl(
+          srcUrl,
+          cropBox,
+          760,
+          0.72,
+        );
+      }
+    }
+
     const fallbackReason = getCategoryLabel(category);
     const msg: CaptureSubmittedEvent = {
       mode: "distraction",
@@ -209,14 +270,47 @@ export default function QuickCapture() {
       text: finalVal || fallbackReason,
       activeApp: payload.activeApp,
       activeWindow: payload.activeWindow,
+      screenshotData: finalScreenshotData,
     };
     await emitTo("main", "capture-submitted", msg).catch(() => {});
 
     // Sebebi yazdıktan sonra ekrana son kalınan meşguliyet (context) gelsin
+    invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
     setStage("reminder");
     reminderTimerRef.current = window.setTimeout(() => {
       closeAndRestore();
     }, 2400);
+  };
+
+  const handlePreviewMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = previewWrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const xPct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+    const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+    setDragStart({ x: xPct, y: yPct });
+    setCropBox({ xPct, yPct, wPct: 0, hPct: 0 });
+  };
+
+  const handlePreviewMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!dragStart) return;
+    const rect = previewWrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    const curX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+    const curY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+    const xPct = Math.min(dragStart.x, curX);
+    const yPct = Math.min(dragStart.y, curY);
+    const wPct = Math.abs(curX - dragStart.x);
+    const hPct = Math.abs(curY - dragStart.y);
+    setCropBox({ xPct, yPct, wPct, hPct });
+  };
+
+  const handlePreviewMouseUp = () => {
+    if (!dragStart) return;
+    setDragStart(null);
+    if (cropBox && (cropBox.wPct < 4 || cropBox.hPct < 4)) {
+      setCropBox(null);
+    }
+    inputRef.current?.focus();
   };
 
   const handleShellKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -377,7 +471,7 @@ export default function QuickCapture() {
             </div>
           </div>
 
-          {/* 5 Kategori Seçici (1-5 veya Harfler: G, F, İ, D, Z) */}
+          {/* 6 Kategori Seçici (1-6 veya Harfler: G, F, S [SS Notu], İ, D, Z) */}
           <div className="qc-cat-row">
             {CATEGORIES_ORDER.map((cat) => {
               const selected = category === cat;
@@ -400,6 +494,63 @@ export default function QuickCapture() {
               );
             })}
           </div>
+
+          {/* 3. Şık (3·S): Ufak Ekran Görüntüsü Penceresi & Bölge Kırpıcı */}
+          {category === "screenshot_note" && (
+            <div className="qc-ss-box">
+              <div className="qc-ss-toolbar">
+                <span className="qc-ss-hint">{t.ssCropHint}</span>
+                <div className="qc-ss-actions">
+                  {cropBox && (
+                    <button
+                      type="button"
+                      className="qc-mini-btn"
+                      onClick={() => setCropBox(null)}
+                    >
+                      {t.ssResetCropBtn}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="qc-mini-btn"
+                    onClick={() => loadScreenshotPreview(true)}
+                  >
+                    {t.ssRetakeBtn}
+                  </button>
+                </div>
+              </div>
+              <div
+                ref={previewWrapRef}
+                className="qc-ss-preview-wrap"
+                onMouseDown={handlePreviewMouseDown}
+                onMouseMove={handlePreviewMouseMove}
+                onMouseUp={handlePreviewMouseUp}
+                onMouseLeave={handlePreviewMouseUp}
+              >
+                {previewShotUrl ? (
+                  <img
+                    src={previewShotUrl}
+                    alt="Screenshot preview"
+                    className="qc-ss-img"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="qc-ss-empty">📸 ...</div>
+                )}
+                {cropBox && cropBox.wPct > 1 && cropBox.hPct > 1 && (
+                  <div
+                    className="qc-ss-crop-rect"
+                    style={{
+                      left: `${cropBox.xPct}%`,
+                      top: `${cropBox.yPct}%`,
+                      width: `${cropBox.wPct}%`,
+                      height: `${cropBox.hPct}%`,
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Tek Satır Hızlı Input */}
           <div className="qc-input-row">

@@ -247,15 +247,17 @@ export interface Translations {
   defaultWorkTags: string[];
   defaultBreakOvertimeTags: string[];
 
-  // v0.1.13: 5 Dikkat Kategorisi, Global Hızlı Yakalama, Otopark, Kısa Mola Notu & Bağlam (Context)
+  // v0.1.13 & v0.1.14: 6 Dikkat Kategorisi (3. şık SS Alma), Global Hızlı Yakalama, Otopark, Çalışma Hikayesi, Google Keep & Bulut Dashboard
   catImpulsiveTask: string;
   catIdea: string;
+  catScreenshotNote: string;
   catInternal: string;
   catExternal: string;
   catEscape: string;
   catKeyHints: {
     impulsive_task: string;
     idea: string;
+    screenshot_note: string;
     internal: string;
     external: string;
     escape: string;
@@ -268,6 +270,7 @@ export interface Translations {
   qcInputPlaceholders: {
     impulsive_task: string;
     idea: string;
+    screenshot_note: string;
     internal: string;
     external: string;
     escape: string;
@@ -282,6 +285,11 @@ export interface Translations {
   qcContextPlaceholder: string;
   qcRecentContextsLabel: string;
 
+  ssCropHint: string;
+  ssResetCropBtn: string;
+  ssRetakeBtn: string;
+  ssReadyBadge: string;
+
   parkingBreakBannerTitle: string;
   parkingToggleBtn: (cnt: number) => string;
   parkingTab: string;
@@ -290,9 +298,56 @@ export interface Translations {
   parkingUnratedIdeas: string;
   parkingImportantIdeas: string;
   parkingUnimportantIdeas: string;
+  parkingScreenshotNotes: string;
   parkingMarkImportant: string;
   parkingMarkUnimportant: string;
   parkingEmpty: string;
+
+  keepSyncAllBtn: string;
+  keepSyncSingleBtn: string;
+  keepSyncedBadge: string;
+
+  workStoryTab: string;
+  workStoryTitle: string;
+  workStorySub: string;
+  workStoryEmpty: string;
+  workStorySnapNowBtn: string;
+  workStoryPeriodicBadge: string;
+  workStoryNoteBadge: string;
+
+  dashboardBtn: string;
+  dashboardTitle: string;
+  cloudAuthTitle: string;
+  cloudEmailPlaceholder: string;
+  cloudNamePlaceholder: string;
+  cloudTokenPlaceholder: string;
+  cloudServerPlaceholder: string;
+  cloudSignInBtn: string;
+  cloudSignOutBtn: string;
+  cloudSyncNowBtn: string;
+  cloudOnlineSynced: string;
+  cloudOfflineQueued: (cnt: number) => string;
+
+  cloudAuthSignedIn: string;
+  syncRunning: string;
+  manualSyncBtn: string;
+  cloudAuthSignOut: string;
+  cloudAuthSignIn: string;
+  cloudAuthHint: string;
+  pendingSyncQueueBadge: (cnt: number) => string;
+  lastSyncLabel: string;
+  dashboardUnfinishedTasks: string;
+  dashboardFinishedTasks: string;
+  noUnfinishedTasks: string;
+  noFinishedTasks: string;
+  dashboardImportantIdeas: string;
+  noImportantIdeas: string;
+  dashboardUnimportantIdeas: string;
+  noUnimportantIdeas: string;
+  workStoryDesc: string;
+  contextStatsTitle: string;
+  appDistractionTitle: string;
+  ssCaptureActive: string;
 
   shortBreakPromptTitle: string;
   shortBreakPromptHint: string;
@@ -646,29 +701,33 @@ const tr: Translations = {
     "Diğer",
   ],
 
-  // v0.1.13
+  // v0.1.13 & v0.1.14
   catImpulsiveTask: "Dürtüsel Görev",
   catIdea: "Akla Gelen Fikir",
+  catScreenshotNote: "📸 SS Notu",
   catInternal: "İçsel Tetikleyici",
   catExternal: "Dışsal Tetikleyici",
   catEscape: "Zorluktan Kaçış",
   catKeyHints: {
     impulsive_task: "1·G",
     idea: "2·F",
-    internal: "3·İ",
-    external: "4·D",
-    escape: "5·Z",
+    screenshot_note: "3·S",
+    internal: "4·İ",
+    external: "5·D",
+    escape: "6·Z",
   },
   noPenaltyParkingBadge: "+0dk • Otopark",
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}dk eklenir` : "+0dk"),
 
   qcDistractHeader: "⚡ Hızlı Yakala",
   qcSelectKeyHint:
-    "1–5 veya harfe (G: Görev, F: Fikir, İ: İçsel, D: Dışsal, Z: Kaçış) bas • Esc kapat",
+    "1–6 veya harfe (1·G: Görev, 2·F: Fikir, 3·S: 📸 SS Alma, 4·İ: İçsel, 5·D: Dışsal, 6·Z: Kaçış) bas • Esc kapat",
   qcInputPlaceholders: {
     impulsive_task:
       "Molada yapılacak dürtüsel görevi yaz ve Enter'a bas (ek süre eklenmez)...",
     idea: "Aklına gelen fikri yaz ve Enter'a bas (ek süre eklenmez)...",
+    screenshot_note:
+      "Ekran görüntüsü için kısa notunu yaz ve Enter'a bas (fareyle bölge kırpabilirsin, ek süre eklenmez)...",
     internal: "İçsel tetikleyiciyi / düşünceyi yaz ve Enter'a bas...",
     external: "Dışsal uyaranı (bildirim, ses vb.) yaz ve Enter'a bas...",
     escape: "Zorlandığın / kaçtığın noktayı kısaca yaz ve Enter'a bas...",
@@ -684,6 +743,11 @@ const tr: Translations = {
     "Şu an odaklandığın spesifik işi yaz ve Enter'a bas (örn: Türev Test 2, API Auth)...",
   qcRecentContextsLabel: "Son meşguliyetler (Tıkla veya ↑↓):",
 
+  ssCropHint: "✂️ Görüntü üzerinde fareyle sürükleyerek istediğin alanı kırpabilirsin",
+  ssResetCropBtn: "Tam Ekran",
+  ssRetakeBtn: "🔄 Yeniden Çek",
+  ssReadyBadge: "📸 Ekran görüntüsü hazır",
+
   parkingBreakBannerTitle:
     "🅿️ Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
   parkingToggleBtn: (cnt) => `🅿️ Otopark (${cnt})`,
@@ -693,9 +757,60 @@ const tr: Translations = {
   parkingUnratedIdeas: "💡 Bekleyen Fikirler",
   parkingImportantIdeas: "⭐ Önemli Fikirler",
   parkingUnimportantIdeas: "💤 Önemsiz Fikirler",
+  parkingScreenshotNotes: "📸 Ekran Görüntüsü Notları (SS)",
   parkingMarkImportant: "⭐ Önemli",
   parkingMarkUnimportant: "💤 Önemsiz",
-  parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev veya fikir yok.",
+  parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev, fikir veya ekran notu yok.",
+
+  keepSyncAllBtn: "🟨 Google Keep'e Aktar / Senkronize Et",
+  keepSyncSingleBtn: "🟨 Keep'e Gönder",
+  keepSyncedBadge: "Keep ✓",
+
+  workStoryTab: "📸 Hikaye",
+  workStoryTitle: "📸 Çalışma Hikayesi (5 dk'da 1 SS + Açık Pencere + Context)",
+  workStorySub:
+    "Çalışırken her 5 dakikada bir ve 3·S ile aldığın ekran notlarıyla oluşan görsel çalışma zaman tüneli",
+  workStoryEmpty:
+    "Henüz çalışma hikayesi kaydı yok. Çalışma sayacı çalışırken her 5 dakikada bir otomatik ekran görüntüsü + açık pencere + context kaydedilir.",
+  workStorySnapNowBtn: "📸 Şimdi Hikaye Karesi Al",
+  workStoryPeriodicBadge: "⏱ 5dk Otomatik",
+  workStoryNoteBadge: "📸 SS Notu",
+
+  dashboardBtn: "📊 Dashboard",
+  dashboardTitle: "📊 Kişisel Odak & Bulut Dashboard",
+  cloudAuthTitle: "☁️ Google Hesabı & Bulut Senkronizasyonu (Çevrimdışı Destekli)",
+  cloudEmailPlaceholder: "Google E-posta (örn: ad.soyad@gmail.com)",
+  cloudNamePlaceholder: "Görünen İsim (örn: Elyas)",
+  cloudTokenPlaceholder: "Google OAuth Access Token (opsiyonel, doğrudan Keep API için)",
+  cloudServerPlaceholder: "Sunucu URL (varsayılan: http://localhost:4000)",
+  cloudSignInBtn: "🔐 Google ile Bağlan",
+  cloudSignOutBtn: "Çıkış",
+  cloudSyncNowBtn: "🔄 Şimdi Senkronize Et",
+  cloudOnlineSynced: "🟢 Bulut Güncel",
+  cloudOfflineQueued: (cnt) => `🟠 Kuyrukta (${cnt})`,
+
+  cloudAuthSignedIn: "Google hesabıyla oturum açıldı ve veriler senkronize edildi.",
+  syncRunning: "Senkronize ediliyor...",
+  manualSyncBtn: "Şimdi Senkronize Et",
+  cloudAuthSignOut: "Çıkış Yap",
+  cloudAuthSignIn: "Giriş Yap",
+  cloudAuthHint:
+    "Google OAuth Access Token opsiyoneldir. Girildiğinde Google Keep REST API ile doğrudan, girilmediğinde ise sunucu ve Web Bridge ile senkronize olur.",
+  pendingSyncQueueBadge: (cnt) => `Bekleyen kuyruk: ${cnt}`,
+  lastSyncLabel: "Son senkronizasyon",
+  dashboardUnfinishedTasks: "Yapılmayan Görevler",
+  dashboardFinishedTasks: "Yapılan Görevler",
+  noUnfinishedTasks: "Bekleyen yapılmamış görev yok.",
+  noFinishedTasks: "Henüz tamamlanmış görev yok.",
+  dashboardImportantIdeas: "Önemli Fikirler",
+  noImportantIdeas: "Önemli olarak işaretlenmiş fikir yok.",
+  dashboardUnimportantIdeas: "Önemsiz / İncelenecek Fikirler",
+  noUnimportantIdeas: "İncelenecek fikir yok.",
+  workStoryDesc:
+    "5 dakikada bir otomatik alınan ekran görüntüleri ve dikkat dağılma ekranından kaydedilen SS notlarıyla oluşan çalışma hikayesi",
+  contextStatsTitle: "Meşguliyet Dağılımı",
+  appDistractionTitle: "Açık Pencere & Sekmeler",
+  ssCaptureActive: "📸 Ekran görüntüsü alınıyor...",
 
   shortBreakPromptTitle: "🎯 Şu An Neyle Meşgulsün? (Context)",
   shortBreakPromptHint:
@@ -1052,29 +1167,33 @@ const en: Translations = {
     "Other",
   ],
 
-  // v0.1.13
+  // v0.1.13 & v0.1.14
   catImpulsiveTask: "Impulsive Task",
   catIdea: "Sudden Idea",
+  catScreenshotNote: "📸 SS Note",
   catInternal: "Internal Trigger",
   catExternal: "External Trigger",
   catEscape: "Difficulty Escape",
   catKeyHints: {
     impulsive_task: "1·G",
     idea: "2·F",
-    internal: "3·I",
-    external: "4·D",
-    escape: "5·Z",
+    screenshot_note: "3·S",
+    internal: "4·I",
+    external: "5·D",
+    escape: "6·Z",
   },
   noPenaltyParkingBadge: "+0m • Parking Lot",
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}m added` : "+0m"),
 
   qcDistractHeader: "⚡ Quick Capture",
   qcSelectKeyHint:
-    "Press 1–5 or letter (G: Task, F: Idea, I: Internal, D: External, Z: Escape) • Esc close",
+    "Press 1–6 or letter (1·G: Task, 2·F: Idea, 3·S: 📸 Screenshot, 4·I: Internal, 5·D: External, 6·Z: Escape) • Esc close",
   qcInputPlaceholders: {
     impulsive_task:
       "Type impulsive task for your break & press Enter (no time added)...",
     idea: "Type your idea & press Enter (no time added)...",
+    screenshot_note:
+      "Type a note for this screenshot & press Enter (drag to crop region, no time added)...",
     internal: "Type internal thought / urge & press Enter...",
     external: "Type external trigger (notification, noise...) & press Enter...",
     escape: "What felt hard or boring right now? Press Enter...",
@@ -1090,6 +1209,11 @@ const en: Translations = {
     "Type what you're actively working on & press Enter (e.g. Calc Problem 4, Auth API)...",
   qcRecentContextsLabel: "Recent contexts (Click or ↑↓):",
 
+  ssCropHint: "✂️ Drag on the preview image to crop a specific region",
+  ssResetCropBtn: "Full Screen",
+  ssRetakeBtn: "🔄 Retake",
+  ssReadyBadge: "📸 Screenshot ready",
+
   parkingBreakBannerTitle:
     "🅿️ These popped into your head while working — check them now:",
   parkingToggleBtn: (cnt) => `🅿️ Parking (${cnt})`,
@@ -1099,9 +1223,60 @@ const en: Translations = {
   parkingUnratedIdeas: "💡 Unrated Ideas",
   parkingImportantIdeas: "⭐ Important Ideas",
   parkingUnimportantIdeas: "💤 Unimportant Ideas",
+  parkingScreenshotNotes: "📸 Screenshot Notes (SS)",
   parkingMarkImportant: "⭐ Important",
   parkingMarkUnimportant: "💤 Minor",
-  parkingEmpty: "No impulsive tasks or ideas in your parking lot yet.",
+  parkingEmpty: "No impulsive tasks, ideas, or screenshot notes in your parking lot yet.",
+
+  keepSyncAllBtn: "🟨 Sync / Send to Google Keep",
+  keepSyncSingleBtn: "🟨 Send to Keep",
+  keepSyncedBadge: "Keep ✓",
+
+  workStoryTab: "📸 Story",
+  workStoryTitle: "📸 Work Story (5m Screenshot + Active Window + Context)",
+  workStorySub:
+    "Visual timeline of your focus session built from 5-minute periodic snapshots and 3·S screenshot notes",
+  workStoryEmpty:
+    "No work story snapshots yet. While the work timer is running, a snapshot + active window + context is captured every 5 minutes.",
+  workStorySnapNowBtn: "📸 Capture Story Frame Now",
+  workStoryPeriodicBadge: "⏱ 5m Auto",
+  workStoryNoteBadge: "📸 SS Note",
+
+  dashboardBtn: "📊 Dashboard",
+  dashboardTitle: "📊 Personal Focus & Cloud Dashboard",
+  cloudAuthTitle: "☁️ Google Account & Cloud Sync (Offline-First)",
+  cloudEmailPlaceholder: "Google Email (e.g. name@gmail.com)",
+  cloudNamePlaceholder: "Display Name",
+  cloudTokenPlaceholder: "Google OAuth Access Token (optional, for direct Keep API)",
+  cloudServerPlaceholder: "Server URL (default: http://localhost:4000)",
+  cloudSignInBtn: "🔐 Connect with Google",
+  cloudSignOutBtn: "Sign Out",
+  cloudSyncNowBtn: "🔄 Sync Now",
+  cloudOnlineSynced: "🟢 Cloud Synced",
+  cloudOfflineQueued: (cnt) => `🟠 Queued (${cnt})`,
+
+  cloudAuthSignedIn: "Signed in with Google and synchronized data.",
+  syncRunning: "Syncing...",
+  manualSyncBtn: "Sync Now",
+  cloudAuthSignOut: "Sign Out",
+  cloudAuthSignIn: "Sign In",
+  cloudAuthHint:
+    "Google OAuth Access Token is optional. When provided, direct Keep API is used; otherwise synced via Server & Web Bridge.",
+  pendingSyncQueueBadge: (cnt) => `Pending queue: ${cnt}`,
+  lastSyncLabel: "Last sync",
+  dashboardUnfinishedTasks: "Unfinished Tasks",
+  dashboardFinishedTasks: "Finished Tasks",
+  noUnfinishedTasks: "No pending unfinished tasks.",
+  noFinishedTasks: "No completed tasks yet.",
+  dashboardImportantIdeas: "Important Ideas",
+  noImportantIdeas: "No ideas marked as important.",
+  dashboardUnimportantIdeas: "Minor / Unrated Ideas",
+  noUnimportantIdeas: "No minor ideas.",
+  workStoryDesc:
+    "Work story formed by 5-minute periodic screenshots and screenshot notes taken from distraction screens",
+  contextStatsTitle: "Active Contexts Breakdown",
+  appDistractionTitle: "Open Windows & Tabs",
+  ssCaptureActive: "📸 Capturing screen...",
 
   shortBreakPromptTitle: "🎯 What Are You Occupied With? (Context)",
   shortBreakPromptHint:

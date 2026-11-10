@@ -5,7 +5,7 @@ import Database from "@tauri-apps/plugin-sql";
 // ---------------------------------------------------------------------------
 
 // "work" / "break" eski sürümlerden kalan değerlerdir; yeni sürümde sayaç ekranı "timer"dır.
-export type PageType = "menu" | "timer" | "work" | "break" | "summary" | "settings";
+export type PageType = "menu" | "timer" | "work" | "break" | "summary" | "settings" | "dashboard";
 export type TimerMode = "work" | "break";
 export type BreakKind = "standard" | "long" | "short";
 
@@ -77,13 +77,14 @@ export type DistractionTrigger = "internal" | "external";
 export type DistractionCategory =
   | "impulsive_task"
   | "idea"
+  | "screenshot_note"
   | "internal"
   | "external"
   | "escape";
 
 export function doesCategoryAddPenalty(cat: DistractionCategory): boolean {
-  // 1: Dürtüsel görev ve 2: Akla gelen fikir için ek süre eklenmez.
-  // 3: İçsel tetikleyici, 4: Dışsal tetikleyici ve 5: Zorluktan kaçış için süre eklenir.
+  // 1: Dürtüsel görev, 2: Akla gelen fikir ve 3: SS Alma (Ekran Görüntüsü Notu) için ek süre eklenmez.
+  // 4: İçsel tetikleyici, 5: Dışsal tetikleyici ve 6: Zorluktan kaçış için süre eklenir.
   return cat === "internal" || cat === "external" || cat === "escape";
 }
 
@@ -91,7 +92,7 @@ export function categoryToTrigger(cat: DistractionCategory): DistractionTrigger 
   return cat === "external" ? "external" : "internal";
 }
 
-export type ParkingItemType = "task" | "idea";
+export type ParkingItemType = "task" | "idea" | "screenshot";
 export type ParkingStatus =
   | "pending"
   | "done"
@@ -108,6 +109,9 @@ export interface ParkingItem {
   active_app: string | null;
   active_window: string | null;
   context_text: string | null;
+  screenshot_data: string | null;
+  keep_synced: number;
+  keep_note_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -118,8 +122,57 @@ export interface ParkingLotData {
   unratedIdeas: ParkingItem[];
   importantIdeas: ParkingItem[];
   unimportantIdeas: ParkingItem[];
+  screenshotNotes: ParkingItem[];
   totalTasks: number;
   totalIdeas: number;
+  totalScreenshots: number;
+}
+
+export type WorkStoryEntryType = "periodic" | "screenshot_note" | "distraction";
+
+export interface WorkStoryEntry {
+  id: number;
+  day_id: number;
+  entry_type: WorkStoryEntryType;
+  context_text: string | null;
+  work_tag: string | null;
+  active_app: string | null;
+  active_window: string | null;
+  note: string | null;
+  screenshot_data: string | null;
+  elapsed_work_sec: number;
+  created_at: string;
+}
+
+export interface CloudAuthState {
+  userId: string;
+  email: string;
+  name: string;
+  picture?: string;
+  accessToken?: string;
+  serverUrl: string;
+  googleClientId?: string;
+  autoSyncKeep: boolean;
+  lastSyncAt: string | null;
+}
+
+export const DEFAULT_CLOUD_AUTH: CloudAuthState = {
+  userId: "",
+  email: "",
+  name: "",
+  picture: "",
+  accessToken: "",
+  serverUrl: "http://localhost:4000",
+  googleClientId: "",
+  autoSyncKeep: true,
+  lastSyncAt: null,
+};
+
+export interface SyncQueueItem {
+  id: number;
+  entity_type: string;
+  payload_json: string;
+  created_at: string;
 }
 
 export interface ContextStatItem {
@@ -169,7 +222,7 @@ export interface WindowSizePreset {
   height: number;
 }
 
-export type SizeTargetPage = "timer" | "menu" | "summary" | "settings";
+export type SizeTargetPage = "timer" | "menu" | "summary" | "settings" | "dashboard";
 export type CustomWindowSizes = Partial<Record<SizeTargetPage, WindowSizePreset>>;
 
 export interface AdhdInsightsData {
@@ -328,7 +381,7 @@ export const DEFAULT_BREAK_SEC = 10 * 60;
 
 const DB_URL = "sqlite:pomodoro.db";
 const SUMMARY_DAY_LIMIT = 7;
-const VALID_PAGES: PageType[] = ["menu", "timer", "work", "break", "summary", "settings"];
+const VALID_PAGES: PageType[] = ["menu", "timer", "work", "break", "summary", "settings", "dashboard"];
 
 const DEFAULT_REASONS = [
   "Telefon",
@@ -415,6 +468,9 @@ async function initDb(): Promise<Database> {
       active_app TEXT,
       active_window TEXT,
       context_text TEXT,
+      screenshot_data TEXT,
+      keep_synced INTEGER NOT NULL DEFAULT 0,
+      keep_note_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -433,6 +489,47 @@ async function initDb(): Promise<Database> {
       ended_at TEXT
     )
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS work_story_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_id INTEGER NOT NULL,
+      entry_type TEXT NOT NULL DEFAULT 'periodic',
+      context_text TEXT,
+      work_tag TEXT,
+      active_app TEXT,
+      active_window TEXT,
+      note TEXT,
+      screenshot_data TEXT,
+      elapsed_work_sec INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  try {
+    await db.execute("ALTER TABLE parking_items ADD COLUMN screenshot_data TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE parking_items ADD COLUMN keep_synced INTEGER NOT NULL DEFAULT 0");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
+
+  try {
+    await db.execute("ALTER TABLE parking_items ADD COLUMN keep_note_id TEXT");
+  } catch {
+    // sütun zaten varsa hata yok sayılır
+  }
 
   try {
     await db.execute("ALTER TABLE distractions ADD COLUMN elapsed_work_sec INTEGER DEFAULT 0");
@@ -553,6 +650,21 @@ export function getDb(): Promise<Database> {
     });
   }
   return dbPromise;
+}
+
+async function enqueueSyncMutation(
+  db: Database,
+  entityType: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.execute(
+      "INSERT INTO sync_queue (entity_type, payload_json, created_at) VALUES ($1, $2, $3)",
+      [entityType, JSON.stringify(payload), new Date().toISOString()],
+    );
+  } catch {
+    // Kuyruk hatası ana akışı engellemez
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -736,6 +848,19 @@ export async function recordWorkSession(
       endReason || null,
     ],
   );
+  await enqueueSyncMutation(db, "session", {
+    day_id: day.id,
+    mode: "work",
+    duration_sec: sec,
+    created_at: endIso,
+    tag: tag || null,
+    reason: reason || null,
+    started_at: startIso,
+    ended_at: endIso,
+    overtime_sec: 0,
+    end_tag: endTag || null,
+    end_reason: endReason || null,
+  });
 }
 
 export async function recordBreakSession(
@@ -754,6 +879,7 @@ export async function recordBreakSession(
   const now = new Date();
   const endIso = endedAt || now.toISOString();
   const startIso = startedAt || new Date(now.getTime() - sec * 1000).toISOString();
+  const overtime = Math.max(0, Math.round(overtimeSec));
 
   await db.execute(
     `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec)
@@ -766,9 +892,20 @@ export async function recordBreakSession(
       reason ?? null,
       startIso,
       endIso,
-      Math.max(0, Math.round(overtimeSec)),
+      overtime,
     ],
   );
+  await enqueueSyncMutation(db, "session", {
+    day_id: day.id,
+    mode: "break",
+    duration_sec: sec,
+    created_at: endIso,
+    tag: tag ?? null,
+    reason: reason ?? null,
+    started_at: startIso,
+    ended_at: endIso,
+    overtime_sec: overtime,
+  });
 }
 
 export async function getTimelineSessions(
@@ -940,6 +1077,7 @@ export async function recordDistraction(
   const elapsed = Math.max(0, Math.round(Number(elapsedInput) || 0));
   const trig: DistractionTrigger = categoryToTrigger(category);
 
+  const nowIso = new Date().toISOString();
   await db.execute(
     `INSERT INTO distractions (
        day_id, reason, tag, created_at, elapsed_work_sec, trigger_type,
@@ -949,7 +1087,7 @@ export async function recordDistraction(
       day.id,
       normalized,
       tag,
-      new Date().toISOString(),
+      nowIso,
       elapsed,
       trig,
       category,
@@ -959,6 +1097,19 @@ export async function recordDistraction(
       penaltySec,
     ],
   );
+  await enqueueSyncMutation(db, "distraction", {
+    day_id: day.id,
+    reason: normalized,
+    tag,
+    created_at: nowIso,
+    elapsed_work_sec: elapsed,
+    trigger_type: trig,
+    category,
+    active_app: activeApp,
+    active_window: activeWindow,
+    context_text: contextText,
+    penalty_sec: penaltySec,
+  });
 }
 
 // Daha önce seçilen şıkları en sık kullanılandan başlayarak getirir
@@ -1111,6 +1262,8 @@ export async function clearAllData(locale = "tr-TR"): Promise<void> {
   await db.execute("DELETE FROM distractions");
   await db.execute("DELETE FROM parking_items");
   await db.execute("DELETE FROM context_logs");
+  await db.execute("DELETE FROM work_story_entries");
+  await db.execute("DELETE FROM sync_queue");
   await db.execute("DELETE FROM study_days");
   await db.execute(
     "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
@@ -1564,19 +1717,21 @@ export async function exportAllData(): Promise<string> {
   const distractions = await db.select("SELECT * FROM distractions ORDER BY id ASC");
   const parking_items = await db.select("SELECT * FROM parking_items ORDER BY id ASC");
   const context_logs = await db.select("SELECT * FROM context_logs ORDER BY id ASC");
+  const work_story_entries = await db.select("SELECT * FROM work_story_entries ORDER BY id ASC");
   const tags = await db.select("SELECT * FROM tags ORDER BY id ASC");
   const feedbacks = await db.select("SELECT * FROM feedbacks ORDER BY id DESC");
   const settings = await db.select("SELECT * FROM settings ORDER BY key ASC");
 
   const data = {
     app: "pomodoro-widget",
-    version: "0.1.13",
+    version: "0.1.14",
     exported_at: new Date().toISOString(),
     study_days: days,
     sessions,
     distractions,
     parking_items,
     context_logs,
+    work_story_entries,
     tags,
     feedbacks,
     settings,
@@ -1636,9 +1791,10 @@ export async function deleteFeedback(id: number): Promise<void> {
 
 export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
   timer: { width: 284, height: 138 },
-  menu: { width: 315, height: 365 },
-  summary: { width: 385, height: 485 },
-  settings: { width: 325, height: 485 },
+  menu: { width: 315, height: 375 },
+  summary: { width: 390, height: 490 },
+  settings: { width: 335, height: 495 },
+  dashboard: { width: 690, height: 530 },
 };
 
 export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
@@ -1651,12 +1807,12 @@ export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
     const parsed = JSON.parse(rows[0].value);
     if (!parsed || typeof parsed !== "object") return {};
     const out: CustomWindowSizes = {};
-    for (const k of ["timer", "menu", "summary", "settings"] as SizeTargetPage[]) {
+    for (const k of ["timer", "menu", "summary", "settings", "dashboard"] as SizeTargetPage[]) {
       const item = parsed[k];
       if (item && typeof item === "object") {
         const w = Math.round(Number(item.width));
         const h = Math.round(Number(item.height));
-        if (Number.isFinite(w) && Number.isFinite(h) && w >= 200 && w <= 1200 && h >= 110 && h <= 1000) {
+        if (Number.isFinite(w) && Number.isFinite(h) && w >= 200 && w <= 1400 && h >= 110 && h <= 1100) {
           out[k] = { width: w, height: h };
         }
       }
@@ -2026,7 +2182,7 @@ export async function saveSessionCycleStats(
 }
 
 // ---------------------------------------------------------------------------
-// "Sonra Bak" Otoparkı (Parking Lot: Dürtüsel Görevler & Fikirler)
+// "Sonra Bak" Otoparkı (Parking Lot: Dürtüsel Görevler, Fikirler & Ekran Notları)
 // Ekleme sırasına göre (ORDER BY id ASC) saklanır ve ayrıştırılır.
 // ---------------------------------------------------------------------------
 
@@ -2036,8 +2192,9 @@ export async function addParkingItem(params: {
   activeApp?: string;
   activeWindow?: string;
   contextText?: string;
+  screenshotData?: string;
 }): Promise<ParkingItem | null> {
-  const trimmed = params.content.trim();
+  const trimmed = params.content.trim() || (params.itemType === "screenshot" ? "📸 Ekran Görüntüsü Notu" : "");
   if (!trimmed) return null;
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
@@ -2047,16 +2204,18 @@ export async function addParkingItem(params: {
   const app = params.activeApp?.trim() || null;
   const win = params.activeWindow?.trim() || null;
   const ctx = params.contextText?.trim() || null;
+  const shot = params.screenshotData || null;
 
   const res = await db.execute(
     `INSERT INTO parking_items (
-       day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [day.id, params.itemType, trimmed, status, app, win, ctx, nowIso, nowIso],
+       day_id, item_type, content, status, active_app, active_window, context_text, screenshot_data, keep_synced, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)`,
+    [day.id, params.itemType, trimmed, status, app, win, ctx, shot, nowIso, nowIso],
   );
 
-  return {
-    id: Number(res.lastInsertId),
+  const insertedId = Number(res.lastInsertId);
+  const item: ParkingItem = {
+    id: insertedId,
     day_id: day.id,
     item_type: params.itemType,
     content: trimmed,
@@ -2064,9 +2223,15 @@ export async function addParkingItem(params: {
     active_app: app,
     active_window: win,
     context_text: ctx,
+    screenshot_data: shot,
+    keep_synced: 0,
+    keep_note_id: null,
     created_at: nowIso,
     updated_at: nowIso,
   };
+
+  await enqueueSyncMutation(db, "parking_item_add", { ...item });
+  return item;
 }
 
 export async function getParkingLotData(
@@ -2078,7 +2243,7 @@ export async function getParkingLotData(
   if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     rows = await db.select<ParkingItem[]>(
-      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
+      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced, keep_note_id, created_at, updated_at
        FROM parking_items
        WHERE day_id = $1
        ORDER BY id ASC`,
@@ -2086,7 +2251,7 @@ export async function getParkingLotData(
     );
   } else {
     rows = await db.select<ParkingItem[]>(
-      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, created_at, updated_at
+      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced, keep_note_id, created_at, updated_at
        FROM parking_items
        ORDER BY id ASC`,
     );
@@ -2097,17 +2262,28 @@ export async function getParkingLotData(
   const unratedIdeas: ParkingItem[] = [];
   const importantIdeas: ParkingItem[] = [];
   const unimportantIdeas: ParkingItem[] = [];
+  const screenshotNotes: ParkingItem[] = [];
 
   for (const r of rows) {
+    const iType: ParkingItemType =
+      r.item_type === "idea"
+        ? "idea"
+        : r.item_type === "screenshot"
+          ? "screenshot"
+          : "task";
+
     const item: ParkingItem = {
       id: Number(r.id),
       day_id: Number(r.day_id),
-      item_type: r.item_type === "idea" ? "idea" : "task",
+      item_type: iType,
       content: r.content,
       status: r.status as ParkingStatus,
       active_app: r.active_app ?? null,
       active_window: r.active_window ?? null,
       context_text: r.context_text ?? null,
+      screenshot_data: r.screenshot_data ?? null,
+      keep_synced: Number(r.keep_synced ?? 0),
+      keep_note_id: r.keep_note_id ?? null,
       created_at: r.created_at,
       updated_at: r.updated_at,
     };
@@ -2118,6 +2294,8 @@ export async function getParkingLotData(
       } else {
         pendingTasks.push(item);
       }
+    } else if (item.item_type === "screenshot") {
+      screenshotNotes.push(item);
     } else {
       if (item.status === "important") {
         importantIdeas.push(item);
@@ -2135,9 +2313,11 @@ export async function getParkingLotData(
     unratedIdeas,
     importantIdeas,
     unimportantIdeas,
+    screenshotNotes,
     totalTasks: pendingTasks.length + doneTasks.length,
     totalIdeas:
       unratedIdeas.length + importantIdeas.length + unimportantIdeas.length,
+    totalScreenshots: screenshotNotes.length,
   };
 }
 
@@ -2147,10 +2327,12 @@ export async function toggleParkingTaskDone(
 ): Promise<void> {
   const db = await getDb();
   const status: ParkingStatus = done ? "done" : "pending";
+  const nowIso = new Date().toISOString();
   await db.execute(
     "UPDATE parking_items SET status = $1, updated_at = $2 WHERE id = $3",
-    [status, new Date().toISOString(), id],
+    [status, nowIso, id],
   );
+  await enqueueSyncMutation(db, "parking_item_update", { id, status, updated_at: nowIso });
 }
 
 export async function rateParkingIdea(
@@ -2158,15 +2340,32 @@ export async function rateParkingIdea(
   rating: "important" | "unimportant" | "unrated",
 ): Promise<void> {
   const db = await getDb();
+  const nowIso = new Date().toISOString();
   await db.execute(
     "UPDATE parking_items SET status = $1, updated_at = $2 WHERE id = $3",
-    [rating, new Date().toISOString(), id],
+    [rating, nowIso, id],
   );
+  await enqueueSyncMutation(db, "parking_item_update", { id, status: rating, updated_at: nowIso });
 }
 
 export async function deleteParkingItem(id: number): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM parking_items WHERE id = $1", [id]);
+  await enqueueSyncMutation(db, "parking_item_delete", { id });
+}
+
+export async function markParkingItemsKeepSynced(
+  ids: number[],
+  keepNoteId?: string,
+): Promise<void> {
+  if (!ids || ids.length === 0) return;
+  const db = await getDb();
+  for (const id of ids) {
+    await db.execute(
+      "UPDATE parking_items SET keep_synced = 1, keep_note_id = COALESCE($1, keep_note_id) WHERE id = $2",
+      [keepNoteId || null, id],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2197,7 +2396,17 @@ export async function startContextLog(params: {
       nowIso,
     ],
   );
-  return Number(res.lastInsertId);
+  const id = Number(res.lastInsertId);
+  await enqueueSyncMutation(db, "context_log_start", {
+    id,
+    day_id: day.id,
+    context_text: text,
+    work_tag: params.workTag?.trim() || null,
+    active_app: params.activeApp?.trim() || null,
+    active_window: params.activeWindow?.trim() || null,
+    started_at: nowIso,
+  });
+  return id;
 }
 
 export async function finalizeContextLog(
@@ -2207,13 +2416,19 @@ export async function finalizeContextLog(
   if (!id || id <= 0) return;
   const add = Math.max(0, Math.round(Number(addDurationSec) || 0));
   const db = await getDb();
+  const endIso = new Date().toISOString();
   await db.execute(
     `UPDATE context_logs
      SET duration_sec = duration_sec + $1,
          ended_at = $2
      WHERE id = $3`,
-    [add, new Date().toISOString(), id],
+    [add, endIso, id],
   );
+  await enqueueSyncMutation(db, "context_log_finalize", {
+    id,
+    add_duration_sec: add,
+    ended_at: endIso,
+  });
 }
 
 export async function incrementContextDistraction(
@@ -2445,4 +2660,293 @@ export async function saveGlobalShortcuts(
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [shortcuts.contextShortcut.trim()],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Çalışma Hikayesi (Work Story: 5 dk'da 1 Screenshot + Açık Pencere + Context)
+// ---------------------------------------------------------------------------
+
+export async function addWorkStoryEntry(params: {
+  entryType: WorkStoryEntryType;
+  contextText?: string;
+  workTag?: string;
+  activeApp?: string;
+  activeWindow?: string;
+  note?: string;
+  screenshotData?: string;
+  elapsedWorkSec?: number;
+}): Promise<WorkStoryEntry> {
+  const db = await getDb();
+  const day = await getOrCreateActiveDay(db);
+  const nowIso = new Date().toISOString();
+  const elapsed = Math.max(0, Math.round(Number(params.elapsedWorkSec) || 0));
+  const ctx = params.contextText?.trim() || null;
+  const wTag = params.workTag?.trim() || null;
+  const app = params.activeApp?.trim() || null;
+  const win = params.activeWindow?.trim() || null;
+  const note = params.note?.trim() || null;
+  const shot = params.screenshotData || null;
+
+  const res = await db.execute(
+    `INSERT INTO work_story_entries (
+       day_id, entry_type, context_text, work_tag, active_app, active_window,
+       note, screenshot_data, elapsed_work_sec, created_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [day.id, params.entryType, ctx, wTag, app, win, note, shot, elapsed, nowIso],
+  );
+
+  const entry: WorkStoryEntry = {
+    id: Number(res.lastInsertId),
+    day_id: day.id,
+    entry_type: params.entryType,
+    context_text: ctx,
+    work_tag: wTag,
+    active_app: app,
+    active_window: win,
+    note,
+    screenshot_data: shot,
+    elapsed_work_sec: elapsed,
+    created_at: nowIso,
+  };
+
+  await enqueueSyncMutation(db, "work_story_entry", { ...entry });
+  return entry;
+}
+
+export async function getWorkStoryEntries(
+  onlyToday = false,
+  limit = 40,
+): Promise<WorkStoryEntry[]> {
+  const db = await getDb();
+  const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));
+  if (onlyToday) {
+    const day = await getOrCreateActiveDay(db);
+    const rows = await db.select<WorkStoryEntry[]>(
+      `SELECT id, day_id, entry_type, context_text, work_tag, active_app, active_window,
+              note, screenshot_data, elapsed_work_sec, created_at
+       FROM work_story_entries
+       WHERE day_id = $1
+       ORDER BY id DESC
+       LIMIT $2`,
+      [day.id, safeLimit],
+    );
+    return rows.map((r) => ({
+      ...r,
+      id: Number(r.id),
+      day_id: Number(r.day_id),
+      elapsed_work_sec: Number(r.elapsed_work_sec ?? 0),
+    }));
+  }
+
+  const rows = await db.select<WorkStoryEntry[]>(
+    `SELECT id, day_id, entry_type, context_text, work_tag, active_app, active_window,
+            note, screenshot_data, elapsed_work_sec, created_at
+     FROM work_story_entries
+     ORDER BY id DESC
+     LIMIT $1`,
+    [safeLimit],
+  );
+  return rows.map((r) => ({
+    ...r,
+    id: Number(r.id),
+    day_id: Number(r.day_id),
+    elapsed_work_sec: Number(r.elapsed_work_sec ?? 0),
+  }));
+}
+
+export async function deleteWorkStoryEntry(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM work_story_entries WHERE id = $1", [id]);
+  await enqueueSyncMutation(db, "work_story_delete", { id });
+}
+
+// ---------------------------------------------------------------------------
+// Bulut Senkronizasyon Kuyruğu (Offline-First Sync Queue) & Google Auth
+// ---------------------------------------------------------------------------
+
+export async function loadCloudAuthState(): Promise<CloudAuthState> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = 'cloudAuthState'",
+  );
+  if (rows.length === 0) return { ...DEFAULT_CLOUD_AUTH };
+  try {
+    const parsed = JSON.parse(rows[0].value);
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CLOUD_AUTH };
+    return {
+      userId: typeof parsed.userId === "string" ? parsed.userId : "",
+      email: typeof parsed.email === "string" ? parsed.email : "",
+      name: typeof parsed.name === "string" ? parsed.name : "",
+      picture: typeof parsed.picture === "string" ? parsed.picture : "",
+      accessToken: typeof parsed.accessToken === "string" ? parsed.accessToken : "",
+      serverUrl:
+        typeof parsed.serverUrl === "string" && parsed.serverUrl.trim()
+          ? parsed.serverUrl.trim().replace(/\/+$/, "")
+          : DEFAULT_CLOUD_AUTH.serverUrl,
+      googleClientId:
+        typeof parsed.googleClientId === "string" ? parsed.googleClientId.trim() : "",
+      autoSyncKeep:
+        typeof parsed.autoSyncKeep === "boolean" ? parsed.autoSyncKeep : true,
+      lastSyncAt: typeof parsed.lastSyncAt === "string" ? parsed.lastSyncAt : null,
+    };
+  } catch {
+    return { ...DEFAULT_CLOUD_AUTH };
+  }
+}
+
+export async function saveCloudAuthState(state: CloudAuthState): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ('cloudAuthState', $1)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [JSON.stringify(state)],
+  );
+}
+
+export async function getPendingSyncQueue(limit = 100): Promise<SyncQueueItem[]> {
+  const db = await getDb();
+  const rows = await db.select<SyncQueueItem[]>(
+    "SELECT id, entity_type, payload_json, created_at FROM sync_queue ORDER BY id ASC LIMIT $1",
+    [limit],
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    entity_type: r.entity_type,
+    payload_json: r.payload_json,
+    created_at: r.created_at,
+  }));
+}
+
+export async function getPendingSyncCount(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<{ cnt: number }[]>(
+    "SELECT COUNT(id) AS cnt FROM sync_queue",
+  );
+  return Number(rows[0]?.cnt ?? 0);
+}
+
+export async function removeSyncedQueueIds(ids: number[]): Promise<void> {
+  if (!ids || ids.length === 0) return;
+  const db = await getDb();
+  for (const id of ids) {
+    await db.execute("DELETE FROM sync_queue WHERE id = $1", [id]);
+  }
+}
+
+export interface UserCloudSnapshot {
+  study_days: any[];
+  sessions: any[];
+  distractions: any[];
+  parking_items: any[];
+  context_logs: any[];
+  work_story_entries: any[];
+  tags: any[];
+  exported_at: string;
+}
+
+export async function exportUserCloudSnapshot(): Promise<UserCloudSnapshot> {
+  const db = await getDb();
+  const study_days = await db.select<any[]>("SELECT * FROM study_days ORDER BY id ASC");
+  const sessions = await db.select<any[]>("SELECT * FROM sessions ORDER BY id ASC");
+  const distractions = await db.select<any[]>("SELECT * FROM distractions ORDER BY id ASC");
+  const parking_items = await db.select<any[]>("SELECT * FROM parking_items ORDER BY id ASC");
+  const context_logs = await db.select<any[]>("SELECT * FROM context_logs ORDER BY id ASC");
+  const work_story_entries = await db.select<any[]>(
+    "SELECT * FROM work_story_entries ORDER BY id DESC LIMIT 60",
+  );
+  const tags = await db.select<any[]>("SELECT * FROM tags ORDER BY id ASC");
+
+  return {
+    study_days,
+    sessions,
+    distractions,
+    parking_items,
+    context_logs,
+    work_story_entries,
+    tags,
+    exported_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Sunucudan dönen kullanıcıya özel verileri yerel SQLite ile çakışmasız birleştirir.
+ */
+export async function mergeRemoteSnapshotToLocal(
+  remote: Partial<UserCloudSnapshot> | null | undefined,
+): Promise<void> {
+  if (!remote) return;
+  const db = await getDb();
+  const day = await getOrCreateActiveDay(db);
+
+  // Parking items (content + created_at eşleşmesine göre eksik olanları ekle veya durumunu güncelle)
+  if (Array.isArray(remote.parking_items)) {
+    const localRows = await db.select<{ id: number; content: string; created_at: string; status: string }[]>(
+      "SELECT id, content, created_at, status FROM parking_items",
+    );
+    const localKeyMap = new Map(
+      localRows.map((r) => [`${r.content}|||${r.created_at}`, r]),
+    );
+    for (const item of remote.parking_items) {
+      if (!item || typeof item.content !== "string") continue;
+      const key = `${item.content}|||${item.created_at || ""}`;
+      const existing = localKeyMap.get(key);
+      if (!existing) {
+        await db.execute(
+          `INSERT INTO parking_items (
+             day_id, item_type, content, status, active_app, active_window,
+             context_text, screenshot_data, keep_synced, keep_note_id, created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [
+            day.id,
+            item.item_type || "task",
+            item.content,
+            item.status || "pending",
+            item.active_app || null,
+            item.active_window || null,
+            item.context_text || null,
+            item.screenshot_data || null,
+            Number(item.keep_synced || 0),
+            item.keep_note_id || null,
+            item.created_at || new Date().toISOString(),
+            item.updated_at || new Date().toISOString(),
+          ],
+        );
+      } else if (item.status && item.status !== existing.status) {
+        await db.execute(
+          "UPDATE parking_items SET status = $1, keep_synced = COALESCE($2, keep_synced) WHERE id = $3",
+          [item.status, Number(item.keep_synced || 0), existing.id],
+        );
+      }
+    }
+  }
+
+  // Work story entries (created_at eşleşmesine göre eksik olanları ekle)
+  if (Array.isArray(remote.work_story_entries)) {
+    const localStories = await db.select<{ created_at: string }[]>(
+      "SELECT created_at FROM work_story_entries",
+    );
+    const seen = new Set(localStories.map((s) => s.created_at));
+    for (const st of remote.work_story_entries) {
+      if (!st || !st.created_at || seen.has(st.created_at)) continue;
+      seen.add(st.created_at);
+      await db.execute(
+        `INSERT INTO work_story_entries (
+           day_id, entry_type, context_text, work_tag, active_app, active_window,
+           note, screenshot_data, elapsed_work_sec, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          day.id,
+          st.entry_type || "periodic",
+          st.context_text || null,
+          st.work_tag || null,
+          st.active_app || null,
+          st.active_window || null,
+          st.note || null,
+          st.screenshot_data || null,
+          Number(st.elapsed_work_sec || 0),
+          st.created_at,
+        ],
+      );
+    }
+  }
 }

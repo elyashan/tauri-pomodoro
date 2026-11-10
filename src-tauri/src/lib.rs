@@ -21,6 +21,40 @@ pub struct ActiveAppInfo {
     pub window_title: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenshotCapturePayload {
+    pub data_url: String,
+    pub active_app: String,
+    pub active_window: String,
+}
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(((input.len() + 2) / 3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(TABLE[((triple >> 18) & 0x3F) as usize]);
+        out.push(TABLE[((triple >> 12) & 0x3F) as usize]);
+        if chunk.len() > 1 {
+            out.push(TABLE[((triple >> 6) & 0x3F) as usize]);
+        } else {
+            out.push(b'=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(triple & 0x3F) as usize]);
+        } else {
+            out.push(b'=');
+        }
+    }
+    // SAFETY: TABLE and '=' are valid ASCII bytes
+    unsafe { String::from_utf8_unchecked(out) }
+}
+
 fn clean_app_and_tab(raw_exe_stem: &str, raw_title: &str) -> ActiveAppInfo {
     let lower = raw_exe_stem.trim().to_ascii_lowercase();
     let app_name = match lower.as_str() {
@@ -94,17 +128,39 @@ fn clean_app_and_tab(raw_exe_stem: &str, raw_title: &str) -> ActiveAppInfo {
 
 #[cfg(target_os = "windows")]
 mod platform_fg {
-    use super::{clean_app_and_tab, ActiveAppInfo};
+    use super::{clean_app_and_tab, encode_base64, ActiveAppInfo};
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::path::Path;
 
     type HWND = isize;
+    type HDC = isize;
+    type HGDIOBJ = isize;
+    type HBITMAP = isize;
     type DWORD = u32;
     type BOOL = i32;
     type HANDLE = isize;
 
     const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
+    const SRCCOPY: DWORD = 0x00CC0020;
+    const HALFTONE: i32 = 4;
+    const DESKTOPVERTRES: i32 = 117;
+    const DESKTOPHORZRES: i32 = 118;
+
+    #[repr(C)]
+    struct BitmapInfoHeader {
+        bi_size: u32,
+        bi_width: i32,
+        bi_height: i32,
+        bi_planes: u16,
+        bi_bit_count: u16,
+        bi_compression: u32,
+        bi_size_image: u32,
+        bi_x_pels_per_meter: i32,
+        bi_y_pels_per_meter: i32,
+        bi_clr_used: u32,
+        bi_clr_important: u32,
+    }
 
     #[link(name = "user32")]
     unsafe extern "system" {
@@ -113,6 +169,42 @@ mod platform_fg {
         fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
         fn SetForegroundWindow(hWnd: HWND) -> BOOL;
         fn IsWindow(hWnd: HWND) -> BOOL;
+        fn GetDC(hWnd: HWND) -> HDC;
+        fn ReleaseDC(hWnd: HWND, hDC: HDC) -> i32;
+        fn GetSystemMetrics(nIndex: i32) -> i32;
+    }
+
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn GetDeviceCaps(hdc: HDC, index: i32) -> i32;
+        fn CreateCompatibleDC(hdc: HDC) -> HDC;
+        fn CreateCompatibleBitmap(hdc: HDC, cx: i32, cy: i32) -> HBITMAP;
+        fn SelectObject(hdc: HDC, h: HGDIOBJ) -> HGDIOBJ;
+        fn SetStretchBltMode(hdc: HDC, mode: i32) -> i32;
+        fn StretchBlt(
+            hdcDest: HDC,
+            xDest: i32,
+            yDest: i32,
+            wDest: i32,
+            hDest: i32,
+            hdcSrc: HDC,
+            xSrc: i32,
+            ySrc: i32,
+            wSrc: i32,
+            hSrc: i32,
+            rop: DWORD,
+        ) -> BOOL;
+        fn GetDIBits(
+            hdc: HDC,
+            hbmp: HBITMAP,
+            start: u32,
+            cLines: u32,
+            lpvBits: *mut u8,
+            lpbmi: *mut BitmapInfoHeader,
+            usage: u32,
+        ) -> i32;
+        fn DeleteObject(ho: HGDIOBJ) -> BOOL;
+        fn DeleteDC(hdc: HDC) -> BOOL;
     }
 
     #[link(name = "kernel32")]
@@ -197,11 +289,126 @@ mod platform_fg {
             }
         }
     }
+
+    pub fn capture_screen_data_url(max_width: i32) -> Option<String> {
+        unsafe {
+            let hdc_screen = GetDC(0);
+            if hdc_screen == 0 {
+                return None;
+            }
+
+            let mut src_w = GetDeviceCaps(hdc_screen, DESKTOPHORZRES);
+            let mut src_h = GetDeviceCaps(hdc_screen, DESKTOPVERTRES);
+            if src_w <= 0 || src_h <= 0 {
+                src_w = GetSystemMetrics(0);
+                src_h = GetSystemMetrics(1);
+            }
+            if src_w <= 0 || src_h <= 0 {
+                let _ = ReleaseDC(0, hdc_screen);
+                return None;
+            }
+
+            let target_w = max_width.clamp(320, 1280).min(src_w);
+            let target_h = ((src_h as i64 * target_w as i64) / src_w as i64).max(180) as i32;
+
+            let hdc_mem = CreateCompatibleDC(hdc_screen);
+            if hdc_mem == 0 {
+                let _ = ReleaseDC(0, hdc_screen);
+                return None;
+            }
+
+            let hbm = CreateCompatibleBitmap(hdc_screen, target_w, target_h);
+            if hbm == 0 {
+                let _ = DeleteDC(hdc_mem);
+                let _ = ReleaseDC(0, hdc_screen);
+                return None;
+            }
+
+            let old_obj = SelectObject(hdc_mem, hbm);
+            let _ = SetStretchBltMode(hdc_mem, HALFTONE);
+            let ok_blt = StretchBlt(
+                hdc_mem,
+                0,
+                0,
+                target_w,
+                target_h,
+                hdc_screen,
+                0,
+                0,
+                src_w,
+                src_h,
+                SRCCOPY,
+            );
+
+            if ok_blt == 0 {
+                let _ = SelectObject(hdc_mem, old_obj);
+                let _ = DeleteObject(hbm);
+                let _ = DeleteDC(hdc_mem);
+                let _ = ReleaseDC(0, hdc_screen);
+                return None;
+            }
+
+            let row_stride = ((target_w as usize * 3 + 3) / 4) * 4;
+            let image_size = row_stride * target_h as usize;
+            let total_size = 54 + image_size;
+            let mut bmp_buf = vec![0u8; total_size];
+
+            // 14-byte BITMAPFILEHEADER
+            bmp_buf[0] = b'B';
+            bmp_buf[1] = b'M';
+            bmp_buf[2..6].copy_from_slice(&(total_size as u32).to_le_bytes());
+            bmp_buf[10..14].copy_from_slice(&54u32.to_le_bytes());
+
+            let mut bmi = BitmapInfoHeader {
+                bi_size: 40,
+                bi_width: target_w,
+                bi_height: target_h, // bottom-up standard BMP
+                bi_planes: 1,
+                bi_bit_count: 24,
+                bi_compression: 0,
+                bi_size_image: image_size as u32,
+                bi_x_pels_per_meter: 0,
+                bi_y_pels_per_meter: 0,
+                bi_clr_used: 0,
+                bi_clr_important: 0,
+            };
+
+            let lines = GetDIBits(
+                hdc_mem,
+                hbm,
+                0,
+                target_h as u32,
+                bmp_buf[54..].as_mut_ptr(),
+                &mut bmi,
+                0,
+            );
+
+            // Copy BITMAPINFOHEADER into bytes 14..54
+            bmp_buf[14..18].copy_from_slice(&bmi.bi_size.to_le_bytes());
+            bmp_buf[18..22].copy_from_slice(&bmi.bi_width.to_le_bytes());
+            bmp_buf[22..26].copy_from_slice(&bmi.bi_height.to_le_bytes());
+            bmp_buf[26..28].copy_from_slice(&bmi.bi_planes.to_le_bytes());
+            bmp_buf[28..30].copy_from_slice(&bmi.bi_bit_count.to_le_bytes());
+            bmp_buf[30..34].copy_from_slice(&bmi.bi_compression.to_le_bytes());
+            bmp_buf[34..38].copy_from_slice(&(image_size as u32).to_le_bytes());
+
+            let _ = SelectObject(hdc_mem, old_obj);
+            let _ = DeleteObject(hbm);
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(0, hdc_screen);
+
+            if lines <= 0 {
+                return None;
+            }
+
+            Some(format!("data:image/bmp;base64,{}", encode_base64(&bmp_buf)))
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
 mod platform_fg {
-    use super::{clean_app_and_tab, ActiveAppInfo};
+    use super::{clean_app_and_tab, encode_base64, ActiveAppInfo};
     use std::process::Command;
 
     pub fn inspect_external_foreground() -> Option<(ActiveAppInfo, isize)> {
@@ -229,6 +436,21 @@ mod platform_fg {
     }
 
     pub fn restore_hwnd(_hwnd: isize) {}
+
+    pub fn capture_screen_data_url(_max_width: i32) -> Option<String> {
+        let tmp = std::env::temp_dir().join("pomodoro_cap_tmp.jpg");
+        let status = Command::new("screencapture")
+            .args(["-x", "-t", "jpg"])
+            .arg(&tmp)
+            .status()
+            .ok()?;
+        if !status.success() {
+            return None;
+        }
+        let bytes = std::fs::read(&tmp).ok()?;
+        let _ = std::fs::remove_file(&tmp);
+        Some(format!("data:image/jpeg;base64,{}", encode_base64(&bytes)))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -252,6 +474,10 @@ mod platform_fg {
     }
 
     pub fn restore_hwnd(_hwnd: isize) {}
+
+    pub fn capture_screen_data_url(_max_width: i32) -> Option<String> {
+        None
+    }
 }
 
 // ============================================================================
@@ -324,6 +550,7 @@ pub struct ShortcutStatus {
 struct SharedCaptureState {
     last_external: ActiveAppInfo,
     last_external_hwnd: isize,
+    last_screenshot_data_url: String,
     capture_opened_at_ms: u128,
     open_seq: u64,
     distraction_shortcut: String,
@@ -341,6 +568,7 @@ impl Default for SharedCaptureState {
         Self {
             last_external: ActiveAppInfo::default(),
             last_external_hwnd: 0,
+            last_screenshot_data_url: String::new(),
             capture_opened_at_ms: 0,
             open_seq: 0,
             parsed_distraction: Shortcut::from_str(&d_str).ok(),
@@ -362,8 +590,13 @@ fn now_ms() -> u128 {
 
 fn trigger_capture_window(app: &AppHandle, mode: &str) {
     // Kısayola basıldığı salisede (henüz capture penceresi odak almadan önce!)
-    // o an açık olan dış uygulama ve sekme başlığını yakala.
+    // o an açık olan dış uygulama, sekme başlığını ve ekran görüntüsünü yakala.
     let fresh_fg = platform_fg::inspect_external_foreground();
+    let pre_shot = if mode == "distraction" {
+        platform_fg::capture_screen_data_url(840)
+    } else {
+        None
+    };
 
     let payload = {
         let state = app.state::<Mutex<SharedCaptureState>>();
@@ -376,6 +609,9 @@ fn trigger_capture_window(app: &AppHandle, mode: &str) {
             if hwnd != 0 {
                 guard.last_external_hwnd = hwnd;
             }
+        }
+        if let Some(shot) = pre_shot {
+            guard.last_screenshot_data_url = shot;
         }
         guard.open_seq = guard.open_seq.wrapping_add(1);
         guard.capture_opened_at_ms = now_ms();
@@ -391,6 +627,7 @@ fn trigger_capture_window(app: &AppHandle, mode: &str) {
     };
 
     if let Some(cap_win) = app.get_webview_window("capture") {
+        let _ = cap_win.set_size(tauri::Size::Logical(tauri::LogicalSize::new(540.0, 205.0)));
         let _ = cap_win.center();
         let _ = cap_win.show();
         let _ = cap_win.unminimize();
@@ -528,6 +765,7 @@ fn open_quick_capture_manual(app: AppHandle, mode: String) {
 fn close_capture_and_restore_focus(app: AppHandle, state: State<'_, Mutex<SharedCaptureState>>) {
     if let Some(cap_win) = app.get_webview_window("capture") {
         let _ = cap_win.hide();
+        let _ = cap_win.set_size(tauri::Size::Logical(tauri::LogicalSize::new(540.0, 205.0)));
     }
     let prev_hwnd = {
         let guard = match state.lock() {
@@ -546,6 +784,82 @@ fn update_global_shortcuts(
     context_shortcut: String,
 ) -> ShortcutStatus {
     apply_shortcuts_internal(&app, distraction_shortcut, context_shortcut)
+}
+
+#[tauri::command]
+fn capture_screen_snapshot(
+    state: State<'_, Mutex<SharedCaptureState>>,
+    fresh: bool,
+) -> ScreenshotCapturePayload {
+    if fresh {
+        let fresh_fg = platform_fg::inspect_external_foreground();
+        let shot = platform_fg::capture_screen_data_url(840).unwrap_or_default();
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some((info, hwnd)) = fresh_fg {
+            guard.last_external = info;
+            if hwnd != 0 {
+                guard.last_external_hwnd = hwnd;
+            }
+        }
+        if !shot.is_empty() {
+            guard.last_screenshot_data_url = shot.clone();
+        }
+        return ScreenshotCapturePayload {
+            data_url: shot,
+            active_app: guard.last_external.app_name.clone(),
+            active_window: guard.last_external.window_title.clone(),
+        };
+    }
+
+    let (cached_shot, app_name, win_title) = {
+        let guard = match state.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        (
+            guard.last_screenshot_data_url.clone(),
+            guard.last_external.app_name.clone(),
+            guard.last_external.window_title.clone(),
+        )
+    };
+
+    if !cached_shot.is_empty() {
+        return ScreenshotCapturePayload {
+            data_url: cached_shot,
+            active_app: app_name,
+            active_window: win_title,
+        };
+    }
+
+    let shot = platform_fg::capture_screen_data_url(840).unwrap_or_default();
+    if !shot.is_empty() {
+        if let Ok(mut guard) = state.lock() {
+            guard.last_screenshot_data_url = shot.clone();
+        }
+    }
+    ScreenshotCapturePayload {
+        data_url: shot,
+        active_app: app_name,
+        active_window: win_title,
+    }
+}
+
+#[tauri::command]
+fn set_capture_window_size(app: AppHandle, width: f64, height: f64) {
+    if let Some(cap_win) = app.get_webview_window("capture") {
+        let _ = cap_win.set_size(tauri::Size::Logical(tauri::LogicalSize::new(width, height)));
+        let _ = cap_win.center();
+    }
+}
+
+#[tauri::command]
+fn update_tray_tooltip(app: AppHandle, tooltip: String) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -593,6 +907,9 @@ pub fn run() {
             open_quick_capture_manual,
             close_capture_and_restore_focus,
             update_global_shortcuts,
+            capture_screen_snapshot,
+            set_capture_window_size,
+            update_tray_tooltip,
         ])
         .setup(|app| {
             // Varsayılan kısayolları başlat (React açılınca kullanıcının kayıtlı kısayollarıyla günceller)
@@ -660,7 +977,7 @@ pub fn run() {
                 ],
             )?;
 
-            let mut tray_builder = TrayIconBuilder::new()
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Pomodoro Zamanlayıcı")
                 .menu(&menu)
                 .show_menu_on_left_click(false)

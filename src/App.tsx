@@ -96,7 +96,28 @@ import {
   getAppDistractionSummary,
   loadGlobalShortcuts,
   saveGlobalShortcuts,
+  WorkStoryEntry,
+  CloudAuthState,
+  DEFAULT_CLOUD_AUTH,
+  addWorkStoryEntry,
+  getWorkStoryEntries,
+  deleteWorkStoryEntry,
+  loadCloudAuthState,
+  markParkingItemsKeepSynced,
+  getPendingSyncCount,
 } from "./db";
+import {
+  CropRegionPct,
+  captureScreenCompressed,
+  captureScreenSnapshotRaw,
+  compressAndCropDataUrl,
+} from "./screenshot";
+import {
+  signInWithGoogleAccount,
+  signOutGoogleAccount,
+  syncWithCloudServer,
+  syncParkingToGoogleKeep,
+} from "./cloudSync";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
 import { ConfettiCanvas } from "./Confetti";
@@ -115,6 +136,7 @@ interface ShortcutStatus {
 const DISTRACT_CATEGORIES: DistractionCategory[] = [
   "impulsive_task",
   "idea",
+  "screenshot_note",
   "internal",
   "external",
   "escape",
@@ -155,11 +177,13 @@ const EMPTY_PARKING: ParkingLotData = {
   unratedIdeas: [],
   importantIdeas: [],
   unimportantIdeas: [],
+  screenshotNotes: [],
   totalTasks: 0,
   totalIdeas: 0,
+  totalScreenshots: 0,
 };
 
-type NavPage = "menu" | "timer" | "summary" | "settings";
+type NavPage = "menu" | "timer" | "summary" | "settings" | "dashboard";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
 
@@ -456,6 +480,12 @@ export default function App() {
 
   // Sağ Alt Mini Sayaç Widget (isMiniDock) & Özel Pencere Boyutları
   const [isMiniDock, setIsMiniDock] = useState(false);
+  const [miniDockContextToast, setMiniDockContextToast] = useState<string | null>(
+    null,
+  );
+  const miniDockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const savedNormalPosRef = useRef<{ x: number; y: number } | null>(null);
   const [customSizes, setCustomSizes] = useState<CustomWindowSizes>({});
   const [currentWinSize, setCurrentWinSize] = useState<{ w: number; h: number }>({
@@ -463,6 +493,42 @@ export default function App() {
     h: 362,
   });
   const [sizeSavedFlash, setSizeSavedFlash] = useState(false);
+
+  // Distracted İçi (3·S) Mini Screenshot Önizleme & Bölge Kırpıcı + 5dk Çalışma Hikayesi + Bulut & Google Keep
+  const [distractRawShot, setDistractRawShot] = useState<string>("");
+  const [distractPreviewShot, setDistractPreviewShot] = useState<string>("");
+  const [distractCropBox, setDistractCropBox] = useState<CropRegionPct | null>(
+    null,
+  );
+  const [distractDragStart, setDistractDragStart] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const distractPreviewRef = useRef<HTMLDivElement | null>(null);
+
+  const [workStoryEntries, setWorkStoryEntries] = useState<WorkStoryEntry[]>(
+    [],
+  );
+  const [lightboxEntry, setLightboxEntry] = useState<WorkStoryEntry | null>(
+    null,
+  );
+  const lastPeriodicShotSecRef = useRef<number>(0);
+
+  const [cloudAuth, setCloudAuth] =
+    useState<CloudAuthState>(DEFAULT_CLOUD_AUTH);
+  const [cloudEmailInput, setCloudEmailInput] = useState<string>("");
+  const [cloudNameInput, setCloudNameInput] = useState<string>("");
+  const [cloudTokenInput, setCloudTokenInput] = useState<string>("");
+  const [cloudServerInput, setCloudServerInput] = useState<string>(
+    DEFAULT_CLOUD_AUTH.serverUrl,
+  );
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
+  const [isOnline, setIsOnline] = useState<boolean>(
+    typeof navigator !== "undefined" ? navigator.onLine : true,
+  );
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  const [keepStatusMsg, setKeepStatusMsg] = useState<string | null>(null);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
 
   // Uygulama İçi Geri Bildirim (Feedback) & ADHD Öz-Farkındalık Verisi
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
@@ -495,7 +561,7 @@ export default function App() {
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
   const [summaryTab, setSummaryTab] = useState<
-    "timeline" | "weekly" | "recent" | "parking" | "adhd"
+    "timeline" | "weekly" | "recent" | "parking" | "story" | "adhd"
   >("timeline");
   const [summaryReasonsTab, setSummaryReasonsTab] = useState<
     "work" | "contexts" | "apps" | "overtime" | "distractions" | "endings"
@@ -736,6 +802,18 @@ export default function App() {
 
         setBreakParkingData(await getParkingLotData(false));
         setRecentContexts(await getRecentContexts(6));
+        setWorkStoryEntries(await getWorkStoryEntries(false, 40));
+
+        const loadedAuth = await loadCloudAuthState();
+        setCloudAuth(loadedAuth);
+        setCloudEmailInput(loadedAuth.email || "");
+        setCloudNameInput(loadedAuth.name || "");
+        setCloudTokenInput(loadedAuth.accessToken || "");
+        setCloudServerInput(
+          loadedAuth.serverUrl || DEFAULT_CLOUD_AUTH.serverUrl,
+        );
+        setPendingSyncCount(await getPendingSyncCount());
+
         await getCurrentWindow().setResizable(true).catch(() => {});
       } catch (err) {
         console.error("Veritabanı yüklenemedi:", err);
@@ -764,6 +842,129 @@ export default function App() {
       setLoaded(true);
     })();
   }, []);
+
+  // Çevrimiçi / Çevrimdışı takip ve internet geri geldiğinde kuyruğu otomatik sunucuya gönderme
+  const triggerBackgroundCloudSync = async () => {
+    try {
+      const cnt = await getPendingSyncCount();
+      setPendingSyncCount(cnt);
+      const auth = await loadCloudAuthState();
+      if (!auth.email) return;
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        setIsOnline(false);
+        return;
+      }
+      const res = await syncWithCloudServer();
+      setPendingSyncCount(res.pendingCount);
+      if (res.ok) {
+        setCloudAuth(await loadCloudAuthState());
+      }
+    } catch {
+      // ignore offline
+    }
+  };
+
+  useEffect(() => {
+    if (!loaded) return;
+    const onOnline = () => {
+      setIsOnline(true);
+      triggerBackgroundCloudSync();
+    };
+    const onOffline = () => {
+      setIsOnline(false);
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    triggerBackgroundCloudSync();
+    const syncTimer = setInterval(() => {
+      triggerBackgroundCloudSync();
+    }, 45_000);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      clearInterval(syncTimer);
+    };
+  }, [loaded]);
+
+  // Sağ alt sistem tepsisi (System Tray) simgesi üzerine gelindiğinde Son Meşguliyet (Context) ve sayacı göster
+  useEffect(() => {
+    if (!loaded) return;
+    const ctxLabel =
+      currentContext.trim() ||
+      (currentWorkTag
+        ? `${currentWorkTag}${currentWorkReason ? `: ${currentWorkReason}` : ""}`
+        : t.qcContextNone);
+    const clk = formatClock(
+      timerMode === "work" ? workSecondsLeft : breakSecondsLeft,
+    );
+    const modeTitle = !sessionActive
+      ? "Pomodoro Widget"
+      : timerMode === "work"
+        ? `💼 ${clk}`
+        : `☕ ${clk}`;
+    invoke("update_tray_tooltip", {
+      tooltip: `${modeTitle} • 🎯 ${ctxLabel}`,
+    }).catch(() => {});
+  }, [
+    loaded,
+    sessionActive,
+    timerMode,
+    workSecondsLeft,
+    breakSecondsLeft,
+    currentContext,
+    currentWorkTag,
+    currentWorkReason,
+    t.qcContextNone,
+  ]);
+
+  // 5 Dakikada 1 Otomatik Ekran Görüntüsü + Açık Pencere İsmi + Context = Çalışma Hikayesi
+  useEffect(() => {
+    if (!loaded || !sessionActive || !isRunning || timerMode !== "work") {
+      if (!sessionActive || timerMode !== "work") {
+        lastPeriodicShotSecRef.current = 0;
+      }
+      return;
+    }
+    const currentBucket = Math.floor(workElapsedSec / 300);
+    const prevBucket = Math.floor(lastPeriodicShotSecRef.current / 300);
+    if (workElapsedSec >= 300 && currentBucket > prevBucket) {
+      lastPeriodicShotSecRef.current = workElapsedSec;
+      (async () => {
+        try {
+          const shot = await captureScreenCompressed(true, null, 720, 0.68);
+          if (!shot.dataUrl) return;
+          const fg =
+            shot.activeApp || shot.activeWindow
+              ? { appName: shot.activeApp, windowTitle: shot.activeWindow }
+              : await invoke<{ appName: string; windowTitle: string }>(
+                  "get_last_active_window",
+                ).catch(() => ({ appName: "", windowTitle: "" }));
+          const rt = runtimeStateRef.current;
+          const ctxText =
+            rt.currentContext.trim() ||
+            (rt.workTag
+              ? `${rt.workTag}${rt.workReason ? `: ${rt.workReason}` : ""}`
+              : "");
+          await addWorkStoryEntry({
+            entryType: "periodic",
+            screenshotData: shot.dataUrl,
+            activeApp: fg.appName,
+            activeWindow: fg.windowTitle,
+            contextText: ctxText,
+            workTag: rt.workTag,
+            note: `${Math.floor(workElapsedSec / 60)} dk • ${fg.appName || rt.workTag || "Çalışma"}`,
+            elapsedWorkSec: workElapsedSec,
+          });
+          setWorkStoryEntries(
+            await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+          );
+          triggerBackgroundCloudSync();
+        } catch (err) {
+          console.error("5dk çalışma hikayesi kaydedilemedi:", err);
+        }
+      })();
+    }
+  }, [loaded, sessionActive, isRunning, timerMode, workElapsedSec]);
 
   // Çalışma <-> Mola geçişlerinde yumuşak görsel geçiş animasyonu tetikle ve Otopark'ı yenile
   useEffect(() => {
@@ -861,6 +1062,50 @@ export default function App() {
     showWorkTopicBox ||
     showShortBreakPrompt;
 
+  // Sağ alt mini sayaç widget'ını konumlandırma ve kısa süreli Son Meşguliyet (Last Context) gösterimi
+  const positionMiniDockWindow = async (withToast: boolean) => {
+    try {
+      const win = getCurrentWindow();
+      const scale = await win.scaleFactor();
+      const miniW = withToast ? 236 : 152;
+      const miniH = withToast ? 66 : 44;
+      await win.setSize(new LogicalSize(miniW, miniH));
+      const mon = await currentMonitor();
+      if (mon) {
+        const physW = Math.round(miniW * scale);
+        const physH = Math.round(miniH * scale);
+        const targetX =
+          mon.position.x + mon.size.width - physW - Math.round(14 * scale);
+        const targetY =
+          mon.position.y + mon.size.height - physH - Math.round(52 * scale);
+        await win.setPosition(new PhysicalPosition(targetX, targetY));
+      }
+      await win.show();
+    } catch (err) {
+      console.error("Mini widget konumlandırılamadı:", err);
+    }
+  };
+
+  const triggerMiniDockContextToast = (customText?: string) => {
+    const rt = runtimeStateRef.current;
+    const ctxText =
+      customText?.trim() ||
+      rt.currentContext.trim() ||
+      (rt.workTag
+        ? `${rt.workTag}${rt.workReason ? `: ${rt.workReason}` : ""}`
+        : "");
+    const displayToast = ctxText || t.qcContextNone;
+    setMiniDockContextToast(displayToast);
+    if (miniDockToastTimerRef.current) {
+      clearTimeout(miniDockToastTimerRef.current);
+    }
+    positionMiniDockWindow(true);
+    miniDockToastTimerRef.current = setTimeout(() => {
+      setMiniDockContextToast(null);
+      positionMiniDockWindow(false);
+    }, 6500);
+  };
+
   // Sağ alt mini sayaç widget'ına (saatin yanına) küçültme ve normal boyuta dönme
   const enterMiniDock = async () => {
     try {
@@ -870,19 +1115,7 @@ export default function App() {
         savedNormalPosRef.current = { x: pos.x, y: pos.y };
       }
       setIsMiniDock(true);
-      const scale = await win.scaleFactor();
-      const miniW = 152;
-      const miniH = 44;
-      await win.setSize(new LogicalSize(miniW, miniH));
-      const mon = await currentMonitor();
-      if (mon) {
-        const physW = Math.round(miniW * scale);
-        const physH = Math.round(miniH * scale);
-        const targetX = mon.position.x + mon.size.width - physW - Math.round(14 * scale);
-        const targetY = mon.position.y + mon.size.height - physH - Math.round(52 * scale);
-        await win.setPosition(new PhysicalPosition(targetX, targetY));
-      }
-      await win.show();
+      triggerMiniDockContextToast();
     } catch (err) {
       console.error("Mini widget konumlandırılamadı:", err);
     }
@@ -890,6 +1123,11 @@ export default function App() {
 
   const exitMiniDock = async () => {
     try {
+      if (miniDockToastTimerRef.current) {
+        clearTimeout(miniDockToastTimerRef.current);
+        miniDockToastTimerRef.current = null;
+      }
+      setMiniDockContextToast(null);
       const win = getCurrentWindow();
       setIsMiniDock(false);
       await win.show();
@@ -907,6 +1145,12 @@ export default function App() {
       console.error("Pencere geri yüklenemedi:", err);
     }
   };
+
+  // Mini-Dock modundayken dikkat dağılırsa veya context güncellenirse sağ altta kısa süreli göster
+  useEffect(() => {
+    if (!loaded || !isMiniDock || !reminderBanner) return;
+    triggerMiniDockContextToast(reminderBanner.text);
+  }, [reminderBanner, isMiniDock, loaded]);
 
   // Sistem tepsisi (Tray) ve pencere kapatma olaylarını dinle
   useEffect(() => {
@@ -949,8 +1193,12 @@ export default function App() {
     if (!loaded || isMiniDock) return;
     const win = getCurrentWindow();
     if (anyModalOpen) {
-      win.setSize(new LogicalSize(320, 355));
-      setCurrentWinSize({ w: 320, h: 355 });
+      const isSsModal =
+        showDistractBox && distractCategory === "screenshot_note";
+      const modalW = isSsModal ? 390 : 325;
+      const modalH = isSsModal ? 455 : 365;
+      win.setSize(new LogicalSize(modalW, modalH));
+      setCurrentWinSize({ w: modalW, h: modalH });
       return;
     }
     const targetPage = page as SizeTargetPage;
@@ -960,7 +1208,10 @@ export default function App() {
       sessionActive &&
       timerMode === "break" &&
       showBreakParking &&
-      breakParkingData.totalTasks + breakParkingData.totalIdeas > 0;
+      breakParkingData.totalTasks +
+        breakParkingData.totalIdeas +
+        breakParkingData.totalScreenshots >
+        0;
     if (custom) {
       const w = hasBreakParking ? Math.max(custom.width, 345) : custom.width;
       const h = hasBreakParking ? Math.max(custom.height, 365) : custom.height;
@@ -975,6 +1226,17 @@ export default function App() {
       const h = hasBanner ? 395 : DEFAULT_WINDOW_SIZES.menu.height;
       win.setSize(new LogicalSize(DEFAULT_WINDOW_SIZES.menu.width, h));
       setCurrentWinSize({ w: DEFAULT_WINDOW_SIZES.menu.width, h });
+    } else if (page === "dashboard") {
+      win.setSize(
+        new LogicalSize(
+          DEFAULT_WINDOW_SIZES.dashboard.width,
+          DEFAULT_WINDOW_SIZES.dashboard.height,
+        ),
+      );
+      setCurrentWinSize({
+        w: DEFAULT_WINDOW_SIZES.dashboard.width,
+        h: DEFAULT_WINDOW_SIZES.dashboard.height,
+      });
     } else if (page === "summary") {
       win.setSize(
         new LogicalSize(
@@ -1002,7 +1264,10 @@ export default function App() {
         sessionActive &&
         timerMode === "break" &&
         showBreakParking &&
-        breakParkingData.totalTasks + breakParkingData.totalIdeas > 0;
+        breakParkingData.totalTasks +
+          breakParkingData.totalIdeas +
+          breakParkingData.totalScreenshots >
+          0;
       const w = hasBreakParking ? 345 : DEFAULT_WINDOW_SIZES.timer.width;
       const h = hasBreakParking ? 365 : DEFAULT_WINDOW_SIZES.timer.height;
       win.setSize(new LogicalSize(w, h));
@@ -1011,6 +1276,8 @@ export default function App() {
   }, [
     page,
     anyModalOpen,
+    showDistractBox,
+    distractCategory,
     loaded,
     updateStatus.kind,
     isMiniDock,
@@ -1020,6 +1287,7 @@ export default function App() {
     showBreakParking,
     breakParkingData.totalTasks,
     breakParkingData.totalIdeas,
+    breakParkingData.totalScreenshots,
   ]);
 
   // Renk ayarları değişince kaydet
@@ -1340,6 +1608,8 @@ export default function App() {
         return trObj.catImpulsiveTask;
       case "idea":
         return trObj.catIdea;
+      case "screenshot_note":
+        return trObj.catScreenshotNote;
       case "internal":
         return trObj.catInternal;
       case "external":
@@ -1382,13 +1652,14 @@ export default function App() {
     setRecentContexts(await getRecentContexts(6));
   };
 
-  // Hem Global Spotlight Hem Widget İçi Ortak Dikkat / Görev / Fikir İşleyici
+  // Hem Global Spotlight Hem Widget İçi Ortak Dikkat / Görev / Fikir / SS Notu İşleyici
   const processDistractionSubmission = async (params: {
     category: DistractionCategory;
     reasonText: string;
     tag?: string;
     activeApp: string;
     activeWindow: string;
+    screenshotData?: string;
   }) => {
     const rt = runtimeStateRef.current;
     const appSt = appStateRef.current;
@@ -1419,17 +1690,44 @@ export default function App() {
       await incrementContextDistraction(rt.activeContextLogId);
     }
 
-    // 1: Dürtüsel Görev ve 2: Akla Gelen Fikir -> Mola Otoparkına ekleme sırasına göre kaydedilir (süre eklenmez!)
-    if (params.category === "impulsive_task" || params.category === "idea") {
+    // 1: Dürtüsel Görev, 2: Akla Gelen Fikir, 3: SS Notu -> Mola Otoparkına ekleme sırasına göre kaydedilir (süre eklenmez!)
+    if (
+      params.category === "impulsive_task" ||
+      params.category === "idea" ||
+      params.category === "screenshot_note"
+    ) {
       await addParkingItem({
-        itemType: params.category === "impulsive_task" ? "task" : "idea",
+        itemType:
+          params.category === "screenshot_note"
+            ? "screenshot"
+            : params.category === "impulsive_task"
+              ? "task"
+              : "idea",
         content: cleanText,
         activeApp: params.activeApp,
         activeWindow: params.activeWindow,
         contextText: effectiveCtx,
+        screenshotData: params.screenshotData,
       });
       setBreakParkingData(await getParkingLotData(false));
       setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+    }
+
+    // SS Notu veya Ekran Görüntüsü varsa Çalışma Hikayesi galerisine de ekle
+    if (params.category === "screenshot_note" || params.screenshotData) {
+      await addWorkStoryEntry({
+        entryType: "screenshot_note",
+        screenshotData: params.screenshotData,
+        activeApp: params.activeApp,
+        activeWindow: params.activeWindow,
+        contextText: effectiveCtx,
+        workTag: rt.workTag,
+        note: cleanText,
+        elapsedWorkSec: rt.sessionActive ? appSt.work_elapsed_sec : 0,
+      });
+      setWorkStoryEntries(
+        await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+      );
     }
 
     await recordDistraction({
@@ -1442,6 +1740,8 @@ export default function App() {
       contextText: effectiveCtx,
       penaltySec: appliedPenaltySec,
     });
+
+    triggerBackgroundCloudSync();
 
     // Sebebi yazdıktan sonra ekrana son kalınan meşguliyet (context) gelsin
     setReminderBanner({
@@ -1462,6 +1762,7 @@ export default function App() {
         reasonText: ev.text,
         activeApp: ev.activeApp,
         activeWindow: ev.activeWindow,
+        screenshotData: ev.screenshotData,
       }).catch((err) => console.error("Hızlı yakalama kaydedilemedi:", err));
     }
   };
@@ -1634,7 +1935,7 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // DİKKAT DAĞILMASI İŞLEMLERİ (5 KATEGORİ + AÇIK SEKME + SON KALINAN CONTEXT)
+  // DİKKAT DAĞILMASI İŞLEMLERİ (6 KATEGORİ: 3. ŞIK SS NOTU + AÇIK SEKME + CONTEXT)
   // ---------------------------------------------------------------------------
   const handleDistractedClick = async () => {
     if (!sessionActive) return;
@@ -1643,6 +1944,16 @@ export default function App() {
       "get_last_active_window",
     ).catch(() => ({ appName: "", windowTitle: "" }));
     setDetectedActiveApp(fg);
+
+    captureScreenSnapshotRaw(false)
+      .then((raw) => {
+        if (raw?.dataUrl) {
+          setDistractRawShot(raw.dataUrl);
+          setDistractPreviewShot(raw.dataUrl);
+        }
+      })
+      .catch(() => {});
+    setDistractCropBox(null);
 
     const loadedTags = await getTags("distraction", t.defaultDistractionTags);
     setDistractTags(loadedTags);
@@ -1665,19 +1976,46 @@ export default function App() {
 
   const submitDistraction = async () => {
     const fallbackLabel =
-      distractCategory === "impulsive_task" || distractCategory === "idea"
+      distractCategory === "impulsive_task" ||
+      distractCategory === "idea" ||
+      distractCategory === "screenshot_note"
         ? getCategoryDisplayName(distractCategory)
         : selectedDistractTag;
     const reason = distractReasonText.trim() || fallbackLabel;
+
+    let finalShot: string | undefined = undefined;
+    if (distractCategory === "screenshot_note") {
+      if (distractRawShot) {
+        finalShot = await compressAndCropDataUrl(
+          distractRawShot,
+          distractCropBox,
+          760,
+          0.72,
+        );
+      } else {
+        const compressed = await captureScreenCompressed(
+          false,
+          distractCropBox,
+          760,
+          0.72,
+        );
+        finalShot = compressed.dataUrl || undefined;
+      }
+    }
+
     await processDistractionSubmission({
       category: distractCategory,
       reasonText: reason,
       tag: selectedDistractTag,
       activeApp: detectedActiveApp.appName,
       activeWindow: detectedActiveApp.windowTitle,
+      screenshotData: finalShot,
     });
     setShowDistractBox(false);
     setDistractReasonText("");
+    setDistractRawShot("");
+    setDistractPreviewShot("");
+    setDistractCropBox(null);
     setIsEditingDistractTags(false);
     setTagForm(null);
   };
@@ -2178,7 +2516,7 @@ export default function App() {
     );
   };
 
-  // Mola Otoparkı & Özet Otoparkı Ortak Render Yardımcısı (Görevler Ekleme Sırasıyla + Fikirler Önemli/Önemsiz)
+  // Mola Otoparkı & Özet Otoparkı Ortak Render Yardımcısı (Görevler Ekleme Sırasıyla + Fikirler Önemli/Önemsiz + SS Notları + Keep Butonu)
   const renderParkingItemTooltip = (item: ParkingItem): string => {
     const parts: string[] = [];
     if (item.context_text) {
@@ -2214,14 +2552,24 @@ export default function App() {
             {item.content}
           </span>
         </label>
-        <button
-          type="button"
-          className="tag-icon-btn del-btn"
-          onClick={() => handleDeleteParkingEntry(item.id)}
-          title={t.cancel}
-        >
-          ✕
-        </button>
+        <div className="parking-row-right">
+          <button
+            type="button"
+            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            onClick={() => handleSyncSingleItemToKeep(item)}
+            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+          >
+            {item.keep_synced ? "✓" : "🟨"}
+          </button>
+          <button
+            type="button"
+            className="tag-icon-btn del-btn"
+            onClick={() => handleDeleteParkingEntry(item.id)}
+            title={t.cancel}
+          >
+            ✕
+          </button>
+        </div>
       </div>
     );
 
@@ -2263,6 +2611,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            onClick={() => handleSyncSingleItemToKeep(item)}
+            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+          >
+            {item.keep_synced ? "✓" : "🟨"}
+          </button>
+          <button
+            type="button"
             className="tag-icon-btn del-btn"
             onClick={() => handleDeleteParkingEntry(item.id)}
             title={t.cancel}
@@ -2273,15 +2629,87 @@ export default function App() {
       </div>
     );
 
+    const renderScreenshotRow = (item: ParkingItem) => (
+      <div
+        key={item.id}
+        className="parking-ss-row"
+        title={renderParkingItemTooltip(item)}
+      >
+        {item.screenshot_data && (
+          <img
+            src={item.screenshot_data}
+            alt="ss"
+            className="parking-ss-thumb"
+            onClick={() =>
+              setLightboxEntry({
+                id: item.id,
+                day_id: item.day_id,
+                entry_type: "screenshot_note",
+                screenshot_data: item.screenshot_data,
+                active_app: item.active_app,
+                active_window: item.active_window,
+                context_text: item.context_text,
+                work_tag: "",
+                note: item.content,
+                created_at: item.created_at,
+                elapsed_work_sec: 0,
+              })
+            }
+          />
+        )}
+        <span className="parking-todo-text">{item.content}</span>
+        <div className="parking-row-right">
+          <button
+            type="button"
+            className={`keep-chip-btn ${item.keep_synced ? "synced" : ""}`}
+            onClick={() => handleSyncSingleItemToKeep(item)}
+            title={item.keep_synced ? t.keepSyncedBadge : "Google Keep"}
+          >
+            {item.keep_synced ? "✓" : "🟨"}
+          </button>
+          <button
+            type="button"
+            className="tag-icon-btn del-btn"
+            onClick={() => handleDeleteParkingEntry(item.id)}
+            title={t.cancel}
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    );
+
+    const totalAllCount =
+      data.totalTasks + data.totalIdeas + data.totalScreenshots;
+
     return (
       <>
-        {isBreakView && (
-          <div className="parking-banner-title">
-            {t.parkingBreakBannerTitle}
+        <div className="parking-header-bar">
+          {isBreakView ? (
+            <div className="parking-banner-title">
+              {t.parkingBreakBannerTitle}
+            </div>
+          ) : (
+            <span className="section-subhead">
+              {t.parkingTab} ({totalAllCount})
+            </span>
+          )}
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            {keepStatusMsg && (
+              <span className="keep-status-pill">{keepStatusMsg}</span>
+            )}
+            <button
+              type="button"
+              className="keep-sync-btn"
+              onClick={handleSyncParkingToKeep}
+              title={t.keepSyncAllBtn}
+            >
+              🟨 Keep
+            </button>
           </div>
-        )}
+        </div>
 
-        {data.totalTasks === 0 && data.totalIdeas === 0 ? (
+        {totalAllCount === 0 ? (
           <div
             style={{
               fontSize: "9.5px",
@@ -2338,10 +2766,157 @@ export default function App() {
                 {data.unimportantIdeas.map((it) => renderIdeaRow(it))}
               </>
             )}
+
+            {data.screenshotNotes.length > 0 && (
+              <>
+                <div className="parking-section-title">
+                  {t.parkingScreenshotNotes} ({data.screenshotNotes.length})
+                </div>
+                {data.screenshotNotes.map((it) => renderScreenshotRow(it))}
+              </>
+            )}
           </>
         )}
       </>
     );
+  };
+
+  // ---------------------------------------------------------------------------
+  // GOOGLE KEEP & BULUT SENKRONİZASYON İŞLEMLERİ
+  // ---------------------------------------------------------------------------
+  const handleSyncParkingToKeep = async () => {
+    setKeepStatusMsg("...");
+    try {
+      const pData = await getParkingLotData(false);
+      const res = await syncParkingToGoogleKeep(pData);
+      setKeepStatusMsg(res.message);
+      if (res.ok) {
+        const allIds = [
+          ...pData.pendingTasks,
+          ...pData.doneTasks,
+          ...pData.unratedIdeas,
+          ...pData.importantIdeas,
+          ...pData.unimportantIdeas,
+          ...pData.screenshotNotes,
+        ].map((it) => it.id);
+        await markParkingItemsKeepSynced(allIds);
+        await refreshParkingViews();
+      }
+      setTimeout(() => setKeepStatusMsg(null), 3500);
+    } catch (err) {
+      setKeepStatusMsg(String(err));
+      setTimeout(() => setKeepStatusMsg(null), 3500);
+    }
+  };
+
+  const handleSyncSingleItemToKeep = async (item: ParkingItem) => {
+    setKeepStatusMsg("...");
+    try {
+      const singleData: ParkingLotData = {
+        totalTasks: item.item_type === "task" ? 1 : 0,
+        totalIdeas: item.item_type === "idea" ? 1 : 0,
+        totalScreenshots: item.item_type === "screenshot" ? 1 : 0,
+        pendingTasks:
+          item.item_type === "task" && item.status !== "done" ? [item] : [],
+        doneTasks:
+          item.item_type === "task" && item.status === "done" ? [item] : [],
+        unratedIdeas:
+          item.item_type === "idea" && item.status === "unrated" ? [item] : [],
+        importantIdeas:
+          item.item_type === "idea" && item.status === "important"
+            ? [item]
+            : [],
+        unimportantIdeas:
+          item.item_type === "idea" && item.status === "unimportant"
+            ? [item]
+            : [],
+        screenshotNotes: item.item_type === "screenshot" ? [item] : [],
+      };
+      const res = await syncParkingToGoogleKeep(singleData, {
+        singleItem: item,
+      });
+      setKeepStatusMsg(res.message);
+      if (res.ok) {
+        await markParkingItemsKeepSynced([item.id]);
+        await refreshParkingViews();
+      }
+      setTimeout(() => setKeepStatusMsg(null), 3500);
+    } catch (err) {
+      setKeepStatusMsg(String(err));
+      setTimeout(() => setKeepStatusMsg(null), 3500);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    if (!cloudEmailInput.trim()) return;
+    const res = await signInWithGoogleAccount({
+      email: cloudEmailInput.trim(),
+      name: cloudNameInput.trim() || undefined,
+      accessToken: cloudTokenInput.trim() || undefined,
+      serverUrl: cloudServerInput.trim() || undefined,
+    });
+    setCloudAuth(res.auth);
+    setSyncStatusMsg(res.message);
+    await triggerBackgroundCloudSync();
+    setTimeout(() => setSyncStatusMsg(null), 2500);
+  };
+
+  const handleGoogleSignOut = async () => {
+    const auth = await signOutGoogleAccount();
+    setCloudAuth(auth);
+    setCloudEmailInput("");
+    setCloudNameInput("");
+    setCloudTokenInput("");
+    setSyncStatusMsg(null);
+  };
+
+  const handleManualCloudSync = async () => {
+    setIsSyncingCloud(true);
+    setSyncStatusMsg(t.syncRunning);
+    try {
+      const res = await syncWithCloudServer();
+      setPendingSyncCount(res.pendingCount);
+      setSyncStatusMsg(res.message);
+      setCloudAuth(await loadCloudAuthState());
+      const pData = await getParkingLotData(freqOnlyTodayRef.current);
+      setSummaryParkingData(pData);
+      setBreakParkingData(await getParkingLotData(false));
+      setWorkStoryEntries(
+        await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+      );
+    } catch (err) {
+      setSyncStatusMsg(String(err));
+    } finally {
+      setIsSyncingCloud(false);
+      setTimeout(() => setSyncStatusMsg(null), 3500);
+    }
+  };
+
+  const openDashboard = async () => {
+    setIsCelebrating(false);
+    setPlanDropdownOpen(false);
+    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+    const days = await getDaysSummary();
+    const weekly = await getWeeklySummary(locale);
+    const reasonsData = await getSummaryReasonsData(freqOnlyToday);
+    const timeline = await getTimelineSessions();
+    const insights = await getAdhdInsights(freqOnlyToday);
+    const pData = await getParkingLotData(freqOnlyToday);
+    const cStats = await getContextStatsSummary(freqOnlyToday);
+    const aStats = await getAppDistractionSummary(freqOnlyToday);
+    const wStory = await getWorkStoryEntries(freqOnlyToday, 40);
+
+    setSummaryDays(days);
+    setWeeklySummary(weekly);
+    setSummaryReasonsData(reasonsData);
+    setTimelineSessions(timeline);
+    setAdhdInsights(insights);
+    setSummaryParkingData(pData);
+    setContextStats(cStats);
+    setAppDistractions(aStats);
+    setWorkStoryEntries(wStory);
+    setPendingSyncCount(await getPendingSyncCount());
+    setPage("dashboard");
   };
 
   // ---------------------------------------------------------------------------
@@ -2652,11 +3227,23 @@ export default function App() {
       <div
         className={`widget-shell mini-dock-shell ${
           isLightColor(theme.bgColor) ? "light-theme" : ""
-        } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""}`}
+        } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""} ${
+          miniDockContextToast ? "has-toast" : ""
+        }`}
         style={shellStyle}
         onMouseDown={handleMouseDown}
         onDoubleClick={exitMiniDock}
       >
+        {miniDockContextToast && (
+          <div
+            className="mini-dock-context-toast no-drag"
+            title={`${t.qcCurrentContextLabel}: ${miniDockContextToast}`}
+            onClick={exitMiniDock}
+          >
+            🎯 {miniDockContextToast}
+          </div>
+        )}
+
         <div className="mini-dock-row">
           <div
             className="mini-dock-left no-drag"
@@ -2722,7 +3309,9 @@ export default function App() {
   }
 
   const breakParkingTotalCount =
-    breakParkingData.totalTasks + breakParkingData.totalIdeas;
+    breakParkingData.totalTasks +
+    breakParkingData.totalIdeas +
+    breakParkingData.totalScreenshots;
   const hasBreakParkingView =
     page === "timer" &&
     sessionActive &&
@@ -3017,7 +3606,7 @@ export default function App() {
             )}
           </div>
 
-          {/* 5 Kategori Seçici (1·G Dürtüsel Görev, 2·F Fikir -> +0dk Otopark | 3·İ, 4·D, 5·Z -> Ceza Süresi) */}
+          {/* 6 Kategori Seçici (1·G Dürtüsel Görev, 2·F Fikir, 3·S SS Notu -> +0dk Otopark | 4·İ, 5·D, 6·Z -> Ceza Süresi) */}
           <div className="cat5-grid">
             {DISTRACT_CATEGORIES.map((cat) => {
               const isSel = distractCategory === cat;
@@ -3044,6 +3633,142 @@ export default function App() {
               );
             })}
           </div>
+
+          {/* 3·S Ekran Görüntüsü Notu Modu İçin Kompakt Önizleme & Bölge Kırpıcı */}
+          {distractCategory === "screenshot_note" && (
+            <div className="qc-ss-box">
+              <div className="qc-ss-toolbar">
+                <span className="qc-ss-hint">{t.ssCropHint}</span>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  {distractCropBox && (
+                    <button
+                      type="button"
+                      className="qc-mini-btn"
+                      onClick={() => setDistractCropBox(null)}
+                    >
+                      {t.ssResetCropBtn}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="qc-mini-btn"
+                    onClick={async () => {
+                      const raw = await captureScreenSnapshotRaw(false);
+                      if (raw?.dataUrl) {
+                        setDistractRawShot(raw.dataUrl);
+                        setDistractPreviewShot(raw.dataUrl);
+                        setDistractCropBox(null);
+                      }
+                    }}
+                  >
+                    🔄
+                  </button>
+                </div>
+              </div>
+
+              {distractPreviewShot ? (
+                <div
+                  ref={distractPreviewRef}
+                  className="qc-ss-preview-wrap"
+                  onMouseDown={(e) => {
+                    const rect =
+                      distractPreviewRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const xPct = Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        ((e.clientX - rect.left) / rect.width) * 100,
+                      ),
+                    );
+                    const yPct = Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        ((e.clientY - rect.top) / rect.height) * 100,
+                      ),
+                    );
+                    setDistractDragStart({ x: xPct, y: yPct });
+                    setDistractCropBox({
+                      xPct,
+                      yPct,
+                      wPct: 0,
+                      hPct: 0,
+                    });
+                  }}
+                  onMouseMove={(e) => {
+                    if (!distractDragStart || !distractPreviewRef.current)
+                      return;
+                    const rect =
+                      distractPreviewRef.current.getBoundingClientRect();
+                    const curX = Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        ((e.clientX - rect.left) / rect.width) * 100,
+                      ),
+                    );
+                    const curY = Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        ((e.clientY - rect.top) / rect.height) * 100,
+                      ),
+                    );
+                    const left = Math.min(distractDragStart.x, curX);
+                    const top = Math.min(distractDragStart.y, curY);
+                    const width = Math.abs(curX - distractDragStart.x);
+                    const height = Math.abs(curY - distractDragStart.y);
+                    setDistractCropBox({
+                      xPct: left,
+                      yPct: top,
+                      wPct: width,
+                      hPct: height,
+                    });
+                  }}
+                  onMouseUp={() => {
+                    if (
+                      distractCropBox &&
+                      (distractCropBox.wPct < 3 ||
+                        distractCropBox.hPct < 3)
+                    ) {
+                      setDistractCropBox(null);
+                    }
+                    setDistractDragStart(null);
+                  }}
+                >
+                  <img
+                    src={distractPreviewShot}
+                    alt="preview"
+                    className="qc-ss-img"
+                    draggable={false}
+                  />
+                  {distractCropBox && (
+                    <div
+                      className="qc-ss-crop-rect"
+                      style={{
+                        left: `${distractCropBox.xPct}%`,
+                        top: `${distractCropBox.yPct}%`,
+                        width: `${distractCropBox.wPct}%`,
+                        height: `${distractCropBox.hPct}%`,
+                      }}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: "9px",
+                    color: "#a1a1aa",
+                    textAlign: "center",
+                    padding: "6px",
+                  }}
+                >
+                  {t.ssCaptureActive}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="section-subhead">{t.selectTagHint}</div>
           <div className="reason-chips stop-chips">
@@ -3123,7 +3848,7 @@ export default function App() {
                   setDistractCategory(next);
                   return;
                 }
-                if (e.altKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+                if (e.altKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
                   e.preventDefault();
                   setDistractCategory(
                     DISTRACT_CATEGORIES[Number(e.key) - 1],
@@ -3662,10 +4387,17 @@ export default function App() {
                   </button>
                   <button
                     className="ghost-btn"
+                    title={t.dashboardBtn}
+                    onClick={openDashboard}
+                  >
+                    📊 {t.dashboardBtn}
+                  </button>
+                  <button
+                    className="ghost-btn"
                     title={t.summaryTitle}
                     onClick={openSummary}
                   >
-                    📊 {t.summary}
+                    📈 {t.summary}
                   </button>
                   <button
                     className="icon-btn"
@@ -4667,10 +5399,18 @@ export default function App() {
                       onClick={() => setSummaryTab("parking")}
                       title={`${t.parkingTab} (${
                         summaryParkingData.totalTasks +
-                        summaryParkingData.totalIdeas
+                        summaryParkingData.totalIdeas +
+                        summaryParkingData.totalScreenshots
                       })`}
                     >
                       {t.parkingTab}
+                    </button>
+                    <button
+                      className={`tab-btn ${summaryTab === "story" ? "active" : ""}`}
+                      onClick={() => setSummaryTab("story")}
+                      title={`${t.workStoryTitle} (${workStoryEntries.length})`}
+                    >
+                      📸 {t.workStoryTab}
                     </button>
                     <button
                       className={`tab-btn ${summaryTab === "adhd" ? "active" : ""}`}
@@ -4680,9 +5420,18 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <button className="ghost-btn" onClick={openMenu}>
-                  ← {t.home}
-                </button>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <button
+                    className="ghost-btn"
+                    onClick={openDashboard}
+                    title={t.dashboardBtn}
+                  >
+                    📊 {t.dashboardBtn}
+                  </button>
+                  <button className="ghost-btn" onClick={openMenu}>
+                    ← {t.home}
+                  </button>
+                </div>
               </div>
 
               {showResetConfirm ? (
@@ -5092,7 +5841,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* MOLA & FİKİR OTOPARKI GÖRÜNÜMÜ (Ekleme Sırasıyla Görevler & Önemli/Önemsiz Fikirler) */}
+                  {/* MOLA & FİKİR OTOPARKI GÖRÜNÜMÜ (Ekleme Sırasıyla Görevler & Önemli/Önemsiz Fikirler + SS Notları) */}
                   {summaryTab === "parking" && (
                     <div className="parking-panel summary-parking no-drag">
                       <div
@@ -5105,7 +5854,8 @@ export default function App() {
                         <span className="parking-banner-title">
                           {t.parkingTab} (
                           {summaryParkingData.totalTasks +
-                            summaryParkingData.totalIdeas}
+                            summaryParkingData.totalIdeas +
+                            summaryParkingData.totalScreenshots}
                           )
                         </span>
                         <button
@@ -5118,6 +5868,95 @@ export default function App() {
                         </button>
                       </div>
                       {renderParkingLotContent(summaryParkingData, false)}
+                    </div>
+                  )}
+
+                  {/* ÇALIŞMA HİKAYESİ GÖRÜNÜMÜ (5dk Periyodik SS'ler & Dağılma SS Notları) */}
+                  {summaryTab === "story" && (
+                    <div className="parking-panel summary-parking no-drag">
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span className="parking-banner-title">
+                          📸 {t.workStoryTitle} ({workStoryEntries.length})
+                        </span>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={toggleFreqFilter}
+                          title={freqOnlyToday ? t.filterToday : t.filterAll}
+                        >
+                          {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
+                        </button>
+                      </div>
+                      {workStoryEntries.length === 0 ? (
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "#a1a1aa",
+                            textAlign: "center",
+                            padding: "12px",
+                          }}
+                        >
+                          {t.workStoryEmpty}
+                        </div>
+                      ) : (
+                        <div className="work-story-grid">
+                          {workStoryEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="work-story-card"
+                              onClick={() => setLightboxEntry(entry)}
+                            >
+                              <img
+                                src={entry.screenshot_data || ""}
+                                alt="screenshot"
+                                className="work-story-thumb"
+                                loading="lazy"
+                              />
+                              <div className="work-story-meta">
+                                <span className="work-story-time">
+                                  {entry.created_at.slice(11, 16)} •{" "}
+                                  {entry.entry_type === "periodic"
+                                    ? "⏱ 5dk"
+                                    : "📸 SS"}
+                                </span>
+                                {entry.active_app && (
+                                  <span
+                                    className="work-story-app"
+                                    title={
+                                      entry.active_window || entry.active_app
+                                    }
+                                  >
+                                    🌐 {entry.active_app}
+                                  </span>
+                                )}
+                                {entry.context_text && (
+                                  <span
+                                    className="work-story-ctx"
+                                    title={entry.context_text}
+                                  >
+                                    🎯 {entry.context_text}
+                                  </span>
+                                )}
+                                {entry.note && (
+                                  <span
+                                    className="work-story-note"
+                                    title={entry.note}
+                                  >
+                                    {entry.note}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -5450,6 +6289,657 @@ export default function App() {
                 </>
               )}
             </>
+          )}
+
+          {/* =================================================================
+              DASHBOARD SAYFASI (Google Auth, Bulut Senkronizasyonu, Detaylı Görselleştirme,
+              Yapılan/Yapılmayan Görevler, Fikirler ve Çalışma Hikayesi)
+             ================================================================= */}
+          {page === "dashboard" && (
+            <div className="dashboard-container">
+              <div className="top-bar">
+                <div className="top-bar-left" style={{ gap: "6px" }}>
+                  <span className="badge">📊 {t.dashboardTitle}</span>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={toggleFreqFilter}
+                    title={freqOnlyToday ? t.filterToday : t.filterAll}
+                  >
+                    {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
+                  </button>
+                </div>
+                <div className="top-bar-right">
+                  <button
+                    className="ghost-btn"
+                    onClick={openSummary}
+                    title={t.summaryTitle}
+                  >
+                    📈 {t.summary}
+                  </button>
+                  <button className="ghost-btn" onClick={openMenu}>
+                    ← {t.home}
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title={t.miniDockTooltip}
+                    onClick={enterMiniDock}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="dashboard-scroll">
+                {/* BULUT VE GOOGLE AUTH ÇUBUĞU */}
+                <div className="cloud-auth-bar">
+                  {cloudAuth.email ? (
+                    <div className="cloud-auth-logged">
+                      <div className="cloud-user-meta">
+                        <span className="cloud-online-dot" />
+                        <span className="cloud-user-name">
+                          🟢 <b>{cloudAuth.email}</b>
+                          {cloudAuth.name ? ` (${cloudAuth.name})` : ""}
+                        </span>
+                        <span className="cloud-sync-meta">
+                          {isOnline ? "🌐 Online" : "📴 Offline"} •{" "}
+                          {t.pendingSyncQueueBadge(pendingSyncCount)}
+                          {cloudAuth.lastSyncAt && (
+                            <>
+                              {" "}
+                              • {t.lastSyncLabel}:{" "}
+                              {cloudAuth.lastSyncAt.slice(11, 16)}
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <div className="cloud-auth-actions">
+                        {syncStatusMsg && (
+                          <span className="keep-status-pill">
+                            {syncStatusMsg}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          disabled={isSyncingCloud}
+                          onClick={handleManualCloudSync}
+                        >
+                          🔄{" "}
+                          {isSyncingCloud ? t.syncRunning : t.manualSyncBtn}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={handleGoogleSignOut}
+                        >
+                          {t.cloudAuthSignOut}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="cloud-auth-signin-box">
+                      <div className="cloud-signin-header">
+                        <span style={{ fontWeight: 600, fontSize: "11px" }}>
+                          ☁️ {t.cloudAuthTitle}
+                        </span>
+                        <span className="cloud-sync-meta">
+                          {isOnline ? "🌐 Çevrimiçi" : "📴 Çevrimdışı (Kuyruk Aktif)"} •{" "}
+                          {t.pendingSyncQueueBadge(pendingSyncCount)}
+                        </span>
+                      </div>
+                      <div className="cloud-signin-fields">
+                        <input
+                          type="email"
+                          className="cloud-input"
+                          placeholder={t.cloudEmailPlaceholder}
+                          value={cloudEmailInput}
+                          onChange={(e) => setCloudEmailInput(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          className="cloud-input"
+                          placeholder={t.cloudNamePlaceholder}
+                          value={cloudNameInput}
+                          onChange={(e) => setCloudNameInput(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          className="cloud-input"
+                          placeholder={t.cloudServerPlaceholder}
+                          value={cloudServerInput}
+                          onChange={(e) => setCloudServerInput(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          onClick={handleGoogleSignIn}
+                        >
+                          {t.cloudAuthSignIn}
+                        </button>
+                      </div>
+                      <div style={{ fontSize: "9px", color: "#a1a1aa", marginTop: "2px" }}>
+                        {t.cloudAuthHint}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* KPI KARTLARI */}
+                <div className="dashboard-kpi-grid">
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {t.formatDuration(dayStats.totalSec)}
+                    </div>
+                    <div className="stat-lbl">{t.totalWork}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">{dayStats.sessionCount}</div>
+                    <div className="stat-lbl">{t.sessions}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {summaryParkingData.pendingTasks.length}
+                    </div>
+                    <div className="stat-lbl">
+                      {t.dashboardUnfinishedTasks}
+                    </div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {summaryParkingData.doneTasks.length}
+                    </div>
+                    <div className="stat-lbl">{t.dashboardFinishedTasks}</div>
+                  </div>
+                </div>
+
+                {/* ÇİFT KOLONLU GÖSTERGE ALANI */}
+                <div className="dashboard-split-grid">
+                  {/* SOL KOLON: GÖREVLER & FİKİRLER */}
+                  <div className="dashboard-col">
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          ⏳ {t.dashboardUnfinishedTasks} (
+                          {summaryParkingData.pendingTasks.length})
+                        </span>
+                        <button
+                          type="button"
+                          className="keep-sync-btn"
+                          onClick={handleSyncParkingToKeep}
+                          title={t.keepSyncAllBtn}
+                        >
+                          🟨 Keep
+                        </button>
+                      </div>
+                      <div className="dashboard-list">
+                        {summaryParkingData.pendingTasks.length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noUnfinishedTasks}
+                          </div>
+                        ) : (
+                          summaryParkingData.pendingTasks.map((it) => (
+                            <div
+                              key={it.id}
+                              className="parking-todo-row"
+                              title={renderParkingItemTooltip(it)}
+                            >
+                              <label className="parking-todo-left">
+                                <input
+                                  type="checkbox"
+                                  checked={false}
+                                  onChange={() =>
+                                    handleToggleParkingTask(it.id, true)
+                                  }
+                                />
+                                <span className="parking-todo-text">
+                                  {it.content}
+                                </span>
+                              </label>
+                              <div className="parking-row-right">
+                                <button
+                                  type="button"
+                                  className={`keep-chip-btn ${
+                                    it.keep_synced ? "synced" : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleSyncSingleItemToKeep(it)
+                                  }
+                                  title="Google Keep"
+                                >
+                                  {it.keep_synced ? "✓" : "🟨"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="tag-icon-btn del-btn"
+                                  onClick={() =>
+                                    handleDeleteParkingEntry(it.id)
+                                  }
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          ✅ {t.dashboardFinishedTasks} (
+                          {summaryParkingData.doneTasks.length})
+                        </span>
+                      </div>
+                      <div className="dashboard-list">
+                        {summaryParkingData.doneTasks.length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noFinishedTasks}
+                          </div>
+                        ) : (
+                          summaryParkingData.doneTasks.map((it) => (
+                            <div
+                              key={it.id}
+                              className="parking-todo-row"
+                              title={renderParkingItemTooltip(it)}
+                            >
+                              <label className="parking-todo-left">
+                                <input
+                                  type="checkbox"
+                                  checked={true}
+                                  onChange={() =>
+                                    handleToggleParkingTask(it.id, false)
+                                  }
+                                />
+                                <span className="parking-todo-text done">
+                                  {it.content}
+                                </span>
+                              </label>
+                              <div className="parking-row-right">
+                                <button
+                                  type="button"
+                                  className={`keep-chip-btn ${
+                                    it.keep_synced ? "synced" : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleSyncSingleItemToKeep(it)
+                                  }
+                                  title="Google Keep"
+                                >
+                                  {it.keep_synced ? "✓" : "🟨"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="tag-icon-btn del-btn"
+                                  onClick={() =>
+                                    handleDeleteParkingEntry(it.id)
+                                  }
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          ⭐ {t.dashboardImportantIdeas} (
+                          {summaryParkingData.importantIdeas.length})
+                        </span>
+                      </div>
+                      <div className="dashboard-list">
+                        {summaryParkingData.importantIdeas.length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noImportantIdeas}
+                          </div>
+                        ) : (
+                          summaryParkingData.importantIdeas.map((it) => (
+                            <div
+                              key={it.id}
+                              className="parking-idea-row"
+                              title={renderParkingItemTooltip(it)}
+                            >
+                              <span className="parking-todo-text">
+                                {it.content}
+                              </span>
+                              <div className="parking-idea-actions">
+                                <button
+                                  type="button"
+                                  className="idea-rate-btn active-imp"
+                                  onClick={() =>
+                                    handleRateParkingIdea(it.id, "unrated")
+                                  }
+                                >
+                                  {t.parkingMarkImportant}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`keep-chip-btn ${
+                                    it.keep_synced ? "synced" : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleSyncSingleItemToKeep(it)
+                                  }
+                                  title="Google Keep"
+                                >
+                                  {it.keep_synced ? "✓" : "🟨"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="tag-icon-btn del-btn"
+                                  onClick={() =>
+                                    handleDeleteParkingEntry(it.id)
+                                  }
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          💤 {t.dashboardUnimportantIdeas} (
+                          {summaryParkingData.unimportantIdeas.length +
+                            summaryParkingData.unratedIdeas.length}
+                          )
+                        </span>
+                      </div>
+                      <div className="dashboard-list">
+                        {[
+                          ...summaryParkingData.unratedIdeas,
+                          ...summaryParkingData.unimportantIdeas,
+                        ].length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noUnimportantIdeas}
+                          </div>
+                        ) : (
+                          [
+                            ...summaryParkingData.unratedIdeas,
+                            ...summaryParkingData.unimportantIdeas,
+                          ].map((it) => (
+                            <div
+                              key={it.id}
+                              className="parking-idea-row"
+                              title={renderParkingItemTooltip(it)}
+                            >
+                              <span className="parking-todo-text">
+                                {it.content}
+                              </span>
+                              <div className="parking-idea-actions">
+                                <button
+                                  type="button"
+                                  className={`idea-rate-btn ${
+                                    it.status === "important"
+                                      ? "active-imp"
+                                      : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleRateParkingIdea(it.id, "important")
+                                  }
+                                >
+                                  {t.parkingMarkImportant}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`keep-chip-btn ${
+                                    it.keep_synced ? "synced" : ""
+                                  }`}
+                                  onClick={() =>
+                                    handleSyncSingleItemToKeep(it)
+                                  }
+                                  title="Google Keep"
+                                >
+                                  {it.keep_synced ? "✓" : "🟨"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="tag-icon-btn del-btn"
+                                  onClick={() =>
+                                    handleDeleteParkingEntry(it.id)
+                                  }
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SAĞ KOLON: ÇALIŞMA HİKAYESİ & MEŞGULİYET / SEKME ANALİZİ */}
+                  <div className="dashboard-col">
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          📸 {t.workStoryTitle} ({workStoryEntries.length})
+                        </span>
+                        <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
+                          {t.workStoryDesc}
+                        </span>
+                      </div>
+                      {workStoryEntries.length === 0 ? (
+                        <div className="dashboard-empty-msg">
+                          {t.workStoryEmpty}
+                        </div>
+                      ) : (
+                        <div className="work-story-grid">
+                          {workStoryEntries.map((entry) => (
+                            <div
+                              key={entry.id}
+                              className="work-story-card"
+                              onClick={() => setLightboxEntry(entry)}
+                            >
+                              <img
+                                src={entry.screenshot_data || ""}
+                                alt="screenshot"
+                                className="work-story-thumb"
+                                loading="lazy"
+                              />
+                              <div className="work-story-meta">
+                                <span className="work-story-time">
+                                  {entry.created_at.slice(11, 16)} •{" "}
+                                  {entry.entry_type === "periodic"
+                                    ? "⏱ 5dk"
+                                    : "📸 SS"}
+                                </span>
+                                {entry.active_app && (
+                                  <span
+                                    className="work-story-app"
+                                    title={
+                                      entry.active_window || entry.active_app
+                                    }
+                                  >
+                                    🌐 {entry.active_app}
+                                  </span>
+                                )}
+                                {entry.context_text && (
+                                  <span
+                                    className="work-story-ctx"
+                                    title={entry.context_text}
+                                  >
+                                    🎯 {entry.context_text}
+                                  </span>
+                                )}
+                                {entry.note && (
+                                  <span
+                                    className="work-story-note"
+                                    title={entry.note}
+                                  >
+                                    {entry.note}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          🎯 {t.contextStatsTitle} ({contextStats.length})
+                        </span>
+                      </div>
+                      <div className="dashboard-list">
+                        {contextStats.length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noContextStats}
+                          </div>
+                        ) : (
+                          contextStats.map((ctx) => (
+                            <div
+                              key={ctx.contextText}
+                              className="dashboard-stat-row"
+                            >
+                              <div className="dashboard-stat-main">
+                                <span style={{ fontWeight: 600 }}>
+                                  🎯 {ctx.contextText}
+                                </span>
+                                <span className="dashboard-stat-sub">
+                                  {ctx.lastWorkTag && `💼 ${ctx.lastWorkTag} `}
+                                  {ctx.topApp && `• 🌐 ${ctx.topApp}`}
+                                </span>
+                              </div>
+                              <span className="dashboard-stat-badge">
+                                {t.formatDuration(ctx.totalDurationSec)} • ⚡
+                                {ctx.distractionCount}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="dashboard-section-card">
+                      <div className="dashboard-section-header">
+                        <span className="dashboard-card-title">
+                          🌐 {t.appDistractionTitle} (
+                          {appDistractions.reduce(
+                            (acc, g) => acc + g.totalCount,
+                            0,
+                          )}
+                          )
+                        </span>
+                      </div>
+                      <div className="dashboard-list">
+                        {appDistractions.length === 0 ? (
+                          <div className="dashboard-empty-msg">
+                            {t.noAppDistractions}
+                          </div>
+                        ) : (
+                          appDistractions.map((grp) => (
+                            <div
+                              key={grp.appName}
+                              className="dashboard-stat-row"
+                            >
+                              <div className="dashboard-stat-main">
+                                <span style={{ fontWeight: 600 }}>
+                                  🌐 {grp.appName}
+                                </span>
+                                {grp.details[0]?.windowTitle && (
+                                  <span className="dashboard-stat-sub">
+                                    {grp.details[0].windowTitle}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="dashboard-stat-badge">
+                                {grp.totalCount}x
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* EKRAN GÖRÜNTÜSÜ BÜYÜTÜCÜ MODAL (LIGHTBOX) */}
+          {lightboxEntry && (
+            <div
+              className="lightbox-overlay no-drag"
+              onClick={() => setLightboxEntry(null)}
+            >
+              <div
+                className="lightbox-content"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="lightbox-header">
+                  <span className="lightbox-title">
+                    📸{" "}
+                    {lightboxEntry.entry_type === "periodic"
+                      ? "5dk Periyodik Ekran Kaydı"
+                      : "📸 Ekran Alıntısı Notu"}{" "}
+                    • {lightboxEntry.created_at.replace("T", " ").slice(0, 16)}
+                  </span>
+                  <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="tag-icon-btn del-btn"
+                      onClick={async () => {
+                        await deleteWorkStoryEntry(lightboxEntry.id);
+                        setLightboxEntry(null);
+                        setWorkStoryEntries(
+                          await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+                        );
+                      }}
+                      title={t.cancel}
+                    >
+                      🗑
+                    </button>
+                    <button
+                      type="button"
+                      className="tag-icon-btn"
+                      onClick={() => setLightboxEntry(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div className="lightbox-img-wrap">
+                  <img
+                    src={lightboxEntry.screenshot_data || ""}
+                    alt="full screenshot"
+                    className="lightbox-img"
+                  />
+                </div>
+                <div className="lightbox-footer">
+                  {lightboxEntry.context_text && (
+                    <div className="lightbox-meta-item">
+                      🎯 <b>Meşguliyet:</b> {lightboxEntry.context_text}
+                    </div>
+                  )}
+                  {lightboxEntry.active_app && (
+                    <div className="lightbox-meta-item">
+                      🌐 <b>Uygulama / Sekme:</b> {lightboxEntry.active_app}
+                      {lightboxEntry.active_window
+                        ? ` — ${lightboxEntry.active_window}`
+                        : ""}
+                    </div>
+                  )}
+                  {lightboxEntry.note && (
+                    <div className="lightbox-meta-item">
+                      📝 <b>Not:</b> {lightboxEntry.note}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </>
       )}
