@@ -123,107 +123,40 @@ import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
 import { translations, resolveLanguage } from "./i18n";
 import { ConfettiCanvas } from "./Confetti";
 import type { CaptureSubmittedEvent } from "./QuickCapture";
+import {
+  EMPTY_PARKING,
+  NavPage,
+  ShortcutStatus,
+  TagFormState,
+  UPDATE_CHECK_INTERVAL_MS,
+  formatClock,
+} from "./constants";
+import {
+  playAlarmChime,
+  playBreakChime,
+  playCelebrationFanfare,
+} from "./lib/audio";
+import { hexToRgba, isLightColor } from "./lib/color";
+import { buildSingleItemParkingData } from "./components/ParkingLot";
+import { MiniDock } from "./components/MiniDock";
+import {
+  BreakOverdueModal,
+  DistractModal,
+  EarlyStopModal,
+  LightboxModal,
+  ShortBreakPromptModal,
+  WorkTopicModal,
+} from "./components/SessionModals";
+import { TimerPage } from "./pages/TimerPage";
+import { MenuPage } from "./pages/MenuPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import {
+  SummaryPage,
+  SummaryReasonsTabType,
+  SummaryTabType,
+} from "./pages/SummaryPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import "./App.css";
-
-interface ShortcutStatus {
-  distractionShortcut: string;
-  contextShortcut: string;
-  distractionOk: boolean;
-  distractionError: string | null;
-  contextOk: boolean;
-  contextError: string | null;
-}
-
-const DISTRACT_CATEGORIES: DistractionCategory[] = [
-  "impulsive_task",
-  "idea",
-  "screenshot_note",
-  "internal",
-  "external",
-  "escape",
-];
-
-function formatKeyCombo(e: React.KeyboardEvent): string | null {
-  const ignore = new Set(["Control", "Shift", "Alt", "Meta"]);
-  if (ignore.has(e.key)) return null;
-
-  const mods: string[] = [];
-  if (e.ctrlKey || e.metaKey) mods.push("Ctrl");
-  if (e.altKey) mods.push("Alt");
-  if (e.shiftKey) mods.push("Shift");
-  if (mods.length === 0) return null;
-
-  let keyToken = "";
-  if (e.code.startsWith("Key")) {
-    keyToken = e.code.slice(3).toUpperCase();
-  } else if (e.code.startsWith("Digit")) {
-    keyToken = e.code.slice(5);
-  } else if (e.code === "Space" || e.key === " ") {
-    keyToken = "Space";
-  } else if (/^F([1-9]|1[0-2])$/i.test(e.key)) {
-    keyToken = e.key.toUpperCase();
-  } else if (e.code === "Backquote") {
-    keyToken = "Backquote";
-  } else if (e.key.length === 1 && /[a-zA-Z0-9]/.test(e.key)) {
-    keyToken = e.key.toUpperCase();
-  }
-
-  if (!keyToken) return null;
-  return [...mods, keyToken].join("+");
-}
-
-const EMPTY_PARKING: ParkingLotData = {
-  pendingTasks: [],
-  doneTasks: [],
-  unratedIdeas: [],
-  importantIdeas: [],
-  unimportantIdeas: [],
-  screenshotNotes: [],
-  totalTasks: 0,
-  totalIdeas: 0,
-  totalScreenshots: 0,
-};
-
-type NavPage = "menu" | "timer" | "summary" | "settings" | "dashboard";
-
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 saat
-
-const BG_PRESETS = [
-  "#1a1814",
-  "#0f172a",
-  "#1e1b4b",
-  "#052e16",
-  "#3f0d12",
-  "#27272a",
-  "#e7e5e4",
-];
-const TIMER_PRESETS = [
-  "#ffffff",
-  "#fbbf24",
-  "#60a5fa",
-  "#4ade80",
-  "#f87171",
-  "#c084fc",
-  "#18181b",
-];
-
-const PENALTY_OPTIONS = [0, 1, 2, 3, 5];
-
-function hexToRgba(hex: string, alpha: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return `rgba(${r}, ${g}, ${b}, ${Math.min(1, Math.max(0, alpha))})`;
-}
-
-function isLightColor(hex: string): boolean {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return (r * 299 + g * 587 + b * 114) / 1000 > 150;
-}
 
 function persistSnapshots(appState: AppState, runtimeState: RuntimeState) {
   saveAppState(appState).catch((err) =>
@@ -234,116 +167,10 @@ function persistSnapshots(appState: AppState, runtimeState: RuntimeState) {
   );
 }
 
-function playCelebrationFanfare() {
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-
-    const notes = [
-      { freq: 523.25, time: 0.0, dur: 0.16 }, // C5
-      { freq: 659.25, time: 0.13, dur: 0.16 }, // E5
-      { freq: 783.99, time: 0.26, dur: 0.2 }, // G5
-      { freq: 1046.5, time: 0.42, dur: 0.45 }, // C6
-      { freq: 1318.51, time: 0.58, dur: 0.7 }, // E6
-    ];
-
-    notes.forEach(({ freq, time, dur }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
-
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
-      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + time + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(ctx.currentTime + time);
-      osc.stop(ctx.currentTime + time + dur + 0.05);
-    });
-
-    setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 1500);
-  } catch {
-    // Ses cihazı meşgulse sessizce geç
-  }
-}
-
-function playBreakChime() {
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-    const notes = [
-      { freq: 587.33, time: 0.0, dur: 0.22 }, // D5
-      { freq: 880.0, time: 0.16, dur: 0.4 }, // A5
-    ];
-    notes.forEach(({ freq, time, dur }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
-      gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + time + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + time);
-      osc.stop(ctx.currentTime + time + dur + 0.05);
-    });
-    setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 800);
-  } catch {
-    // Ses cihazı meşgulse sessizce geç
-  }
-}
-
-function playAlarmChime() {
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-    const notes = [
-      { freq: 880.0, time: 0.0, dur: 0.12 },
-      { freq: 880.0, time: 0.15, dur: 0.18 },
-    ];
-    notes.forEach(({ freq, time, dur }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + time);
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime + time);
-      gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + time + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + time + dur);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + time);
-      osc.stop(ctx.currentTime + time + dur + 0.04);
-    });
-    setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 450);
-  } catch {
-    // Ses cihazı meşgulse sessizce geç
-  }
-}
-
 export default function App() {
   const [loaded, setLoaded] = useState(false);
 
-  // Navigasyon sayfası ("menu" | "timer" | "summary" | "settings") ile
+  // Navigasyon sayfası ("menu" | "timer" | "summary" | "settings" | "dashboard") ile
   // seans içi mod ("work" | "break") birbirinden tamamen ayrıdır.
   const [page, setPage] = useState<NavPage>("menu");
   const [sessionActive, setSessionActive] = useState<boolean>(false);
@@ -368,7 +195,8 @@ export default function App() {
   const [completedWorkCount, setCompletedWorkCount] = useState<number>(0);
   const [sessionShortBreakCount, setSessionShortBreakCount] = useState<number>(0);
   const [breakKind, setBreakKind] = useState<BreakKind>("standard");
-  const [savedWorkSecondsLeft, setSavedWorkSecondsLeft] = useState<number>(DEFAULT_WORK_SEC);
+  const [savedWorkSecondsLeft, setSavedWorkSecondsLeft] =
+    useState<number>(DEFAULT_WORK_SEC);
   const [savedWorkElapsedSec, setSavedWorkElapsedSec] = useState<number>(0);
 
   const currentPlan =
@@ -392,17 +220,22 @@ export default function App() {
   // Gecikme diyaloğu kapandığında çalışmayı otomatik başlatıp başlatmayacağımızı tutar
   const autoStartAfterBreakRef = useRef<boolean>(true);
   const [breakOverdueTags, setBreakOverdueTags] = useState<TagItem[]>([]);
-  const [selectedBreakOverdueTag, setSelectedBreakOverdueTag] = useState<string>("Telefon");
-  const [breakOverduePrevReasons, setBreakOverduePrevReasons] = useState<string[]>([]);
+  const [selectedBreakOverdueTag, setSelectedBreakOverdueTag] =
+    useState<string>("Telefon");
+  const [breakOverduePrevReasons, setBreakOverduePrevReasons] = useState<
+    string[]
+  >([]);
   const [breakOverdueReasonText, setBreakOverdueReasonText] = useState("");
-  const [isEditingBreakOverdueTags, setIsEditingBreakOverdueTags] = useState(false);
+  const [isEditingBreakOverdueTags, setIsEditingBreakOverdueTags] =
+    useState(false);
 
   // Çalışma Konusu (Subject / Task)
   const [currentWorkTag, setCurrentWorkTag] = useState<string>("Ders");
   const [currentWorkReason, setCurrentWorkReason] = useState<string>("");
   const [showWorkTopicBox, setShowWorkTopicBox] = useState(false);
   const [workTags, setWorkTags] = useState<TagItem[]>([]);
-  const [selectedWorkTopicTag, setSelectedWorkTopicTag] = useState<string>("Ders");
+  const [selectedWorkTopicTag, setSelectedWorkTopicTag] =
+    useState<string>("Ders");
   const [workTopicReasonText, setWorkTopicReasonText] = useState("");
   const [workPrevReasons, setWorkPrevReasons] = useState<string[]>([]);
   const [isEditingWorkTags, setIsEditingWorkTags] = useState(false);
@@ -413,13 +246,17 @@ export default function App() {
 
   // Dikkat Dağılma Ek Süresi (Dakika) ve Seans İçi Dağılma Sayacı
   const [distractPenaltyMins, setDistractPenaltyMins] = useState(1);
-  const [currentSessionDistractions, setCurrentSessionDistractions] = useState(0);
+  const [currentSessionDistractions, setCurrentSessionDistractions] =
+    useState(0);
 
-  // Dikkatim Dağıldı Kutusu (5 Kategori + Açık Sekme Yakalama)
+  // Dikkatim Dağıldı Kutusu (6 Kategori + Açık Sekme Yakalama)
   const [showDistractBox, setShowDistractBox] = useState(false);
   const [distractTags, setDistractTags] = useState<TagItem[]>([]);
-  const [selectedDistractTag, setSelectedDistractTag] = useState<string>("Diğer");
-  const [distractPreviousReasons, setDistractPreviousReasons] = useState<string[]>([]);
+  const [selectedDistractTag, setSelectedDistractTag] =
+    useState<string>("Diğer");
+  const [distractPreviousReasons, setDistractPreviousReasons] = useState<
+    string[]
+  >([]);
   const [distractReasonText, setDistractReasonText] = useState("");
   const [distractCategory, setDistractCategory] =
     useState<DistractionCategory>("internal");
@@ -467,13 +304,7 @@ export default function App() {
   >(null);
 
   // Satır-İçi Tag Ekle / Düzenle / Sil Formu (window.prompt / window.confirm yerine)
-  const [tagForm, setTagForm] = useState<{
-    mode: "add" | "edit" | "delete";
-    kind: TagKind;
-    tagId?: number;
-    currentName?: string;
-    value: string;
-  } | null>(null);
+  const [tagForm, setTagForm] = useState<TagFormState | null>(null);
 
   // Çalışma <-> Mola Geçiş Animasyonu
   const [isModeSwitching, setIsModeSwitching] = useState(false);
@@ -481,31 +312,29 @@ export default function App() {
 
   // Sağ Alt Mini Sayaç Widget (isMiniDock) & Özel Pencere Boyutları
   const [isMiniDock, setIsMiniDock] = useState(false);
-  const [miniDockContextToast, setMiniDockContextToast] = useState<string | null>(
-    null,
-  );
+  const [miniDockContextToast, setMiniDockContextToast] = useState<
+    string | null
+  >(null);
   const miniDockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const savedNormalPosRef = useRef<{ x: number; y: number } | null>(null);
   const [customSizes, setCustomSizes] = useState<CustomWindowSizes>({});
-  const [currentWinSize, setCurrentWinSize] = useState<{ w: number; h: number }>({
+  const [currentWinSize, setCurrentWinSize] = useState<{
+    w: number;
+    h: number;
+  }>({
     w: 315,
     h: 362,
   });
   const [sizeSavedFlash, setSizeSavedFlash] = useState(false);
 
-  // Distracted İçi (3·S) Mini Screenshot Önizleme & Bölge Kırpıcı + 5dk Çalışma Hikayesi + Bulut & Google Keep
+  // Distracted İçi (3·S) Mini Screenshot Önizleme & Bölge Kırpıcı + 5dk Çalışma Hikayesi + Bulut & Google Docs
   const [distractRawShot, setDistractRawShot] = useState<string>("");
   const [distractPreviewShot, setDistractPreviewShot] = useState<string>("");
   const [distractCropBox, setDistractCropBox] = useState<CropRegionPct | null>(
     null,
   );
-  const [distractDragStart, setDistractDragStart] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
-  const distractPreviewRef = useRef<HTMLDivElement | null>(null);
 
   const [workStoryEntries, setWorkStoryEntries] = useState<WorkStoryEntry[]>(
     [],
@@ -528,7 +357,7 @@ export default function App() {
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
-  const [keepStatusMsg, setKeepStatusMsg] = useState<string | null>(null);
+  const [docsStatusMsg, setDocsStatusMsg] = useState<string | null>(null);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
 
   // Uygulama İçi Geri Bildirim (Feedback) & ADHD Öz-Farkındalık Verisi
@@ -536,13 +365,17 @@ export default function App() {
   const [feedbackCat, setFeedbackCat] = useState<FeedbackCategory>("feature");
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackCopied, setFeedbackCopied] = useState(false);
-  const [adhdInsights, setAdhdInsights] = useState<AdhdInsightsData | null>(null);
+  const [adhdInsights, setAdhdInsights] = useState<AdhdInsightsData | null>(
+    null,
+  );
 
   // Erken Durdurma Kutusu
   const [showStopBox, setShowStopBox] = useState(false);
   const [endingTags, setEndingTags] = useState<TagItem[]>([]);
   const [selectedEndingTag, setSelectedEndingTag] = useState<string>("Diğer");
-  const [endingPreviousReasons, setEndingPreviousReasons] = useState<string[]>([]);
+  const [endingPreviousReasons, setEndingPreviousReasons] = useState<string[]>(
+    [],
+  );
   const [endingReasonText, setEndingReasonText] = useState("");
   const [isEditingEndingTags, setIsEditingEndingTags] = useState(false);
 
@@ -560,21 +393,24 @@ export default function App() {
     avgSec: 0,
   });
   const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
-  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(null);
-  const [summaryTab, setSummaryTab] = useState<
-    "timeline" | "weekly" | "recent" | "parking" | "story" | "adhd"
-  >("timeline");
-  const [summaryReasonsTab, setSummaryReasonsTab] = useState<
-    "work" | "contexts" | "apps" | "overtime" | "distractions" | "endings"
-  >("work");
-  const [summaryReasonsData, setSummaryReasonsData] = useState<SummaryReasonsData | null>(
+  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(
     null,
   );
-  const [timelineSessions, setTimelineSessions] = useState<TimelineSessionItem[]>([]);
-  const [hoveredTimelineItem, setHoveredTimelineItem] = useState<TimelineSessionItem | null>(null);
+  const [summaryTab, setSummaryTab] = useState<SummaryTabType>("timeline");
+  const [summaryReasonsTab, setSummaryReasonsTab] =
+    useState<SummaryReasonsTabType>("work");
+  const [summaryReasonsData, setSummaryReasonsData] =
+    useState<SummaryReasonsData | null>(null);
+  const [timelineSessions, setTimelineSessions] = useState<
+    TimelineSessionItem[]
+  >([]);
+  const [hoveredTimelineItem, setHoveredTimelineItem] =
+    useState<TimelineSessionItem | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
   const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
-  const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(null);
+  const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(
+    null,
+  );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [freqOnlyToday, setFreqOnlyToday] = useState(false);
 
@@ -674,23 +510,32 @@ export default function App() {
         setTheme(savedTheme);
 
         // Tag listelerini yükle
-        const dTags = await getTags("distraction", currentT.defaultDistractionTags);
+        const dTags = await getTags(
+          "distraction",
+          currentT.defaultDistractionTags,
+        );
         const eTags = await getTags("ending", currentT.defaultEndingTags);
         const wTags = await getTags("work", currentT.defaultWorkTags);
-        const boTags = await getTags("break_overtime", currentT.defaultBreakOvertimeTags);
+        const boTags = await getTags(
+          "break_overtime",
+          currentT.defaultBreakOvertimeTags,
+        );
         setDistractTags(dTags);
         setEndingTags(eTags);
         setWorkTags(wTags);
         setBreakOverdueTags(boTags);
 
-        const defaultWorkTag = wTags[0]?.name || currentT.defaultWorkTags[0] || "Ders";
+        const defaultWorkTag =
+          wTags[0]?.name || currentT.defaultWorkTags[0] || "Ders";
         setCurrentWorkTag(defaultWorkTag);
         setSelectedWorkTopicTag(defaultWorkTag);
         if (boTags.length > 0) setSelectedBreakOverdueTag(boTags[0].name);
 
         const savedAlwaysOnTop = await loadAlwaysOnTop();
         setAlwaysOnTop(savedAlwaysOnTop);
-        await getCurrentWindow().setAlwaysOnTop(savedAlwaysOnTop).catch(() => {});
+        await getCurrentWindow()
+          .setAlwaysOnTop(savedAlwaysOnTop)
+          .catch(() => {});
 
         const loadedPlans = await loadStudyPlans();
         const loadedPlanId = await loadActivePlanId();
@@ -733,12 +578,16 @@ export default function App() {
           );
 
           if (savedRuntime.sessionActive) {
-            setWorkSecondsLeft(saved.work_seconds_left || validPlan.workMins * 60);
+            setWorkSecondsLeft(
+              saved.work_seconds_left || validPlan.workMins * 60,
+            );
             setWorkElapsedSec(saved.work_elapsed_sec);
             setBreakSecondsLeft(saved.break_seconds_left);
             setIsRunning(true);
             const normalizedPage: NavPage =
-              saved.page === "timer" || saved.page === "work" || saved.page === "break"
+              saved.page === "timer" ||
+              saved.page === "work" ||
+              saved.page === "break"
                 ? "timer"
                 : saved.page === "summary" || saved.page === "settings"
                   ? saved.page
@@ -767,10 +616,15 @@ export default function App() {
             setWorkElapsedSec(saved.work_elapsed_sec);
             setBreakSecondsLeft(saved.break_seconds_left);
             setBreakTotalSec(
-              Math.max(saved.break_seconds_left, validPlan.standardBreakMins * 60),
+              Math.max(
+                saved.break_seconds_left,
+                validPlan.standardBreakMins * 60,
+              ),
             );
             setPage(
-              saved.page === "work" || saved.page === "break" || saved.page === "timer"
+              saved.page === "work" ||
+                saved.page === "break" ||
+                saved.page === "timer"
                 ? "timer"
                 : saved.page,
             );
@@ -1426,7 +1280,9 @@ export default function App() {
 
       const nextCompleted = completedWorkCount + 1;
       setCompletedWorkCount(nextCompleted);
-      saveSessionCycleStats(nextCompleted, sessionShortBreakCount).catch(() => {});
+      saveSessionCycleStats(nextCompleted, sessionShortBreakCount).catch(
+        () => {},
+      );
 
       const isLong = nextCompleted % currentPlan.longBreakInterval === 0;
       const bKind: BreakKind = isLong ? "long" : "standard";
@@ -1591,14 +1447,6 @@ export default function App() {
     }
   };
 
-  const formatClock = (sec: number) => {
-    const m = Math.floor(sec / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (sec % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  };
-
   const getCategoryDisplayName = (
     cat: DistractionCategory,
     lang: "tr" | "en" = activeLang,
@@ -1678,7 +1526,12 @@ export default function App() {
     const penaltyMins = distractPenaltyRef.current;
     let appliedPenaltySec = 0;
 
-    if (addsPenalty && rt.sessionActive && rt.mode === "work" && penaltyMins > 0) {
+    if (
+      addsPenalty &&
+      rt.sessionActive &&
+      rt.mode === "work" &&
+      penaltyMins > 0
+    ) {
       appliedPenaltySec = penaltyMins * 60;
       setWorkSecondsLeft((prev) => prev + appliedPenaltySec);
     }
@@ -1751,7 +1604,9 @@ export default function App() {
     });
   };
 
-  const captureHandlerRef = useRef<(ev: CaptureSubmittedEvent) => void>(() => {});
+  const captureHandlerRef = useRef<(ev: CaptureSubmittedEvent) => void>(
+    () => {},
+  );
   captureHandlerRef.current = (ev: CaptureSubmittedEvent) => {
     if (ev.mode === "context") {
       applyNewContext(ev.text, ev.activeApp, ev.activeWindow).catch((err) =>
@@ -1973,6 +1828,15 @@ export default function App() {
     setSelectedDistractTag(tagName);
     const prevReasons = await getPreviousReasons("distraction", tagName);
     setDistractPreviousReasons(prevReasons);
+  };
+
+  const handleRetakeDistractScreenshot = async () => {
+    const raw = await captureScreenSnapshotRaw(false);
+    if (raw?.dataUrl) {
+      setDistractRawShot(raw.dataUrl);
+      setDistractPreviewShot(raw.dataUrl);
+      setDistractCropBox(null);
+    }
   };
 
   const submitDistraction = async () => {
@@ -2220,17 +2084,20 @@ export default function App() {
     const fresh = DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
     setStudyPlans(fresh);
     await saveStudyPlans(fresh);
-    const current =
-      fresh.find((p) => p.id === activePlanId) || fresh[0];
+    const current = fresh.find((p) => p.id === activePlanId) || fresh[0];
     if (!isRunning && workElapsedSec === 0 && timerMode === "work") {
       setWorkSecondsLeft(current.workMins * 60);
     }
   };
 
   const handleOpenBreakOverdueBox = async () => {
-    const loadedTags = await getTags("break_overtime", t.defaultBreakOvertimeTags);
+    const loadedTags = await getTags(
+      "break_overtime",
+      t.defaultBreakOvertimeTags,
+    );
     setBreakOverdueTags(loadedTags);
-    const initial = loadedTags[0]?.name || t.defaultBreakOvertimeTags[0] || t.other;
+    const initial =
+      loadedTags[0]?.name || t.defaultBreakOvertimeTags[0] || t.other;
     setSelectedBreakOverdueTag(initial);
     const prev = await getPreviousReasons("break_overtime", initial);
     setBreakOverduePrevReasons(prev);
@@ -2336,7 +2203,8 @@ export default function App() {
     setPlanDropdownOpen(false);
     const loadedTags = await getTags("work", t.defaultWorkTags);
     setWorkTags(loadedTags);
-    const initial = currentWorkTag || loadedTags[0]?.name || t.defaultWorkTags[0];
+    const initial =
+      currentWorkTag || loadedTags[0]?.name || t.defaultWorkTags[0];
     setSelectedWorkTopicTag(initial);
     const prev = await getPreviousReasons("work", initial);
     setWorkPrevReasons(prev);
@@ -2395,11 +2263,7 @@ export default function App() {
     });
   };
 
-  const handleDeleteTagItem = (
-    tagId: number,
-    name: string,
-    kind: TagKind,
-  ) => {
+  const handleDeleteTagItem = (tagId: number, name: string, kind: TagKind) => {
     setTagForm({
       mode: "delete",
       kind,
@@ -2440,14 +2304,18 @@ export default function App() {
           setDistractTags(
             await getTags("distraction", t.defaultDistractionTags),
           );
-          if (selectedDistractTag === currentName) setSelectedDistractTag(trimmed);
+          if (selectedDistractTag === currentName) {
+            setSelectedDistractTag(trimmed);
+          }
         } else if (kind === "ending") {
           setEndingTags(await getTags("ending", t.defaultEndingTags));
           if (selectedEndingTag === currentName) setSelectedEndingTag(trimmed);
         } else if (kind === "work") {
           setWorkTags(await getTags("work", t.defaultWorkTags));
           if (currentWorkTag === currentName) setCurrentWorkTag(trimmed);
-          if (selectedWorkTopicTag === currentName) setSelectedWorkTopicTag(trimmed);
+          if (selectedWorkTopicTag === currentName) {
+            setSelectedWorkTopicTag(trimmed);
+          }
         } else if (kind === "break_overtime") {
           setBreakOverdueTags(
             await getTags("break_overtime", t.defaultBreakOvertimeTags),
@@ -2474,323 +2342,15 @@ export default function App() {
     setTagForm(null);
   };
 
-  const renderInlineTagForm = (kind: TagKind) => {
-    if (!tagForm || tagForm.kind !== kind) return null;
-    if (tagForm.mode === "delete") {
-      return (
-        <div className="inline-tag-form delete-mode">
-          <span
-            className="inline-tag-label"
-            title={t.deleteTagConfirm(tagForm.currentName || "")}
-          >
-            🗑 {t.deleteTagConfirm(tagForm.currentName || "")}
-          </span>
-          <button className="warn-btn" onClick={submitTagForm}>
-            ✓
-          </button>
-          <button onClick={() => setTagForm(null)}>{t.cancel}</button>
-        </div>
-      );
-    }
-    return (
-      <div className="inline-tag-form">
-        <input
-          className="inline-tag-input"
-          placeholder={
-            tagForm.mode === "add"
-              ? t.newTagPrompt
-              : t.editTagPrompt(tagForm.currentName || "")
-          }
-          value={tagForm.value}
-          autoFocus
-          onChange={(e) => setTagForm({ ...tagForm, value: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submitTagForm();
-            if (e.key === "Escape") setTagForm(null);
-          }}
-        />
-        <button className="primary-btn" onClick={submitTagForm}>
-          {tagForm.mode === "add" ? t.add : t.doneEditing}
-        </button>
-        <button onClick={() => setTagForm(null)}>{t.cancel}</button>
-      </div>
-    );
-  };
-
-  // Mola Otoparkı & Özet Otoparkı Ortak Render Yardımcısı (Görevler Ekleme Sırasıyla + Fikirler Önemli/Önemsiz + SS Notları + Keep Butonu)
-  const renderParkingItemTooltip = (item: ParkingItem): string => {
-    const parts: string[] = [];
-    if (item.context_text) {
-      parts.push(`🎯 ${item.context_text}`);
-    }
-    if (item.active_app || item.active_window) {
-      parts.push(
-        `🌐 ${item.active_app || ""}${
-          item.active_window ? ` — ${item.active_window}` : ""
-        }`,
-      );
-    }
-    return parts.join(" • ");
-  };
-
-  const renderParkingLotContent = (
-    data: ParkingLotData,
-    isBreakView: boolean,
-  ) => {
-    const renderTaskRow = (item: ParkingItem, isDone: boolean) => (
-      <div
-        key={item.id}
-        className="parking-todo-row"
-        title={renderParkingItemTooltip(item)}
-      >
-        <label className="parking-todo-left">
-          <input
-            type="checkbox"
-            checked={isDone}
-            onChange={() => handleToggleParkingTask(item.id, !isDone)}
-          />
-          <span className={`parking-todo-text ${isDone ? "done" : ""}`}>
-            {item.content}
-          </span>
-        </label>
-        <div className="parking-row-right">
-          <button
-            type="button"
-            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-            onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-          >
-            {item.keep_synced ? "✓" : "📄"}
-          </button>
-          <button
-            type="button"
-            className="tag-icon-btn del-btn"
-            onClick={() => handleDeleteParkingEntry(item.id)}
-            title={t.cancel}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-
-    const renderIdeaRow = (item: ParkingItem) => (
-      <div
-        key={item.id}
-        className="parking-idea-row"
-        title={renderParkingItemTooltip(item)}
-      >
-        <span className="parking-todo-text">{item.content}</span>
-        <div className="parking-idea-actions">
-          <button
-            type="button"
-            className={`idea-rate-btn ${
-              item.status === "important" ? "active-imp" : ""
-            }`}
-            onClick={() =>
-              handleRateParkingIdea(
-                item.id,
-                item.status === "important" ? "unrated" : "important",
-              )
-            }
-          >
-            {t.parkingMarkImportant}
-          </button>
-          <button
-            type="button"
-            className={`idea-rate-btn ${
-              item.status === "unimportant" ? "active-unimp" : ""
-            }`}
-            onClick={() =>
-              handleRateParkingIdea(
-                item.id,
-                item.status === "unimportant" ? "unrated" : "unimportant",
-              )
-            }
-          >
-            {t.parkingMarkUnimportant}
-          </button>
-          <button
-            type="button"
-            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-            onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-          >
-            {item.keep_synced ? "✓" : "📄"}
-          </button>
-          <button
-            type="button"
-            className="tag-icon-btn del-btn"
-            onClick={() => handleDeleteParkingEntry(item.id)}
-            title={t.cancel}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-
-    const renderScreenshotRow = (item: ParkingItem) => (
-      <div
-        key={item.id}
-        className="parking-ss-row"
-        title={renderParkingItemTooltip(item)}
-      >
-        {item.screenshot_data && (
-          <img
-            src={item.screenshot_data}
-            alt="ss"
-            className="parking-ss-thumb"
-            onClick={() =>
-              setLightboxEntry({
-                id: item.id,
-                day_id: item.day_id,
-                entry_type: "screenshot_note",
-                screenshot_data: item.screenshot_data,
-                active_app: item.active_app,
-                active_window: item.active_window,
-                context_text: item.context_text,
-                work_tag: "",
-                note: item.content,
-                created_at: item.created_at,
-                elapsed_work_sec: 0,
-              })
-            }
-          />
-        )}
-        <span className="parking-todo-text">{item.content}</span>
-        <div className="parking-row-right">
-          <button
-            type="button"
-            className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-            onClick={() => handleSyncSingleItemToKeep(item)}
-            title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-          >
-            {item.keep_synced ? "✓" : "📄"}
-          </button>
-          <button
-            type="button"
-            className="tag-icon-btn del-btn"
-            onClick={() => handleDeleteParkingEntry(item.id)}
-            title={t.cancel}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-
-    const totalAllCount =
-      data.totalTasks + data.totalIdeas + data.totalScreenshots;
-
-    return (
-      <>
-        <div className="parking-header-bar">
-          {isBreakView ? (
-            <div className="parking-banner-title">
-              {t.parkingBreakBannerTitle}
-            </div>
-          ) : (
-            <span className="section-subhead">
-              {t.parkingTab} ({totalAllCount})
-            </span>
-          )}
-          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-            {keepStatusMsg && (
-              <span className="docs-status-pill">{keepStatusMsg}</span>
-            )}
-            <button
-              type="button"
-              className="docs-sync-btn"
-              onClick={handleSyncParkingToKeep}
-              title={t.docsSyncAllBtn}
-            >
-              📄 Docs
-            </button>
-          </div>
-        </div>
-
-        {totalAllCount === 0 ? (
-          <div
-            style={{
-              fontSize: "9.5px",
-              color: "#a1a1aa",
-              padding: "4px 2px",
-              textAlign: "center",
-            }}
-          >
-            {t.parkingEmpty}
-          </div>
-        ) : (
-          <>
-            {data.pendingTasks.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingPendingTasks} ({data.pendingTasks.length})
-                </div>
-                {data.pendingTasks.map((it) => renderTaskRow(it, false))}
-              </>
-            )}
-
-            {data.doneTasks.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingDoneTasks} ({data.doneTasks.length})
-                </div>
-                {data.doneTasks.map((it) => renderTaskRow(it, true))}
-              </>
-            )}
-
-            {data.unratedIdeas.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingUnratedIdeas} ({data.unratedIdeas.length})
-                </div>
-                {data.unratedIdeas.map((it) => renderIdeaRow(it))}
-              </>
-            )}
-
-            {data.importantIdeas.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingImportantIdeas} ({data.importantIdeas.length})
-                </div>
-                {data.importantIdeas.map((it) => renderIdeaRow(it))}
-              </>
-            )}
-
-            {data.unimportantIdeas.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingUnimportantIdeas} ({data.unimportantIdeas.length})
-                </div>
-                {data.unimportantIdeas.map((it) => renderIdeaRow(it))}
-              </>
-            )}
-
-            {data.screenshotNotes.length > 0 && (
-              <>
-                <div className="parking-section-title">
-                  {t.parkingScreenshotNotes} ({data.screenshotNotes.length})
-                </div>
-                {data.screenshotNotes.map((it) => renderScreenshotRow(it))}
-              </>
-            )}
-          </>
-        )}
-      </>
-    );
-  };
-
   // ---------------------------------------------------------------------------
   // GOOGLE DOCS / DRIVE DEFTERİ & BULUT SENKRONİZASYON İŞLEMLERİ
   // ---------------------------------------------------------------------------
-  const handleSyncParkingToKeep = async () => {
-    setKeepStatusMsg("...");
+  const handleSyncParkingToDocs = async () => {
+    setDocsStatusMsg("...");
     try {
       const pData = await getParkingLotData(false);
       const res = await syncParkingToGoogleDocs(pData);
-      setKeepStatusMsg(res.message);
+      setDocsStatusMsg(res.message);
       if (res.ok) {
         if (res.docUrl) {
           setCloudAuth((prev) => ({
@@ -2810,40 +2370,21 @@ export default function App() {
         await markParkingItemsKeepSynced(allIds, res.docUrl);
         await refreshParkingViews();
       }
-      setTimeout(() => setKeepStatusMsg(null), 4000);
+      setTimeout(() => setDocsStatusMsg(null), 4000);
     } catch (err) {
-      setKeepStatusMsg(String(err));
-      setTimeout(() => setKeepStatusMsg(null), 4000);
+      setDocsStatusMsg(String(err));
+      setTimeout(() => setDocsStatusMsg(null), 4000);
     }
   };
 
-  const handleSyncSingleItemToKeep = async (item: ParkingItem) => {
-    setKeepStatusMsg("...");
+  const handleSyncSingleItemToDocs = async (item: ParkingItem) => {
+    setDocsStatusMsg("...");
     try {
-      const singleData: ParkingLotData = {
-        totalTasks: item.item_type === "task" ? 1 : 0,
-        totalIdeas: item.item_type === "idea" ? 1 : 0,
-        totalScreenshots: item.item_type === "screenshot" ? 1 : 0,
-        pendingTasks:
-          item.item_type === "task" && item.status !== "done" ? [item] : [],
-        doneTasks:
-          item.item_type === "task" && item.status === "done" ? [item] : [],
-        unratedIdeas:
-          item.item_type === "idea" && item.status === "unrated" ? [item] : [],
-        importantIdeas:
-          item.item_type === "idea" && item.status === "important"
-            ? [item]
-            : [],
-        unimportantIdeas:
-          item.item_type === "idea" && item.status === "unimportant"
-            ? [item]
-            : [],
-        screenshotNotes: item.item_type === "screenshot" ? [item] : [],
-      };
+      const singleData = buildSingleItemParkingData(item);
       const res = await syncParkingToGoogleDocs(singleData, {
         singleItem: item,
       });
-      setKeepStatusMsg(res.message);
+      setDocsStatusMsg(res.message);
       if (res.ok) {
         if (res.docUrl) {
           setCloudAuth((prev) => ({
@@ -2855,10 +2396,10 @@ export default function App() {
         await markParkingItemsKeepSynced([item.id], res.docUrl);
         await refreshParkingViews();
       }
-      setTimeout(() => setKeepStatusMsg(null), 4000);
+      setTimeout(() => setDocsStatusMsg(null), 4000);
     } catch (err) {
-      setKeepStatusMsg(String(err));
-      setTimeout(() => setKeepStatusMsg(null), 4000);
+      setDocsStatusMsg(String(err));
+      setTimeout(() => setDocsStatusMsg(null), 4000);
     }
   };
 
@@ -2883,6 +2424,14 @@ export default function App() {
     setCloudNameInput("");
     setCloudTokenInput("");
     setSyncStatusMsg(null);
+  };
+
+  const handleSaveCloudToken = async () => {
+    const nextAuth = { ...cloudAuth, accessToken: cloudTokenInput.trim() };
+    await saveCloudAuthState(nextAuth);
+    setCloudAuth(nextAuth);
+    setSyncStatusMsg("Google Token kaydedildi!");
+    setTimeout(() => setSyncStatusMsg(null), 3000);
   };
 
   const handleManualCloudSync = async () => {
@@ -3026,6 +2575,12 @@ export default function App() {
     await refreshParkingViews();
   };
 
+  const handleDeleteWorkStoryItem = async (id: number) => {
+    await deleteWorkStoryEntry(id);
+    setLightboxEntry(null);
+    setWorkStoryEntries(await getWorkStoryEntries(freqOnlyTodayRef.current, 40));
+  };
+
   // Global Kısayol Kaydetme & Sıfırlama
   const handleApplyShortcuts = async (next: GlobalShortcutSettings) => {
     setShortcuts(next);
@@ -3156,7 +2711,8 @@ export default function App() {
     );
   }
 
-  const isBreakAlarm = sessionActive && timerMode === "break" && breakOverdueSec > 0;
+  const isBreakAlarm =
+    sessionActive && timerMode === "break" && breakOverdueSec > 0;
   const isTimerAlarmView = page === "timer" && isBreakAlarm;
 
   const progressPct = !sessionActive
@@ -3182,7 +2738,8 @@ export default function App() {
             ),
           );
 
-  const activeSeconds = timerMode === "work" ? workSecondsLeft : breakSecondsLeft;
+  const activeSeconds =
+    timerMode === "work" ? workSecondsLeft : breakSecondsLeft;
   const liveClockStr = isBreakAlarm
     ? `-${formatClock(breakOverdueSec)}`
     : formatClock(activeSeconds);
@@ -3199,7 +2756,10 @@ export default function App() {
 
   const currentBreakFullTooltip =
     breakKind === "short"
-      ? t.shortBreakBadge(Math.round(breakTotalSec / 60), sessionShortBreakCount)
+      ? t.shortBreakBadge(
+          Math.round(breakTotalSec / 60),
+          sessionShortBreakCount,
+        )
       : breakKind === "long"
         ? t.longBreakBadge(Math.round(breakTotalSec / 60), completedWorkCount)
         : t.standardBreakBadge(
@@ -3239,87 +2799,22 @@ export default function App() {
 
   if (isMiniDock) {
     return (
-      <div
-        className={`widget-shell mini-dock-shell ${
-          isLightColor(theme.bgColor) ? "light-theme" : ""
-        } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""} ${
-          miniDockContextToast ? "has-toast" : ""
-        }`}
-        style={shellStyle}
+      <MiniDock
+        isLight={isLightColor(theme.bgColor)}
+        modeClass={modeClass}
+        isBreakAlarm={isBreakAlarm}
+        miniDockContextToast={miniDockContextToast}
+        shellStyle={shellStyle}
+        sessionActive={sessionActive}
+        timerMode={timerMode}
+        breakKind={breakKind}
+        liveClockStr={liveClockStr}
+        progressPct={progressPct}
+        t={t}
         onMouseDown={handleMouseDown}
-        onDoubleClick={exitMiniDock}
-      >
-        {miniDockContextToast && (
-          <div
-            className="mini-dock-context-toast no-drag"
-            title={`${t.qcCurrentContextLabel}: ${miniDockContextToast}`}
-            onClick={exitMiniDock}
-          >
-            🎯 {miniDockContextToast}
-          </div>
-        )}
-
-        <div className="mini-dock-row">
-          <div
-            className="mini-dock-left no-drag"
-            onClick={exitMiniDock}
-            title={t.restoreWindowTooltip}
-          >
-            <span className="mini-dock-icon">
-              {!sessionActive
-                ? "⠿"
-                : isBreakAlarm
-                  ? "🚨"
-                  : timerMode === "work"
-                    ? "💼"
-                    : breakKind === "long"
-                      ? "🎉"
-                      : "☕"}
-            </span>
-            <span
-              className={`mini-dock-clock ${isBreakAlarm ? "alarm" : ""}`}
-            >
-              {liveClockStr}
-            </span>
-          </div>
-
-          <div className="mini-dock-actions no-drag">
-            <button
-              className="mini-dock-btn"
-              onClick={exitMiniDock}
-              title={t.restoreWindowTooltip}
-            >
-              ↗
-            </button>
-            <button
-              className="mini-dock-btn"
-              onClick={hideToTray}
-              title={t.hideToTrayOnlyTooltip}
-            >
-              ▾
-            </button>
-          </div>
-        </div>
-
-        {sessionActive && (
-          <div
-            className="progress-bar-container"
-            style={{ bottom: 2, left: 10, right: 10, height: 2 }}
-          >
-            <div
-              className="progress-bar-fill"
-              style={{
-                width: `${progressPct}%`,
-                backgroundColor: isBreakAlarm
-                  ? "#ef4444"
-                  : timerMode === "work"
-                    ? "var(--timer-color, #fbbf24)"
-                    : "#38bdf8",
-              }}
-            />
-          </div>
-        )}
-      </div>
+        onExitMiniDock={exitMiniDock}
+        onHideToTray={hideToTray}
+      />
     );
   }
 
@@ -3334,10 +2829,21 @@ export default function App() {
     showBreakParking &&
     breakParkingTotalCount > 0;
 
+  const tagHandlers = {
+    tagForm,
+    onChangeTagForm: setTagForm,
+    onSubmitTagForm: submitTagForm,
+    onAddNewTag: handleAddNewTag,
+    onEditTagItem: handleEditTagItem,
+    onDeleteTagItem: handleDeleteTagItem,
+  };
+
   return (
     <div
       className={`widget-shell ${
-        page !== "timer" || anyModalOpen || hasBreakParkingView ? "solid-bg" : ""
+        page !== "timer" || anyModalOpen || hasBreakParkingView
+          ? "solid-bg"
+          : ""
       } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${modeClass} ${
         isModeSwitching ? "mode-switching" : ""
       } ${isCelebrating ? "celebrating-shell" : ""} ${
@@ -3383,3619 +2889,342 @@ export default function App() {
           ORTAK TAG & AÇIKLAMA DİYALOGLARI (Kısa Mola Notu, Konu, Dağılma, Erken Bitirme, Gecikme)
          ===================================================================== */}
       {showShortBreakPrompt ? (
-        <div className="stop-box">
-          <div className="stop-box-header">
-            <span className="stop-box-title">{t.shortBreakPromptTitle}</span>
-          </div>
-          <div className="stop-box-hint">{t.shortBreakPromptHint}</div>
-
-          {(currentContext || recentContexts.length > 0) && (
-            <div className="previous-reasons-box">
-              <div className="previous-reasons-chips">
-                {currentContext && (
-                  <button
-                    type="button"
-                    className={`reason-suggestion-chip ${
-                      shortBreakDraft === currentContext ? "selected" : ""
-                    }`}
-                    onClick={() => setShortBreakDraft(currentContext)}
-                  >
-                    🎯 {currentContext}
-                  </button>
-                )}
-                {recentContexts
-                  .filter((rc) => rc !== currentContext)
-                  .slice(0, 4)
-                  .map((rc) => (
-                    <button
-                      key={rc}
-                      type="button"
-                      className={`reason-suggestion-chip ${
-                        shortBreakDraft === rc ? "selected" : ""
-                      }`}
-                      onClick={() => setShortBreakDraft(rc)}
-                    >
-                      {rc}
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-
-          <div className="new-reason-row">
-            <textarea
-              className="distract-textarea"
-              rows={2}
-              placeholder={t.shortBreakPromptPlaceholder}
-              value={shortBreakDraft}
-              autoFocus
-              onChange={(e) => setShortBreakDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  confirmStartShortBreak();
-                }
-                if (e.key === "Escape") setShowShortBreakPrompt(false);
-              }}
-            />
-          </div>
-
-          <div className="stop-box-actions">
-            <button className="primary-btn" onClick={confirmStartShortBreak}>
-              {t.shortBreakStartBtn}
-            </button>
-            <button onClick={() => setShowShortBreakPrompt(false)}>
-              {t.cancel}
-            </button>
-          </div>
-        </div>
+        <ShortBreakPromptModal
+          t={t}
+          currentContext={currentContext}
+          recentContexts={recentContexts}
+          shortBreakDraft={shortBreakDraft}
+          onChangeDraft={setShortBreakDraft}
+          onConfirm={confirmStartShortBreak}
+          onCancel={() => setShowShortBreakPrompt(false)}
+        />
       ) : showWorkTopicBox ? (
-        <div className="stop-box">
-          <div className="stop-box-header">
-            <span className="stop-box-title">{t.whatAreYouWorkingOn}</span>
-            <div style={{ display: "flex", gap: "3px" }}>
-              <button
-                className="ghost-btn"
-                onClick={() => handleAddNewTag("work")}
-                title={t.newTagPrompt}
-              >
-                + Tag
-              </button>
-              <button
-                className="ghost-btn"
-                onClick={() => {
-                  setIsEditingWorkTags(!isEditingWorkTags);
-                  setTagForm(null);
-                }}
-              >
-                {isEditingWorkTags ? t.doneEditing : t.editTags}
-              </button>
-            </div>
-          </div>
-
-          {renderInlineTagForm("work")}
-
-          <div className="section-subhead">{t.selectTagHint}</div>
-          <div className="reason-chips stop-chips">
-            {workTags.map((tag) => {
-              const isSelected = selectedWorkTopicTag === tag.name;
-              return (
-                <div
-                  key={tag.id}
-                  className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
-                >
-                  <button
-                    className="tag-chip-btn"
-                    onClick={() => handleSelectWorkTopicTag(tag.name)}
-                  >
-                    {tag.name}
-                  </button>
-                  {isEditingWorkTags && (
-                    <span className="tag-actions">
-                      <button
-                        className="tag-icon-btn"
-                        onClick={() =>
-                          handleEditTagItem(tag.id, tag.name, "work")
-                        }
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="tag-icon-btn del-btn"
-                        onClick={() =>
-                          handleDeleteTagItem(tag.id, tag.name, "work")
-                        }
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {workPrevReasons.length > 0 && (
-            <div className="previous-reasons-box">
-              <div className="section-subhead">{t.previousReasons}</div>
-              <div className="previous-reasons-chips">
-                {workPrevReasons.map((r) => (
-                  <button
-                    key={r}
-                    className="reason-suggestion-chip"
-                    onClick={() => setWorkTopicReasonText(r)}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="new-reason-row">
-            <textarea
-              className="distract-textarea"
-              rows={2}
-              placeholder={t.workTopicPlaceholder}
-              value={workTopicReasonText}
-              autoFocus
-              onChange={(e) => setWorkTopicReasonText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitWorkTopic();
-                }
-                if (e.key === "Escape") setShowWorkTopicBox(false);
-              }}
-            />
-            <button className="primary-btn" onClick={submitWorkTopic}>
-              {t.doneEditing}
-            </button>
-          </div>
-
-          <div className="stop-box-actions">
-            <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
-              Tag: <b>{selectedWorkTopicTag}</b>
-            </span>
-            <button
-              onClick={() => {
-                setShowWorkTopicBox(false);
-                setTagForm(null);
-              }}
-            >
-              {t.cancel}
-            </button>
-          </div>
-        </div>
+        <WorkTopicModal
+          {...tagHandlers}
+          t={t}
+          workTags={workTags}
+          selectedWorkTopicTag={selectedWorkTopicTag}
+          workPrevReasons={workPrevReasons}
+          workTopicReasonText={workTopicReasonText}
+          isEditingWorkTags={isEditingWorkTags}
+          onToggleEditTags={() => {
+            setIsEditingWorkTags(!isEditingWorkTags);
+            setTagForm(null);
+          }}
+          onSelectTag={handleSelectWorkTopicTag}
+          onChangeReasonText={setWorkTopicReasonText}
+          onSubmit={submitWorkTopic}
+          onCancel={() => {
+            setShowWorkTopicBox(false);
+            setTagForm(null);
+          }}
+        />
       ) : showDistractBox ? (
-        <div className="stop-box">
-          <div className="stop-box-header">
-            <span className="stop-box-title">{t.distractionTitle}</span>
-            <div style={{ display: "flex", gap: "3px" }}>
-              <button
-                className="ghost-btn"
-                onClick={() => handleAddNewTag("distraction")}
-                title={t.newTagPrompt}
-              >
-                + Tag
-              </button>
-              <button
-                className="ghost-btn"
-                onClick={() => {
-                  setIsEditingDistractTags(!isEditingDistractTags);
-                  setTagForm(null);
-                }}
-              >
-                {isEditingDistractTags ? t.doneEditing : t.editTags}
-              </button>
-            </div>
-          </div>
-
-          {renderInlineTagForm("distraction")}
-
-          {/* Son Kalınan Context & Son Açık Uygulama / Sekme Şeridi */}
-          <div className="active-app-strip">
-            <div
-              className="active-app-strip-row"
-              title={`${t.qcCurrentContextLabel}: ${
-                currentContext || fullTopicLabel
-              }`}
-            >
-              🎯 <b>{t.qcCurrentContextLabel}:</b>{" "}
-              {currentContext || fullTopicLabel}
-            </div>
-            {(detectedActiveApp.appName || detectedActiveApp.windowTitle) && (
-              <div
-                className="active-app-strip-row"
-                title={`${detectedActiveApp.appName}${
-                  detectedActiveApp.windowTitle
-                    ? ` — ${detectedActiveApp.windowTitle}`
-                    : ""
-                }`}
-              >
-                🌐 <b>{t.qcActiveTabLabel}:</b> {detectedActiveApp.appName}
-                {detectedActiveApp.windowTitle
-                  ? ` — ${detectedActiveApp.windowTitle}`
-                  : ""}
-              </div>
-            )}
-          </div>
-
-          {/* 6 Kategori Seçici (1·G Dürtüsel Görev, 2·F Fikir, 3·S SS Notu -> +0dk Otopark | 4·İ, 5·D, 6·Z -> Ceza Süresi) */}
-          <div className="cat5-grid">
-            {DISTRACT_CATEGORIES.map((cat) => {
-              const isSel = distractCategory === cat;
-              const addsPen = doesCategoryAddPenalty(cat);
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  className={`cat5-btn ${isSel ? "active" : ""} ${
-                    addsPen ? "has-pen" : "zero-pen"
-                  }`}
-                  onClick={() => setDistractCategory(cat)}
-                  title={`${t.catKeyHints[cat]} ${getCategoryDisplayName(cat)} (${
-                    addsPen
-                      ? t.addsPenaltyBadge(distractPenaltyMins)
-                      : t.noPenaltyParkingBadge
-                  })`}
-                >
-                  <span className="cat5-key">{t.catKeyHints[cat]}</span>
-                  <span className="cat5-lbl">
-                    {getCategoryDisplayName(cat)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 3·S Ekran Görüntüsü Notu Modu İçin Kompakt Önizleme & Bölge Kırpıcı */}
-          {distractCategory === "screenshot_note" && (
-            <div className="qc-ss-box">
-              <div className="qc-ss-toolbar">
-                <span className="qc-ss-hint">{t.ssCropHint}</span>
-                <div style={{ display: "flex", gap: "4px" }}>
-                  {distractCropBox && (
-                    <button
-                      type="button"
-                      className="qc-mini-btn"
-                      onClick={() => setDistractCropBox(null)}
-                    >
-                      {t.ssResetCropBtn}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="qc-mini-btn"
-                    onClick={async () => {
-                      const raw = await captureScreenSnapshotRaw(false);
-                      if (raw?.dataUrl) {
-                        setDistractRawShot(raw.dataUrl);
-                        setDistractPreviewShot(raw.dataUrl);
-                        setDistractCropBox(null);
-                      }
-                    }}
-                  >
-                    🔄
-                  </button>
-                </div>
-              </div>
-
-              {distractPreviewShot ? (
-                <div
-                  ref={distractPreviewRef}
-                  className="qc-ss-preview-wrap"
-                  onMouseDown={(e) => {
-                    const rect =
-                      distractPreviewRef.current?.getBoundingClientRect();
-                    if (!rect) return;
-                    const xPct = Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((e.clientX - rect.left) / rect.width) * 100,
-                      ),
-                    );
-                    const yPct = Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((e.clientY - rect.top) / rect.height) * 100,
-                      ),
-                    );
-                    setDistractDragStart({ x: xPct, y: yPct });
-                    setDistractCropBox({
-                      xPct,
-                      yPct,
-                      wPct: 0,
-                      hPct: 0,
-                    });
-                  }}
-                  onMouseMove={(e) => {
-                    if (!distractDragStart || !distractPreviewRef.current)
-                      return;
-                    const rect =
-                      distractPreviewRef.current.getBoundingClientRect();
-                    const curX = Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((e.clientX - rect.left) / rect.width) * 100,
-                      ),
-                    );
-                    const curY = Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((e.clientY - rect.top) / rect.height) * 100,
-                      ),
-                    );
-                    const left = Math.min(distractDragStart.x, curX);
-                    const top = Math.min(distractDragStart.y, curY);
-                    const width = Math.abs(curX - distractDragStart.x);
-                    const height = Math.abs(curY - distractDragStart.y);
-                    setDistractCropBox({
-                      xPct: left,
-                      yPct: top,
-                      wPct: width,
-                      hPct: height,
-                    });
-                  }}
-                  onMouseUp={() => {
-                    if (
-                      distractCropBox &&
-                      (distractCropBox.wPct < 3 ||
-                        distractCropBox.hPct < 3)
-                    ) {
-                      setDistractCropBox(null);
-                    }
-                    setDistractDragStart(null);
-                  }}
-                >
-                  <img
-                    src={distractPreviewShot}
-                    alt="preview"
-                    className="qc-ss-img"
-                    draggable={false}
-                  />
-                  {distractCropBox && (
-                    <div
-                      className="qc-ss-crop-rect"
-                      style={{
-                        left: `${distractCropBox.xPct}%`,
-                        top: `${distractCropBox.yPct}%`,
-                        width: `${distractCropBox.wPct}%`,
-                        height: `${distractCropBox.hPct}%`,
-                      }}
-                    />
-                  )}
-                </div>
-              ) : (
-                <div
-                  style={{
-                    fontSize: "9px",
-                    color: "#a1a1aa",
-                    textAlign: "center",
-                    padding: "6px",
-                  }}
-                >
-                  {t.ssCaptureActive}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="section-subhead">{t.selectTagHint}</div>
-          <div className="reason-chips stop-chips">
-            {distractTags.map((tag) => {
-              const isSelected = selectedDistractTag === tag.name;
-              return (
-                <div
-                  key={tag.id}
-                  className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
-                >
-                  <button
-                    className="tag-chip-btn"
-                    onClick={() => handleSelectDistractTag(tag.name)}
-                  >
-                    {tag.name}
-                  </button>
-                  {isEditingDistractTags && (
-                    <span className="tag-actions">
-                      <button
-                        className="tag-icon-btn"
-                        onClick={() =>
-                          handleEditTagItem(tag.id, tag.name, "distraction")
-                        }
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="tag-icon-btn del-btn"
-                        onClick={() =>
-                          handleDeleteTagItem(tag.id, tag.name, "distraction")
-                        }
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {distractPreviousReasons.length > 0 && (
-            <div className="previous-reasons-box">
-              <div className="section-subhead">{t.previousReasons}</div>
-              <div className="previous-reasons-chips">
-                {distractPreviousReasons.map((r) => (
-                  <button
-                    key={r}
-                    className="reason-suggestion-chip"
-                    onClick={() => setDistractReasonText(r)}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="new-reason-row">
-            <textarea
-              className="distract-textarea"
-              rows={2}
-              placeholder={t.qcInputPlaceholders[distractCategory]}
-              value={distractReasonText}
-              autoFocus
-              onChange={(e) => setDistractReasonText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  const idx = DISTRACT_CATEGORIES.indexOf(distractCategory);
-                  const next =
-                    DISTRACT_CATEGORIES[
-                      (idx +
-                        (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
-                        DISTRACT_CATEGORIES.length
-                    ];
-                  setDistractCategory(next);
-                  return;
-                }
-                if (e.altKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
-                  e.preventDefault();
-                  setDistractCategory(
-                    DISTRACT_CATEGORIES[Number(e.key) - 1],
-                  );
-                  return;
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitDistraction();
-                }
-                if (e.key === "Escape") setShowDistractBox(false);
-              }}
-            />
-            <button className="primary-btn" onClick={submitDistraction}>
-              {doesCategoryAddPenalty(distractCategory)
-                ? t.saveAndAddMin(distractPenaltyMins)
-                : `${t.feedbackSaveBtn} (${t.noPenaltyParkingBadge})`}
-            </button>
-          </div>
-
-          <div className="stop-box-actions">
-            <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
-              Tag: <b>{selectedDistractTag}</b>
-            </span>
-            <button
-              onClick={() => {
-                setShowDistractBox(false);
-                setTagForm(null);
-              }}
-            >
-              {t.cancel}
-            </button>
-          </div>
-        </div>
+        <DistractModal
+          {...tagHandlers}
+          t={t}
+          currentContext={currentContext}
+          fullTopicLabel={fullTopicLabel}
+          detectedActiveApp={detectedActiveApp}
+          distractCategory={distractCategory}
+          distractPenaltyMins={distractPenaltyMins}
+          distractPreviewShot={distractPreviewShot}
+          distractCropBox={distractCropBox}
+          distractTags={distractTags}
+          selectedDistractTag={selectedDistractTag}
+          distractPreviousReasons={distractPreviousReasons}
+          distractReasonText={distractReasonText}
+          isEditingDistractTags={isEditingDistractTags}
+          getCategoryDisplayName={(cat) => getCategoryDisplayName(cat)}
+          onChangeCategory={setDistractCategory}
+          onChangeCropBox={setDistractCropBox}
+          onRetakeScreenshot={handleRetakeDistractScreenshot}
+          onToggleEditTags={() => {
+            setIsEditingDistractTags(!isEditingDistractTags);
+            setTagForm(null);
+          }}
+          onSelectTag={handleSelectDistractTag}
+          onChangeReasonText={setDistractReasonText}
+          onSubmit={submitDistraction}
+          onCancel={() => {
+            setShowDistractBox(false);
+            setTagForm(null);
+          }}
+        />
       ) : showStopBox ? (
-        <div className="stop-box">
-          <div className="stop-box-header">
-            <span className="stop-box-title">{t.earlyStopTitle}</span>
-            <div style={{ display: "flex", gap: "3px" }}>
-              <button
-                className="ghost-btn"
-                onClick={() => handleAddNewTag("ending")}
-                title={t.newTagPrompt}
-              >
-                + Tag
-              </button>
-              <button
-                className="ghost-btn"
-                onClick={() => {
-                  setIsEditingEndingTags(!isEditingEndingTags);
-                  setTagForm(null);
-                }}
-              >
-                {isEditingEndingTags ? t.doneEditing : t.editTags}
-              </button>
-            </div>
-          </div>
-          <div className="stop-box-hint">
-            {t.earlyStopWorkedTime(Math.floor(workElapsedSec / 60))}
-          </div>
-
-          {renderInlineTagForm("ending")}
-
-          <div className="reason-chips stop-chips">
-            {endingTags.map((tag) => {
-              const isSelected = selectedEndingTag === tag.name;
-              return (
-                <div
-                  key={tag.id}
-                  className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
-                >
-                  <button
-                    className="tag-chip-btn"
-                    onClick={() => handleSelectEndingTag(tag.name)}
-                  >
-                    {tag.name}
-                  </button>
-                  {isEditingEndingTags && (
-                    <span className="tag-actions">
-                      <button
-                        className="tag-icon-btn"
-                        onClick={() =>
-                          handleEditTagItem(tag.id, tag.name, "ending")
-                        }
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="tag-icon-btn del-btn"
-                        onClick={() =>
-                          handleDeleteTagItem(tag.id, tag.name, "ending")
-                        }
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {endingPreviousReasons.length > 0 && (
-            <div className="previous-reasons-box">
-              <div className="section-subhead">{t.previousReasons}</div>
-              <div className="previous-reasons-chips">
-                {endingPreviousReasons.map((r) => (
-                  <button
-                    key={r}
-                    className="reason-suggestion-chip"
-                    onClick={() => setEndingReasonText(r)}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="new-reason-row">
-            <textarea
-              className="distract-textarea"
-              rows={2}
-              placeholder={t.endingExplanationPlaceholder}
-              value={endingReasonText}
-              autoFocus
-              onChange={(e) => setEndingReasonText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitEnding(true);
-                }
-                if (e.key === "Escape") cancelStopBox();
-              }}
-            />
-            <button className="primary-btn" onClick={() => submitEnding(true)}>
-              {t.addAndFinish}
-            </button>
-          </div>
-
-          <div className="stop-box-actions">
-            <button className="ghost-btn" onClick={() => submitEnding(false)}>
-              {t.finishWithoutTag}
-            </button>
-            <button onClick={cancelStopBox}>
-              {t.cancelReturn}
-            </button>
-          </div>
-        </div>
+        <EarlyStopModal
+          {...tagHandlers}
+          t={t}
+          workElapsedSec={workElapsedSec}
+          endingTags={endingTags}
+          selectedEndingTag={selectedEndingTag}
+          endingPreviousReasons={endingPreviousReasons}
+          endingReasonText={endingReasonText}
+          isEditingEndingTags={isEditingEndingTags}
+          onToggleEditTags={() => {
+            setIsEditingEndingTags(!isEditingEndingTags);
+            setTagForm(null);
+          }}
+          onSelectTag={handleSelectEndingTag}
+          onChangeReasonText={setEndingReasonText}
+          onSubmitWithTag={(withTag) => submitEnding(withTag)}
+          onCancel={cancelStopBox}
+        />
       ) : showBreakOverdueBox ? (
-        <div className="stop-box">
-          <div className="stop-box-header">
-            <span className="stop-box-title">{t.breakOverdueTitle}</span>
-            <div style={{ display: "flex", gap: "3px" }}>
-              <button
-                className="ghost-btn"
-                onClick={() => handleAddNewTag("break_overtime")}
-                title={t.newTagPrompt}
-              >
-                + Tag
-              </button>
-              <button
-                className="ghost-btn"
-                onClick={() => {
-                  setIsEditingBreakOverdueTags(!isEditingBreakOverdueTags);
-                  setTagForm(null);
-                }}
-              >
-                {isEditingBreakOverdueTags ? t.doneEditing : t.editTags}
-              </button>
-            </div>
-          </div>
-
-          <div className="stop-box-hint">
-            {t.breakOverdueDesc(
-              formatClock(breakOvertimeAccumSec + breakOverdueSec),
-            )}
-          </div>
-
-          {renderInlineTagForm("break_overtime")}
-
-          <div className="reason-chips stop-chips">
-            {breakOverdueTags.map((tag) => {
-              const isSelected = selectedBreakOverdueTag === tag.name;
-              return (
-                <div
-                  key={tag.id}
-                  className={`tag-chip-wrap ${isSelected ? "selected" : ""}`}
-                >
-                  <button
-                    className="tag-chip-btn"
-                    onClick={() => handleSelectBreakOverdueTag(tag.name)}
-                  >
-                    {tag.name}
-                  </button>
-                  {isEditingBreakOverdueTags && (
-                    <span className="tag-actions">
-                      <button
-                        className="tag-icon-btn"
-                        onClick={() =>
-                          handleEditTagItem(
-                            tag.id,
-                            tag.name,
-                            "break_overtime",
-                          )
-                        }
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="tag-icon-btn del-btn"
-                        onClick={() =>
-                          handleDeleteTagItem(
-                            tag.id,
-                            tag.name,
-                            "break_overtime",
-                          )
-                        }
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {breakOverduePrevReasons.length > 0 && (
-            <div className="previous-reasons-box">
-              <div className="section-subhead">{t.previousReasons}</div>
-              <div className="previous-reasons-chips">
-                {breakOverduePrevReasons.map((r) => (
-                  <button
-                    key={r}
-                    className="reason-suggestion-chip"
-                    onClick={() => setBreakOverdueReasonText(r)}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="new-reason-row">
-            <textarea
-              className="distract-textarea"
-              rows={2}
-              placeholder={t.distractExplanationPlaceholder}
-              value={breakOverdueReasonText}
-              autoFocus
-              onChange={(e) => setBreakOverdueReasonText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submitBreakOverdue(false);
-                }
-                if (e.key === "Escape") submitBreakOverdue(true);
-              }}
-            />
-          </div>
-
-          <div className="stop-box-actions">
-            <button
-              className="primary-btn"
-              onClick={() => submitBreakOverdue(false)}
-            >
-              {t.saveAndStartWork}
-            </button>
-            <button onClick={() => submitBreakOverdue(true)}>
-              {t.skipAndStartWork}
-            </button>
-          </div>
-        </div>
+        <BreakOverdueModal
+          {...tagHandlers}
+          t={t}
+          totalOvertimeSec={breakOvertimeAccumSec + breakOverdueSec}
+          breakOverdueTags={breakOverdueTags}
+          selectedBreakOverdueTag={selectedBreakOverdueTag}
+          breakOverduePrevReasons={breakOverduePrevReasons}
+          breakOverdueReasonText={breakOverdueReasonText}
+          isEditingBreakOverdueTags={isEditingBreakOverdueTags}
+          onToggleEditTags={() => {
+            setIsEditingBreakOverdueTags(!isEditingBreakOverdueTags);
+            setTagForm(null);
+          }}
+          onSelectTag={handleSelectBreakOverdueTag}
+          onChangeReasonText={setBreakOverdueReasonText}
+          onSubmit={(skipReason) => submitBreakOverdue(skipReason)}
+        />
       ) : (
         <>
-          {/* =================================================================
-              SAYAÇ EKRANI (ÇALIŞMA & MOLA — Kompakt, Tek Satır, Hover Detaylı)
-             ================================================================= */}
           {page === "timer" && sessionActive && (
-            <>
-              <div
-                className={
-                  hasBreakParkingView ? "top-bar" : "top-bar hover-reveal"
-                }
-              >
-                <div className="top-bar-left">
-                  {timerMode === "work" ? (
-                    <>
-                      <span
-                        className="badge"
-                        title={`${t.work} (${getPlanDisplayName(currentPlan)} • ${currentPlan.workMins} ${activeLang === "tr" ? "dk" : "min"})`}
-                      >
-                        💼
-                      </span>
-
-                      <button
-                        className="work-topic-badge"
-                        onClick={handleOpenWorkTopicBox}
-                        title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
-                      >
-                        🏷️ {currentWorkTag || t.selectWorkTopic}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="context-badge"
-                        onClick={() => openQuickCaptureFromUi("context")}
-                        title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
-                          currentContext || t.qcContextNone
-                        }`}
-                      >
-                        🎯 {currentContext || t.setContextBadgePlaceholder}
-                      </button>
-
-                      <span
-                        className="cycle-badge"
-                        title={t.cycleTooltip(
-                          currentCycleIndex,
-                          currentPlan.longBreakInterval,
-                          currentPlan.longBreakMins,
-                        )}
-                      >
-                        🔄{" "}
-                        {t.cycleProgressBadge(
-                          currentCycleIndex,
-                          currentPlan.longBreakInterval,
-                        )}
-                      </span>
-
-                      {sessionShortBreakCount > 0 && (
-                        <span
-                          className="short-break-chip"
-                          title={t.shortBreaksCountBadge(
-                            sessionShortBreakCount,
-                          )}
-                        >
-                          ☕ {sessionShortBreakCount}
-                        </span>
-                      )}
-
-                      {currentSessionDistractions > 0 && (
-                        <span
-                          className="distract-chip"
-                          title={t.distractionsCountTooltip(
-                            currentSessionDistractions,
-                          )}
-                        >
-                          ⚡ {currentSessionDistractions}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <span className="badge" title={currentBreakFullTooltip}>
-                        {breakKind === "short"
-                          ? "☕"
-                          : breakKind === "long"
-                            ? "🎉"
-                            : "🌴"}{" "}
-                        {currentBreakShortName}
-                      </span>
-                      <span
-                        className="cycle-badge"
-                        title={t.cycleTooltip(
-                          currentCycleIndex,
-                          currentPlan.longBreakInterval,
-                          currentPlan.longBreakMins,
-                        )}
-                      >
-                        🔄{" "}
-                        {t.cycleProgressBadge(
-                          currentCycleIndex,
-                          currentPlan.longBreakInterval,
-                        )}
-                      </span>
-                      {breakParkingTotalCount > 0 && (
-                        <button
-                          type="button"
-                          className="context-badge"
-                          onClick={() => setShowBreakParking((p) => !p)}
-                          title={t.parkingBreakBannerTitle}
-                        >
-                          {t.parkingToggleBtn(breakParkingTotalCount)}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div className="top-bar-right">
-                  <button
-                    className={`icon-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
-                    title={t.alwaysOnTopTooltip(alwaysOnTop)}
-                    onClick={toggleAlwaysOnTop}
-                  >
-                    📌
-                  </button>
-                  <button
-                    className="icon-btn"
-                    onClick={openMenu}
-                    title={
-                      updateAvailable
-                        ? `${t.menu} (${t.updateAvailableHint})`
-                        : t.menu
-                    }
-                  >
-                    ☰
-                    {updateAvailable && <span className="update-dot" />}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title={t.miniDockTooltip}
-                    onClick={enterMiniDock}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              <div className="timer-wrap">
-                {isBreakAlarm ? (
-                  <div className="timer-display alarm-timer">
-                    -{formatClock(breakOverdueSec)}
-                  </div>
-                ) : (
-                  <div className="timer-display">
-                    {formatClock(activeSeconds)}
-                  </div>
-                )}
-
-                {hasPausedProgress && (
-                  <div className="resume-hint">
-                    {t.resumeHint(Math.floor(workElapsedSec / 60))}
-                  </div>
-                )}
-
-                {reminderBanner && (
-                  <div
-                    className="reminder-banner no-drag"
-                    title={`${t.contextReminderPrefix} ${reminderBanner.text}`}
-                  >
-                    <span className="reminder-banner-text">
-                      {t.contextReminderPrefix} <b>{reminderBanner.text}</b>
-                    </span>
-                    <button
-                      type="button"
-                      className="tag-icon-btn"
-                      onClick={() => setReminderBanner(null)}
-                      title={t.cancel}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {hasBreakParkingView && (
-                <div className="parking-panel no-drag">
-                  {renderParkingLotContent(breakParkingData, true)}
-                </div>
-              )}
-
-              {timerMode === "break" ? (
-                <div
-                  className={
-                    hasBreakParkingView ? "btn-row" : "btn-row hover-reveal"
-                  }
-                >
-                  <button
-                    className="primary-btn"
-                    onClick={handleStartWorkFromBreak}
-                    title={
-                      breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn
-                    }
-                  >
-                    {breakKind === "short"
-                      ? t.returnToWorkCompact
-                      : t.startWorkCompact}
-                  </button>
-                  <button
-                    onClick={handleExtendBreak5m}
-                    title={t.extendBreakTooltip}
-                  >
-                    {t.extendBreakCompact}
-                  </button>
-                  <button
-                    onClick={handleStopSession}
-                    title={t.stopBtnTooltip}
-                  >
-                    {t.stop}
-                  </button>
-                </div>
-              ) : (
-                <div className="btn-row hover-reveal">
-                  <button
-                    className="short-break-btn"
-                    onClick={handleTakeShortBreak}
-                    title={t.shortBreakBtnTooltip(currentPlan.shortBreakMins)}
-                  >
-                    {t.shortBreakBtn(currentPlan.shortBreakMins)}
-                  </button>
-                  <button
-                    onClick={handleStopSession}
-                    title={t.stopBtnTooltip}
-                  >
-                    {t.stop}
-                  </button>
-                  <button
-                    className="warn-btn"
-                    onClick={handleDistractedClick}
-                    title={t.distractedBtnTooltip(distractPenaltyMins)}
-                  >
-                    {t.distractedBtnCompact(distractPenaltyMins)}
-                  </button>
-                </div>
-              )}
-            </>
+            <TimerPage
+              t={t}
+              activeLang={activeLang}
+              timerMode={timerMode}
+              breakKind={breakKind}
+              currentPlan={currentPlan}
+              planDisplayName={getPlanDisplayName(currentPlan)}
+              currentWorkTag={currentWorkTag}
+              fullTopicLabel={fullTopicLabel}
+              currentContext={currentContext}
+              shortcuts={shortcuts}
+              currentCycleIndex={currentCycleIndex}
+              sessionShortBreakCount={sessionShortBreakCount}
+              currentSessionDistractions={currentSessionDistractions}
+              currentBreakShortName={currentBreakShortName}
+              currentBreakFullTooltip={currentBreakFullTooltip}
+              breakParkingTotalCount={breakParkingTotalCount}
+              hasBreakParkingView={hasBreakParkingView}
+              breakParkingData={breakParkingData}
+              docsStatusMsg={docsStatusMsg}
+              alwaysOnTop={alwaysOnTop}
+              updateAvailable={updateAvailable}
+              isBreakAlarm={isBreakAlarm}
+              breakOverdueSec={breakOverdueSec}
+              activeSeconds={activeSeconds}
+              hasPausedProgress={hasPausedProgress}
+              workElapsedSec={workElapsedSec}
+              distractPenaltyMins={distractPenaltyMins}
+              reminderBanner={reminderBanner}
+              onOpenWorkTopicBox={handleOpenWorkTopicBox}
+              onOpenQuickCapture={openQuickCaptureFromUi}
+              onToggleBreakParking={() => setShowBreakParking((p) => !p)}
+              onToggleAlwaysOnTop={toggleAlwaysOnTop}
+              onOpenMenu={openMenu}
+              onEnterMiniDock={enterMiniDock}
+              onDismissReminderBanner={() => setReminderBanner(null)}
+              onSyncParkingToDocs={handleSyncParkingToDocs}
+              onSyncSingleItemToDocs={handleSyncSingleItemToDocs}
+              onToggleParkingTask={handleToggleParkingTask}
+              onRateParkingIdea={handleRateParkingIdea}
+              onDeleteParkingEntry={handleDeleteParkingEntry}
+              onOpenLightbox={setLightboxEntry}
+              onStartWorkFromBreak={handleStartWorkFromBreak}
+              onExtendBreak5m={handleExtendBreak5m}
+              onStopSession={handleStopSession}
+              onTakeShortBreak={handleTakeShortBreak}
+              onDistractedClick={handleDistractedClick}
+            />
           )}
 
-          {/* =================================================================
-              ANA MENÜ (Canlı Seans Durumu, Özel Dropdown, Seans Başlat / Bitir)
-             ================================================================= */}
           {page === "menu" && (
-            <>
-              <div className="top-bar">
-                <span className="badge">⠿ {dayStats.label}</span>
-                <div className="top-bar-right">
-                  <button
-                    className={`icon-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
-                    title={t.alwaysOnTopTooltip(alwaysOnTop)}
-                    onClick={toggleAlwaysOnTop}
-                  >
-                    📌
-                  </button>
-                  <button
-                    className="ghost-btn"
-                    title={t.dashboardBtn}
-                    onClick={openDashboard}
-                  >
-                    📊 {t.dashboardBtn}
-                  </button>
-                  <button
-                    className="ghost-btn"
-                    title={t.summaryTitle}
-                    onClick={openSummary}
-                  >
-                    📈 {t.summary}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title={t.settings}
-                    onClick={openSettings}
-                  >
-                    ⚙
-                    {updateAvailable && <span className="update-dot" />}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title={t.miniDockTooltip}
-                    onClick={enterMiniDock}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              <div className="stats-grid">
-                <div className="stat-card" title={t.totalWork}>
-                  <div className="stat-val">
-                    {t.formatDuration(dayStats.totalSec)}
-                  </div>
-                  <div className="stat-lbl">{t.totalWork}</div>
-                </div>
-                <div className="stat-card" title={t.sessions}>
-                  <div className="stat-val">{dayStats.sessionCount}</div>
-                  <div className="stat-lbl">{t.sessions}</div>
-                </div>
-                <div className="stat-card" title={t.average}>
-                  <div className="stat-val">
-                    {Math.round(dayStats.avgSec / 60)}{" "}
-                    {activeLang === "tr" ? "dk" : "m"}
-                  </div>
-                  <div className="stat-lbl">{t.average}</div>
-                </div>
-              </div>
-
-              {/* CANLI SEANS DURUM ÇUBUĞU */}
-              {sessionActive ? (
-                <div
-                  className={`session-status-bar ${
-                    isBreakAlarm
-                      ? "active-alarm"
-                      : timerMode === "work"
-                        ? "active-work"
-                        : "active-break"
-                  }`}
-                  title={t.sessionActiveTooltip(
-                    timerMode === "work" ? t.work : currentBreakShortName,
-                    fullTopicLabel,
-                    sessionShortBreakCount,
-                  )}
-                >
-                  <div className="session-status-left">
-                    <span
-                      className={`status-dot ${
-                        isBreakAlarm
-                          ? "alarm"
-                          : !isRunning
-                            ? "paused"
-                            : timerMode === "work"
-                              ? "work"
-                              : "break"
-                      }`}
-                    />
-                    <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-                      {timerMode === "work"
-                        ? `💼 ${t.work}`
-                        : `☕ ${currentBreakShortName}`}
-                    </span>
-                    <span className="session-state-tag">
-                      {isRunning ? t.statusRunning : t.statusPaused}
-                    </span>
-                  </div>
-                  <div className="session-status-right">
-                    <span
-                      className="cycle-badge"
-                      title={t.cycleTooltip(
-                        currentCycleIndex,
-                        currentPlan.longBreakInterval,
-                        currentPlan.longBreakMins,
-                      )}
-                    >
-                      🔄 {currentCycleIndex}/{currentPlan.longBreakInterval}
-                    </span>
-                    <span className="session-clock-pill">{liveClockStr}</span>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="session-status-bar"
-                  title={t.sessionIdleTooltip}
-                >
-                  <div className="session-status-left">
-                    <span className="status-dot" />
-                    <span style={{ color: "#a1a1aa" }}>
-                      {t.sessionIdleLabel}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: "10px", color: "#71717a" }}>
-                    {getPlanDisplayName(currentPlan)} • {currentPlan.workMins}
-                    {activeLang === "tr" ? "dk" : "m"}
-                  </span>
-                </div>
-              )}
-
-              {(updateStatus.kind === "available" ||
-                updateStatus.kind === "downloading") && (
-                <div className="update-banner">
-                  {updateStatus.kind === "available" ? (
-                    <>
-                      <span>{t.newVersionReady(updateStatus.version)}</span>
-                      <button
-                        className="primary-btn"
-                        onClick={handleInstallUpdate}
-                      >
-                        {t.installVersion(updateStatus.version)}
-                      </button>
-                    </>
-                  ) : (
-                    <span>{t.updateDownloading(updateStatus.percent)}</span>
-                  )}
-                </div>
-              )}
-
-              {/* ÖZEL ÇALIŞMA PLANI SEÇİCİ & KONU SATIRI */}
-              <div className="plan-picker-box no-drag">
-                <div className="plan-dropdown-wrap" ref={planDropdownRef}>
-                  <button
-                    type="button"
-                    className={`plan-dropdown-trigger ${
-                      planDropdownOpen ? "open" : ""
-                    }`}
-                    disabled={sessionActive}
-                    onClick={() => {
-                      if (!sessionActive) {
-                        setPlanDropdownOpen((prev) => !prev);
-                      }
-                    }}
-                    title={
-                      sessionActive
-                        ? t.planLockedDuringSession
-                        : t.planDetailTooltip(
-                            getPlanDisplayName(currentPlan),
-                            currentPlan.workMins,
-                            currentPlan.shortBreakMins,
-                            currentPlan.standardBreakMins,
-                            currentPlan.longBreakMins,
-                            currentPlan.longBreakInterval,
-                          )
-                    }
-                  >
-                    <span>📋 {getPlanDisplayName(currentPlan)}</span>
-                    <span className="plan-trigger-meta">
-                      <span>
-                        {currentPlan.workMins}/{currentPlan.standardBreakMins}
-                        {activeLang === "tr" ? "dk" : "m"} •{" "}
-                        {currentPlan.longBreakInterval}+1
-                      </span>
-                      {!sessionActive && (
-                        <span>{planDropdownOpen ? "▴" : "▾"}</span>
-                      )}
-                    </span>
-                  </button>
-
-                  {planDropdownOpen && !sessionActive && (
-                    <div className="plan-dropdown-list">
-                      {studyPlans.map((p) => {
-                        const pName = getPlanDisplayName(p);
-                        const isSelected = p.id === activePlanId;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className={`plan-dropdown-item ${
-                              isSelected ? "selected" : ""
-                            }`}
-                            onClick={() => handleSelectPlan(p.id)}
-                            title={t.planDetailTooltip(
-                              pName,
-                              p.workMins,
-                              p.shortBreakMins,
-                              p.standardBreakMins,
-                              p.longBreakMins,
-                              p.longBreakInterval,
-                            )}
-                          >
-                            <span>{pName}</span>
-                            <span className="plan-item-meta">
-                              {p.workMins}/{p.standardBreakMins}
-                              {activeLang === "tr" ? "dk" : "m"} •{" "}
-                              {p.longBreakInterval}+1
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="plan-meta-row">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      minWidth: 0,
-                      flex: 1,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="work-topic-badge menu-topic"
-                      onClick={handleOpenWorkTopicBox}
-                      title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
-                    >
-                      🏷️ {fullTopicLabel}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="context-badge"
-                      onClick={() => openQuickCaptureFromUi("context")}
-                      title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
-                        currentContext || t.qcContextNone
-                      }`}
-                    >
-                      🎯 {currentContext || t.setContextBadgePlaceholder}
-                    </button>
-                  </div>
-
-                  <div className="plan-chips-row">
-                    <span
-                      className="plan-chip highlight"
-                      title={`${t.planWorkMins}: ${currentPlan.workMins}`}
-                    >
-                      💼{currentPlan.workMins}
-                    </span>
-                    <span
-                      className="plan-chip"
-                      title={`${t.planShortBreakMins}: ${currentPlan.shortBreakMins}`}
-                    >
-                      ☕{currentPlan.shortBreakMins}
-                    </span>
-                    <span
-                      className="plan-chip"
-                      title={`${t.planStandardBreakMins}: ${currentPlan.standardBreakMins}`}
-                    >
-                      🌴{currentPlan.standardBreakMins}
-                    </span>
-                    <span
-                      className="plan-chip"
-                      title={`${t.planLongBreakMins}: ${currentPlan.longBreakMins} (${t.planLongBreakIntervalDesc(currentPlan.longBreakInterval)})`}
-                    >
-                      🎉{currentPlan.longBreakMins}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* SEANS AKSİYON BUTONLARI */}
-              <div className="menu-actions">
-                {sessionActive ? (
-                  <>
-                    <button
-                      className="primary-btn"
-                      onClick={() => {
-                        setIsCelebrating(false);
-                        setPage("timer");
-                      }}
-                    >
-                      {timerMode === "work"
-                        ? t.returnToWorkMenuBtn
-                        : t.returnToBreakMenuBtn}
-                    </button>
-                    <button
-                      className="warn-btn"
-                      onClick={handleFinishSession}
-                      title={t.finishSessionTooltip}
-                    >
-                      {t.finishSessionBtn}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="primary-btn full-width"
-                    onClick={handleStartSession}
-                    title={t.startSessionTooltip}
-                  >
-                    {t.startSessionBtn}
-                  </button>
-                )}
-              </div>
-
-              <div className="credits-bar">
-                Credits by <b>Elyas</b>
-              </div>
-            </>
+            <MenuPage
+              t={t}
+              activeLang={activeLang}
+              dayStats={dayStats}
+              alwaysOnTop={alwaysOnTop}
+              updateAvailable={updateAvailable}
+              updateStatus={updateStatus}
+              sessionActive={sessionActive}
+              isBreakAlarm={isBreakAlarm}
+              isRunning={isRunning}
+              timerMode={timerMode}
+              currentBreakShortName={currentBreakShortName}
+              fullTopicLabel={fullTopicLabel}
+              sessionShortBreakCount={sessionShortBreakCount}
+              currentCycleIndex={currentCycleIndex}
+              currentPlan={currentPlan}
+              studyPlans={studyPlans}
+              activePlanId={activePlanId}
+              planDropdownOpen={planDropdownOpen}
+              planDropdownRef={planDropdownRef}
+              liveClockStr={liveClockStr}
+              currentContext={currentContext}
+              shortcuts={shortcuts}
+              getPlanDisplayName={getPlanDisplayName}
+              onToggleAlwaysOnTop={toggleAlwaysOnTop}
+              onOpenDashboard={openDashboard}
+              onOpenSummary={openSummary}
+              onOpenSettings={openSettings}
+              onEnterMiniDock={enterMiniDock}
+              onInstallUpdate={handleInstallUpdate}
+              onTogglePlanDropdown={() => setPlanDropdownOpen((prev) => !prev)}
+              onSelectPlan={handleSelectPlan}
+              onOpenWorkTopicBox={handleOpenWorkTopicBox}
+              onOpenQuickCapture={openQuickCaptureFromUi}
+              onReturnToTimer={() => {
+                setIsCelebrating(false);
+                setPage("timer");
+              }}
+              onFinishSession={handleFinishSession}
+              onStartSession={handleStartSession}
+            />
           )}
 
-          {/* =================================================================
-              AYARLAR SAYFASI
-             ================================================================= */}
           {page === "settings" && (
-            <>
-              <div className="top-bar">
-                <span className="badge">{t.settingsTitle}</span>
-                <button className="ghost-btn" onClick={openMenu}>
-                  ← {t.home}
-                </button>
-              </div>
-
-              {/* DİL SEÇİMİ */}
-              <div className="settings-section">
-                <div className="settings-label">{t.langLabel}</div>
-                <div className="lang-switcher">
-                  <button
-                    className={`lang-btn ${langPref === "auto" ? "active" : ""}`}
-                    onClick={() => handleLanguageChange("auto")}
-                  >
-                    {t.langAuto}
-                  </button>
-                  <button
-                    className={`lang-btn ${langPref === "tr" ? "active" : ""}`}
-                    onClick={() => handleLanguageChange("tr")}
-                  >
-                    {t.langTr}
-                  </button>
-                  <button
-                    className={`lang-btn ${langPref === "en" ? "active" : ""}`}
-                    onClick={() => handleLanguageChange("en")}
-                  >
-                    {t.langEn}
-                  </button>
-                </div>
-              </div>
-
-              {/* DİKKAT DAĞILMA CEZA SÜRESİ */}
-              <div className="settings-section">
-                <div className="settings-label">{t.distractPenaltySetting}</div>
-                <div
-                  className="penalty-selector"
-                  style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
-                >
-                  {PENALTY_OPTIONS.map((mins) => (
-                    <button
-                      key={mins}
-                      className={`penalty-btn ${distractPenaltyMins === mins ? "active" : ""}`}
-                      onClick={() => handlePenaltyChange(mins)}
-                    >
-                      {mins === 0
-                        ? "0"
-                        : `+${mins}${activeLang === "tr" ? "dk" : "m"}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* HER ZAMAN ÜSTTE (ALWAYS ON TOP) */}
-              <div className="settings-section">
-                <div className="settings-label">{t.alwaysOnTop}</div>
-                <button
-                  className={`penalty-btn ${alwaysOnTop ? "active" : ""}`}
-                  onClick={toggleAlwaysOnTop}
-                >
-                  {alwaysOnTop
-                    ? activeLang === "tr"
-                      ? "Açık (📌 Üstte)"
-                      : "Enabled (📌 On Top)"
-                    : activeLang === "tr"
-                      ? "Kapalı"
-                      : "Disabled"}
-                </button>
-              </div>
-
-              {/* GLOBAL KISAYOLLAR (EKRAN ORTASINDA HIZLI TEK SATIR INPUT) */}
-              <div className="settings-section no-drag">
-                <div
-                  className="settings-label"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>{t.shortcutsSectionTitle}</span>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    style={{ fontSize: "9px", padding: "2px 6px" }}
-                    onClick={handleResetShortcuts}
-                  >
-                    {t.shortcutResetBtn}
-                  </button>
-                </div>
-
-                <div className="shortcut-setting-row">
-                  <span
-                    className="shortcut-lbl"
-                    title={t.shortcutDistractLabel}
-                  >
-                    {t.shortcutDistractLabel}
-                  </span>
-                  <button
-                    type="button"
-                    className={`shortcut-record-btn ${
-                      recordingShortcutFor === "distraction" ? "recording" : ""
-                    }`}
-                    onClick={() =>
-                      setRecordingShortcutFor(
-                        recordingShortcutFor === "distraction"
-                          ? null
-                          : "distraction",
-                      )
-                    }
-                    onBlur={() =>
-                      setRecordingShortcutFor((cur) =>
-                        cur === "distraction" ? null : cur,
-                      )
-                    }
-                    onKeyDown={(e) => {
-                      if (recordingShortcutFor !== "distraction") return;
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setRecordingShortcutFor(null);
-                        return;
-                      }
-                      const combo = formatKeyCombo(e);
-                      if (combo) {
-                        e.preventDefault();
-                        setRecordingShortcutFor(null);
-                        handleApplyShortcuts({
-                          ...shortcuts,
-                          distractionShortcut: combo,
-                        });
-                      }
-                    }}
-                    title={t.shortcutRecordPressKeys}
-                  >
-                    {recordingShortcutFor === "distraction"
-                      ? "..."
-                      : shortcuts.distractionShortcut}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => openQuickCaptureFromUi("distraction")}
-                  >
-                    {t.shortcutTestBtn}
-                  </button>
-                </div>
-
-                <div className="shortcut-setting-row">
-                  <span className="shortcut-lbl" title={t.shortcutContextLabel}>
-                    {t.shortcutContextLabel}
-                  </span>
-                  <button
-                    type="button"
-                    className={`shortcut-record-btn ${
-                      recordingShortcutFor === "context" ? "recording" : ""
-                    }`}
-                    onClick={() =>
-                      setRecordingShortcutFor(
-                        recordingShortcutFor === "context" ? null : "context",
-                      )
-                    }
-                    onBlur={() =>
-                      setRecordingShortcutFor((cur) =>
-                        cur === "context" ? null : cur,
-                      )
-                    }
-                    onKeyDown={(e) => {
-                      if (recordingShortcutFor !== "context") return;
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setRecordingShortcutFor(null);
-                        return;
-                      }
-                      const combo = formatKeyCombo(e);
-                      if (combo) {
-                        e.preventDefault();
-                        setRecordingShortcutFor(null);
-                        handleApplyShortcuts({
-                          ...shortcuts,
-                          contextShortcut: combo,
-                        });
-                      }
-                    }}
-                    title={t.shortcutRecordPressKeys}
-                  >
-                    {recordingShortcutFor === "context"
-                      ? "..."
-                      : shortcuts.contextShortcut}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => openQuickCaptureFromUi("context")}
-                  >
-                    {t.shortcutTestBtn}
-                  </button>
-                </div>
-
-                {recordingShortcutFor && (
-                  <div style={{ fontSize: "9px", color: "#fbbf24" }}>
-                    {t.shortcutRecordPressKeys}
-                  </div>
-                )}
-
-                {shortcutStatus &&
-                  (!shortcutStatus.distractionOk ||
-                    !shortcutStatus.contextOk) && (
-                    <div style={{ fontSize: "9px", color: "#fca5a5" }}>
-                      {shortcutStatus.distractionError ||
-                        shortcutStatus.contextError}
-                    </div>
-                  )}
-              </div>
-
-              {/* ÇALIŞMA PLANLARI & MOLA AYARLARI */}
-              <div className="settings-section">
-                <div
-                  className="settings-label"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>{t.editPlansTitle}</span>
-                  <button
-                    className="ghost-btn"
-                    style={{ fontSize: "9px", padding: "2px 6px" }}
-                    onClick={handleResetPlansDefault}
-                  >
-                    {t.resetPlansDefault}
-                  </button>
-                </div>
-
-                <div className="plans-settings-wrapper">
-                  <div className="plans-selector-tabs">
-                    {studyPlans.map((p) => (
-                      <button
-                        key={p.id}
-                        className={`plan-tab-btn ${editingPlanId === p.id ? "active" : ""}`}
-                        onClick={() => setEditingPlanId(p.id)}
-                      >
-                        {getPlanDisplayName(p)}
-                      </button>
-                    ))}
-                  </div>
-
-                  {(() => {
-                    const currentEditPlan =
-                      studyPlans.find((p) => p.id === editingPlanId) ||
-                      studyPlans[0] ||
-                      DEFAULT_STUDY_PLANS[0];
-                    return (
-                      <div className="plans-editor-card">
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            {t.planNameLabel}
-                          </span>
-                          <input
-                            className="plan-text-input"
-                            placeholder={
-                              t.planNames[currentEditPlan.id] ||
-                              t.planNamePlaceholder
-                            }
-                            value={currentEditPlan.name}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "name",
-                                e.target.value,
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            💼 {t.planWorkMins}
-                          </span>
-                          <input
-                            type="number"
-                            className="plan-number-input"
-                            min={1}
-                            max={240}
-                            value={currentEditPlan.workMins}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "workMins",
-                                Math.max(1, parseInt(e.target.value, 10) || 1),
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            ☕ {t.planShortBreakMins}
-                          </span>
-                          <input
-                            type="number"
-                            className="plan-number-input"
-                            min={1}
-                            max={60}
-                            value={currentEditPlan.shortBreakMins}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "shortBreakMins",
-                                Math.max(1, parseInt(e.target.value, 10) || 1),
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            🌴 {t.planStandardBreakMins}
-                          </span>
-                          <input
-                            type="number"
-                            className="plan-number-input"
-                            min={1}
-                            max={90}
-                            value={currentEditPlan.standardBreakMins}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "standardBreakMins",
-                                Math.max(1, parseInt(e.target.value, 10) || 1),
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            🎉 {t.planLongBreakMins}
-                          </span>
-                          <input
-                            type="number"
-                            className="plan-number-input"
-                            min={1}
-                            max={180}
-                            value={currentEditPlan.longBreakMins}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "longBreakMins",
-                                Math.max(1, parseInt(e.target.value, 10) || 1),
-                              )
-                            }
-                          />
-                        </div>
-
-                        <div className="plan-field-row">
-                          <span className="plan-field-label">
-                            🔄 {t.planLongBreakInterval}
-                          </span>
-                          <input
-                            type="number"
-                            className="plan-number-input"
-                            min={1}
-                            max={12}
-                            value={currentEditPlan.longBreakInterval}
-                            onChange={(e) =>
-                              handleUpdatePlanField(
-                                currentEditPlan.id,
-                                "longBreakInterval",
-                                Math.max(1, parseInt(e.target.value, 10) || 1),
-                              )
-                            }
-                          />
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* ARKA PLAN RENK & OPAKLIK */}
-              <div className="settings-section">
-                <div className="settings-label">{t.bgColorLabel}</div>
-                <div className="swatch-row">
-                  {BG_PRESETS.map((c) => (
-                    <button
-                      key={c}
-                      className={`swatch ${theme.bgColor === c ? "selected" : ""}`}
-                      style={{ background: c }}
-                      title={c}
-                      onClick={() => updateTheme({ bgColor: c })}
-                    />
-                  ))}
-                  <input
-                    type="color"
-                    className="color-input"
-                    title={t.customColorTitle}
-                    value={theme.bgColor}
-                    onChange={(e) => updateTheme({ bgColor: e.target.value })}
-                  />
-                </div>
-                <div className="settings-label slider-label">
-                  <span>{t.opacityLabel}</span>
-                  <span>%{theme.bgOpacity}</span>
-                </div>
-                <input
-                  type="range"
-                  className="range-input"
-                  min={30}
-                  max={100}
-                  value={theme.bgOpacity}
-                  onChange={(e) =>
-                    updateTheme({ bgOpacity: Number(e.target.value) })
-                  }
-                />
-              </div>
-
-              {/* SAYAÇ RENGİ */}
-              <div className="settings-section">
-                <div className="settings-label slider-label">
-                  <span>{t.timerColorLabel}</span>
-                  <span className="timer-preview">50:00</span>
-                </div>
-                <div className="swatch-row">
-                  {TIMER_PRESETS.map((c) => (
-                    <button
-                      key={c}
-                      className={`swatch ${theme.timerColor === c ? "selected" : ""}`}
-                      style={{ background: c }}
-                      title={c}
-                      onClick={() => updateTheme({ timerColor: c })}
-                    />
-                  ))}
-                  <input
-                    type="color"
-                    className="color-input"
-                    title={t.customColorTitle}
-                    value={theme.timerColor}
-                    onChange={(e) =>
-                      updateTheme({ timerColor: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="settings-actions">
-                <button
-                  title={t.autoStartOnBoot(autoStartOn)}
-                  onClick={toggleAutoStart}
-                >
-                  {t.autoStartOnBoot(autoStartOn)}
-                </button>
-                <button onClick={() => updateTheme({ ...DEFAULT_THEME })}>
-                  {t.resetDefaultColors}
-                </button>
-              </div>
-
-              {/* PENCERE BOYUTU ÖZELLEŞTİRME & STANDART BOYUTA DÖN */}
-              <div className="settings-section">
-                <div
-                  className="settings-label"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>📐 {t.windowSizeTitle}</span>
-                  {sizeSavedFlash && (
-                    <span
-                      style={{
-                        fontSize: "9px",
-                        color: "#4ade80",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {t.sizeSavedBadge}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: "9.5px", color: "#a1a1aa" }}>
-                  {t.windowSizeHint(currentWinSize.w, currentWinSize.h)}
-                </div>
-                <div className="settings-actions">
-                  <button
-                    className="primary-btn"
-                    onClick={handleSaveCurrentWindowSize}
-                  >
-                    {t.saveCurrentSizeBtn}
-                  </button>
-                  <button onClick={handleResetStandardSizes}>
-                    {t.resetStandardSizeBtn}
-                  </button>
-                </div>
-              </div>
-
-              {/* UYGULAMA İÇİ GERİ BİLDİRİM (FEEDBACK) BÖLÜMÜ */}
-              <div className="settings-section no-drag">
-                <div
-                  className="settings-label"
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>💬 {t.feedbackSectionTitle}</span>
-                  {feedbackCopied && (
-                    <span
-                      style={{
-                        fontSize: "9px",
-                        color: "#4ade80",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {t.feedbackCopiedMsg}
-                    </span>
-                  )}
-                </div>
-
-                <div className="feedback-cat-row">
-                  <button
-                    type="button"
-                    className={`feedback-cat-btn ${
-                      feedbackCat === "bug" ? "active" : ""
-                    }`}
-                    onClick={() => setFeedbackCat("bug")}
-                  >
-                    {t.feedbackCatBug}
-                  </button>
-                  <button
-                    type="button"
-                    className={`feedback-cat-btn ${
-                      feedbackCat === "feature" ? "active" : ""
-                    }`}
-                    onClick={() => setFeedbackCat("feature")}
-                  >
-                    {t.feedbackCatFeature}
-                  </button>
-                  <button
-                    type="button"
-                    className={`feedback-cat-btn ${
-                      feedbackCat === "ui" ? "active" : ""
-                    }`}
-                    onClick={() => setFeedbackCat("ui")}
-                  >
-                    {t.feedbackCatUi}
-                  </button>
-                </div>
-
-                <div className="new-reason-row">
-                  <textarea
-                    className="distract-textarea"
-                    rows={2}
-                    placeholder={t.feedbackPlaceholder}
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddFeedbackItem();
-                      }
-                    }}
-                  />
-                  <button
-                    className="primary-btn"
-                    onClick={handleAddFeedbackItem}
-                  >
-                    {t.feedbackSaveBtn}
-                  </button>
-                </div>
-
-                <div className="settings-actions">
-                  <button
-                    className="ghost-btn"
-                    disabled={feedbacks.length === 0}
-                    onClick={handleCopyAllFeedbacks}
-                  >
-                    {t.feedbackCopyAllBtn} ({feedbacks.length})
-                  </button>
-                  <button
-                    className="ghost-btn"
-                    onClick={handleOpenGithubFeedback}
-                  >
-                    {t.feedbackGithubBtn}
-                  </button>
-                </div>
-
-                <div className="feedback-list">
-                  {feedbacks.length === 0 ? (
-                    <div
-                      style={{
-                        fontSize: "9.5px",
-                        color: "#a1a1aa",
-                        textAlign: "center",
-                        padding: "4px",
-                      }}
-                    >
-                      {t.feedbackEmpty}
-                    </div>
-                  ) : (
-                    feedbacks.map((f) => (
-                      <div key={f.id} className="feedback-item">
-                        <div className="feedback-item-text">
-                          <b>
-                            {f.category === "bug"
-                              ? "🐛"
-                              : f.category === "feature"
-                                ? "💡"
-                                : "🎨"}
-                          </b>{" "}
-                          {f.message}
-                        </div>
-                        <button
-                          className="tag-icon-btn del-btn"
-                          onClick={() => handleDeleteFeedbackItem(f.id)}
-                          title={t.cancel}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div className="update-row">
-                <span>{t.versionLabel(appVersion)}</span>
-                {updateStatus.kind === "available" ? (
-                  <button className="primary-btn" onClick={handleInstallUpdate}>
-                    {t.installVersion(updateStatus.version)}
-                  </button>
-                ) : updateStatus.kind === "downloading" ? (
-                  <span>{t.updateDownloading(updateStatus.percent)}</span>
-                ) : (
-                  <button
-                    className="ghost-btn"
-                    disabled={updateStatus.kind === "checking"}
-                    onClick={handleCheckUpdate}
-                  >
-                    {updateStatus.kind === "checking"
-                      ? t.checkingUpdates
-                      : updateStatus.kind === "up-to-date"
-                        ? t.upToDate
-                        : updateStatus.kind === "error"
-                          ? t.checkErrorRetry
-                          : t.checkUpdates}
-                  </button>
-                )}
-              </div>
-              {updateStatus.kind === "error" && (
-                <div className="update-error" title={updateStatus.message}>
-                  {updateStatus.message}
-                </div>
-              )}
-
-              <div className="credits-bar">
-                Credits by <b>Elyas</b>
-              </div>
-            </>
+            <SettingsPage
+              t={t}
+              activeLang={activeLang}
+              langPref={langPref}
+              distractPenaltyMins={distractPenaltyMins}
+              alwaysOnTop={alwaysOnTop}
+              shortcuts={shortcuts}
+              shortcutStatus={shortcutStatus}
+              recordingShortcutFor={recordingShortcutFor}
+              studyPlans={studyPlans}
+              editingPlanId={editingPlanId}
+              theme={theme}
+              autoStartOn={autoStartOn}
+              sizeSavedFlash={sizeSavedFlash}
+              currentWinSize={currentWinSize}
+              feedbackCopied={feedbackCopied}
+              feedbackCat={feedbackCat}
+              feedbackText={feedbackText}
+              feedbacks={feedbacks}
+              appVersion={appVersion}
+              updateStatus={updateStatus}
+              getPlanDisplayName={getPlanDisplayName}
+              onOpenMenu={openMenu}
+              onLanguageChange={handleLanguageChange}
+              onPenaltyChange={handlePenaltyChange}
+              onToggleAlwaysOnTop={toggleAlwaysOnTop}
+              onResetShortcuts={handleResetShortcuts}
+              onSetRecordingShortcutFor={setRecordingShortcutFor}
+              onApplyShortcuts={handleApplyShortcuts}
+              onOpenQuickCapture={openQuickCaptureFromUi}
+              onResetPlansDefault={handleResetPlansDefault}
+              onSetEditingPlanId={setEditingPlanId}
+              onUpdatePlanField={handleUpdatePlanField}
+              onUpdateTheme={updateTheme}
+              onToggleAutoStart={toggleAutoStart}
+              onSaveCurrentWindowSize={handleSaveCurrentWindowSize}
+              onResetStandardSizes={handleResetStandardSizes}
+              onSetFeedbackCat={setFeedbackCat}
+              onSetFeedbackText={setFeedbackText}
+              onAddFeedbackItem={handleAddFeedbackItem}
+              onCopyAllFeedbacks={handleCopyAllFeedbacks}
+              onOpenGithubFeedback={handleOpenGithubFeedback}
+              onDeleteFeedbackItem={handleDeleteFeedbackItem}
+              onInstallUpdate={handleInstallUpdate}
+              onCheckUpdate={handleCheckUpdate}
+            />
           )}
 
-          {/* =================================================================
-              ÖZET SAYFASI
-             ================================================================= */}
           {page === "summary" && (
-            <>
-              <div className="top-bar">
-                <div className="top-bar-left" style={{ gap: "6px" }}>
-                  <span className="badge">⠿ {t.summary}</span>
-                  <div className="summary-tab-group">
-                    <button
-                      className={`tab-btn ${summaryTab === "timeline" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("timeline")}
-                    >
-                      {t.timelineTab}
-                    </button>
-                    <button
-                      className={`tab-btn ${summaryTab === "weekly" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("weekly")}
-                    >
-                      {t.viewWeekly}
-                    </button>
-                    <button
-                      className={`tab-btn ${summaryTab === "recent" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("recent")}
-                    >
-                      {t.viewRecentDays}
-                    </button>
-                    <button
-                      className={`tab-btn ${summaryTab === "parking" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("parking")}
-                      title={`${t.parkingTab} (${
-                        summaryParkingData.totalTasks +
-                        summaryParkingData.totalIdeas +
-                        summaryParkingData.totalScreenshots
-                      })`}
-                    >
-                      {t.parkingTab}
-                    </button>
-                    <button
-                      className={`tab-btn ${summaryTab === "story" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("story")}
-                      title={`${t.workStoryTitle} (${workStoryEntries.length})`}
-                    >
-                      📸 {t.workStoryTab}
-                    </button>
-                    <button
-                      className={`tab-btn ${summaryTab === "adhd" ? "active" : ""}`}
-                      onClick={() => setSummaryTab("adhd")}
-                    >
-                      {t.adhdTab}
-                    </button>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "4px" }}>
-                  <button
-                    className="ghost-btn"
-                    onClick={openDashboard}
-                    title={t.dashboardBtn}
-                  >
-                    📊 {t.dashboardBtn}
-                  </button>
-                  <button className="ghost-btn" onClick={openMenu}>
-                    ← {t.home}
-                  </button>
-                </div>
-              </div>
-
-              {showResetConfirm ? (
-                <div className="reset-confirm-box">
-                  <div className="reset-confirm-title">
-                    {t.resetConfirmTitle}
-                  </div>
-                  <div className="reset-confirm-desc">{t.resetConfirmDesc}</div>
-                  <div className="btn-row" style={{ marginTop: "8px" }}>
-                    <button className="warn-btn" onClick={handleResetAllData}>
-                      {t.resetConfirmYes}
-                    </button>
-                    <button onClick={() => setShowResetConfirm(false)}>
-                      {t.cancel}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* 24 SAATLİK ÇİZELGE GÖRÜNÜMÜ */}
-                  {summaryTab === "timeline" && (
-                    <>
-                      <div className="tooltip-banner">
-                        {hoveredTimelineItem ? (
-                          <>
-                            <span>
-                              <b>
-                                {hoveredTimelineItem.mode === "work"
-                                  ? t.work
-                                  : t.break}
-                              </b>
-                              :{" "}
-                              {hoveredTimelineItem.tag ||
-                                (hoveredTimelineItem.mode === "work"
-                                  ? t.work
-                                  : t.break)}
-                              {hoveredTimelineItem.reason
-                                ? ` (${hoveredTimelineItem.reason})`
-                                : ""}
-                            </span>
-                            <span>
-                              {hoveredTimelineItem.timeRangeLabel} •{" "}
-                              {t.formatDuration(
-                                hoveredTimelineItem.durationSec,
-                              )}
-                              {hoveredTimelineItem.overtimeSec > 0
-                                ? ` (+${Math.max(1, Math.round(hoveredTimelineItem.overtimeSec / 60))} ${activeLang === "tr" ? "dk" : "m"})`
-                                : ""}
-                            </span>
-                          </>
-                        ) : (
-                          <span>{t.summaryHoverHint}</span>
-                        )}
-                      </div>
-
-                      <div className="timeline-container">
-                        <div className="timeline-24h-wrapper">
-                          <div className="timeline-24h-track">
-                            {timelineSessions.map((s) => {
-                              const leftPct = (s.startHour / 24) * 100;
-                              const widthPct = Math.max(
-                                1.0,
-                                ((s.endHour - s.startHour) / 24) * 100,
-                              );
-                              const blockClass =
-                                s.mode === "work"
-                                  ? "work-block"
-                                  : s.overtimeSec > 0
-                                    ? "overtime-block"
-                                    : "break-block";
-                              return (
-                                <div
-                                  key={s.id}
-                                  className={`timeline-block ${blockClass}`}
-                                  style={{
-                                    left: `${leftPct}%`,
-                                    width: `${widthPct}%`,
-                                  }}
-                                  onMouseEnter={() => setHoveredTimelineItem(s)}
-                                  title={`${s.mode === "work" ? t.work : t.break}: ${s.timeRangeLabel} (${t.formatDuration(s.durationSec)})`}
-                                />
-                              );
-                            })}
-                          </div>
-                          <div className="timeline-hours-axis">
-                            <span>00:00</span>
-                            <span>04:00</span>
-                            <span>08:00</span>
-                            <span>12:00</span>
-                            <span>16:00</span>
-                            <span>20:00</span>
-                            <span>24:00</span>
-                          </div>
-                        </div>
-
-                        <div className="timeline-session-list">
-                          {timelineSessions.length > 0 ? (
-                            timelineSessions.map((s) => (
-                              <div
-                                key={s.id}
-                                className={`timeline-session-row ${
-                                  hoveredTimelineItem?.id === s.id
-                                    ? "active-row"
-                                    : ""
-                                }`}
-                                onMouseEnter={() => setHoveredTimelineItem(s)}
-                              >
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "6px",
-                                    minWidth: 0,
-                                    overflow: "hidden",
-                                  }}
-                                >
-                                  <span className="timeline-row-time">
-                                    {s.timeRangeLabel}
-                                  </span>
-                                  <span className="timeline-row-tag">
-                                    {s.mode === "work" ? "💼" : "☕"}{" "}
-                                    {s.tag ||
-                                      (s.mode === "work" ? t.work : t.break)}
-                                  </span>
-                                  {s.reason && (
-                                    <span
-                                      style={{
-                                        color: "#a1a1aa",
-                                        fontSize: "9px",
-                                        whiteSpace: "pre-wrap",
-                                        wordBreak: "break-word",
-                                      }}
-                                    >
-                                      ({s.reason})
-                                    </span>
-                                  )}
-                                  {s.overtimeSec > 0 ? (
-                                    <span className="overtime-badge">
-                                      +
-                                      {Math.max(
-                                        1,
-                                        Math.round(s.overtimeSec / 60),
-                                      )}
-                                      {activeLang === "tr" ? "dk" : "m"}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <span className="timeline-row-dur">
-                                  {t.formatDuration(s.durationSec)}
-                                </span>
-                              </div>
-                            ))
-                          ) : (
-                            <div
-                              style={{
-                                fontSize: "10px",
-                                color: "#a1a1aa",
-                                padding: "8px",
-                                textAlign: "center",
-                              }}
-                            >
-                              {t.noTimelineSessions}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* HAFTALIK ÖZET GÖRÜNÜMÜ */}
-                  {summaryTab === "weekly" && (
-                    <>
-                      <div className="weekly-stats-grid">
-                        <div className="stat-card">
-                          <div className="stat-val">
-                            {t.formatDuration(weeklySummary?.totalSec ?? 0)}
-                          </div>
-                          <div className="stat-lbl">{t.weeklyTotal}</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="stat-val">
-                            {t.formatDuration(weeklySummary?.dailyAvgSec ?? 0)}
-                          </div>
-                          <div className="stat-lbl">{t.weeklyDailyAvg}</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="stat-val">
-                            {summaryReasonsData?.avgDistractionsPerSession ?? 0}
-                          </div>
-                          <div className="stat-lbl">
-                            {t.avgDistractionsPerSession}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="tooltip-banner">
-                        {hoveredWeekDay ? (
-                          <>
-                            <span>
-                              <b>{hoveredWeekDay.shortLabel}</b> (
-                              {hoveredWeekDay.dateLabel}):{" "}
-                              {(hoveredWeekDay.total_sec / 3600).toFixed(1)}{" "}
-                              {activeLang === "tr" ? "sa" : "h"}
-                            </span>
-                            <span>
-                              {hoveredWeekDay.session_count}{" "}
-                              {t.sessions.toLowerCase()} •{" "}
-                              {t.formatDuration(hoveredWeekDay.total_sec)}
-                            </span>
-                          </>
-                        ) : (
-                          <span>{t.summaryHoverHint}</span>
-                        )}
-                      </div>
-
-                      <div className="chart-area">
-                        {weeklySummary?.days.map((d) => {
-                          const hours = d.total_sec / 3600;
-                          const heightPct = Math.max(
-                            6,
-                            (hours / maxWeeklyHours) * 85,
-                          );
-                          const isHovered =
-                            hoveredWeekDay?.dayIndex === d.dayIndex;
-                          return (
-                            <div
-                              key={d.dayIndex}
-                              className="bar-col"
-                              onMouseEnter={() => setHoveredWeekDay(d)}
-                            >
-                              <span className="bar-hours">
-                                {hours.toFixed(1)}
-                                {activeLang === "tr" ? "s" : "h"}
-                              </span>
-                              <div
-                                className={`bar-fill ${isHovered ? "active-bar" : ""}`}
-                                style={{
-                                  height: `${heightPct}%`,
-                                  borderColor: d.is_today
-                                    ? "#fbbf24"
-                                    : undefined,
-                                  borderWidth: d.is_today ? "1px" : "0",
-                                  borderStyle: "solid",
-                                }}
-                              />
-                              <span
-                                className="bar-label"
-                                style={{
-                                  color: d.is_today ? "#fbbf24" : undefined,
-                                  fontWeight: d.is_today ? 700 : undefined,
-                                }}
-                              >
-                                {d.shortLabel}
-                                {d.is_today ? "•" : ""}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-
-                  {/* SON GÜNLER GÖRÜNÜMÜ */}
-                  {summaryTab === "recent" && (
-                    <>
-                      <div
-                        className="tooltip-banner"
-                        style={{ marginTop: "6px" }}
-                      >
-                        {hoveredDay ? (
-                          (() => {
-                            const hours = (hoveredDay.total_sec / 3600).toFixed(
-                              1,
-                            );
-                            const avgMins =
-                              hoveredDay.session_count > 0
-                                ? Math.round(
-                                    hoveredDay.total_sec /
-                                      hoveredDay.session_count /
-                                      60,
-                                  )
-                                : 0;
-                            const details = t.summaryBarDetails(
-                              hoveredDay.label,
-                              hours,
-                              hoveredDay.session_count,
-                              avgMins,
-                            );
-                            return (
-                              <>
-                                <span>
-                                  <b>{details.main}</b>
-                                </span>
-                                <span>{details.sub}</span>
-                              </>
-                            );
-                          })()
-                        ) : (
-                          <span>{t.summaryHoverHint}</span>
-                        )}
-                      </div>
-
-                      <div className="chart-area">
-                        {summaryDays.map((d) => {
-                          const hours = d.total_sec / 3600;
-                          const heightPct = Math.max(
-                            6,
-                            (hours / maxRecentHours) * 85,
-                          );
-                          return (
-                            <div
-                              key={d.id}
-                              className="bar-col"
-                              onMouseEnter={() => setHoveredDay(d)}
-                            >
-                              <span className="bar-hours">
-                                {hours.toFixed(1)}
-                                {activeLang === "tr" ? "s" : "h"}
-                              </span>
-                              <div
-                                className={`bar-fill ${hoveredDay?.id === d.id ? "active-bar" : ""}`}
-                                style={{ height: `${heightPct}%` }}
-                              />
-                              <span className="bar-label">
-                                {d.is_active ? `${d.label}*` : d.label}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-
-                  {/* ADHD ÖZ-FARKINDALIK (SELF-REALIZATION) GÖRÜNÜMÜ */}
-                  {summaryTab === "adhd" && (
-                    <div className="adhd-insights-wrap">
-                      <div className="adhd-cards-grid">
-                        <div className="adhd-card">
-                          <div className="adhd-card-title">
-                            ⏱ {t.adhdFocusThresholdTitle}
-                          </div>
-                          <div className="adhd-card-desc">
-                            {t.adhdFocusThresholdDesc(
-                              adhdInsights?.avgFocusThresholdMins ?? null,
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="adhd-card">
-                          <div className="adhd-card-title">
-                            🧭 {t.adhdTriggerRatioTitle}
-                          </div>
-                          <div className="adhd-card-desc">
-                            {t.adhdTriggerRatioDesc(
-                              adhdInsights?.internalPct ?? 50,
-                              adhdInsights?.internalCount ?? 0,
-                              adhdInsights?.externalCount ?? 0,
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="adhd-card">
-                          <div className="adhd-card-title">
-                            ⏳ {t.adhdTransitionTitle}
-                          </div>
-                          <div className="adhd-card-desc">
-                            {t.adhdTransitionDesc(
-                              adhdInsights?.avgBreakOvertimeMins ?? 0,
-                              adhdInsights?.overtimeBreakRatePct ?? 0,
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="adhd-card">
-                          <div className="adhd-card-title">
-                            🔥 {t.adhdCompletionTitle}
-                          </div>
-                          <div className="adhd-card-desc">
-                            {t.adhdCompletionDesc(
-                              adhdInsights?.completionRatePct ?? 100,
-                              adhdInsights?.hyperfocusCount ?? 0,
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="adhd-card full">
-                          <div className="adhd-card-title">
-                            🌅 {t.adhdChronoTitle}
-                          </div>
-                          <div className="adhd-card-desc">
-                            {t.adhdChronoDesc(
-                              adhdInsights?.peakFocusHoursLabel ?? null,
-                              adhdInsights?.mostDistractedHoursLabel ?? null,
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="adhd-tip-box">
-                        {t.adhdDynamicTip(
-                          adhdInsights?.avgFocusThresholdMins ?? null,
-                          adhdInsights?.internalPct ?? 50,
-                          adhdInsights?.overtimeBreakRatePct ?? 0,
-                          adhdInsights?.topTriggerTag ?? null,
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* MOLA & FİKİR OTOPARKI GÖRÜNÜMÜ (Ekleme Sırasıyla Görevler & Önemli/Önemsiz Fikirler + SS Notları) */}
-                  {summaryTab === "parking" && (
-                    <div className="parking-panel summary-parking no-drag">
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <span className="parking-banner-title">
-                          {t.parkingTab} (
-                          {summaryParkingData.totalTasks +
-                            summaryParkingData.totalIdeas +
-                            summaryParkingData.totalScreenshots}
-                          )
-                        </span>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={toggleFreqFilter}
-                          title={freqOnlyToday ? t.filterToday : t.filterAll}
-                        >
-                          {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                        </button>
-                      </div>
-                      {renderParkingLotContent(summaryParkingData, false)}
-                    </div>
-                  )}
-
-                  {/* ÇALIŞMA HİKAYESİ GÖRÜNÜMÜ (5dk Periyodik SS'ler & Dağılma SS Notları) */}
-                  {summaryTab === "story" && (
-                    <div className="parking-panel summary-parking no-drag">
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: "6px",
-                        }}
-                      >
-                        <span className="parking-banner-title">
-                          📸 {t.workStoryTitle} ({workStoryEntries.length})
-                        </span>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={toggleFreqFilter}
-                          title={freqOnlyToday ? t.filterToday : t.filterAll}
-                        >
-                          {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                        </button>
-                      </div>
-                      {workStoryEntries.length === 0 ? (
-                        <div
-                          style={{
-                            fontSize: "10px",
-                            color: "#a1a1aa",
-                            textAlign: "center",
-                            padding: "12px",
-                          }}
-                        >
-                          {t.workStoryEmpty}
-                        </div>
-                      ) : (
-                        <div className="work-story-grid">
-                          {workStoryEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="work-story-card"
-                              onClick={() => setLightboxEntry(entry)}
-                            >
-                              <img
-                                src={entry.screenshot_data || ""}
-                                alt="screenshot"
-                                className="work-story-thumb"
-                                loading="lazy"
-                              />
-                              <div className="work-story-meta">
-                                <span className="work-story-time">
-                                  {entry.created_at.slice(11, 16)} •{" "}
-                                  {entry.entry_type === "periodic"
-                                    ? "⏱ 5dk"
-                                    : "📸 SS"}
-                                </span>
-                                {entry.active_app && (
-                                  <span
-                                    className="work-story-app"
-                                    title={
-                                      entry.active_window || entry.active_app
-                                    }
-                                  >
-                                    🌐 {entry.active_app}
-                                  </span>
-                                )}
-                                {entry.context_text && (
-                                  <span
-                                    className="work-story-ctx"
-                                    title={entry.context_text}
-                                  >
-                                    🎯 {entry.context_text}
-                                  </span>
-                                )}
-                                {entry.note && (
-                                  <span
-                                    className="work-story-note"
-                                    title={entry.note}
-                                  >
-                                    {entry.note}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* KOMPAKT KATEGORİ KIRILIMI (Üzerine gelince detaylı açıklama) */}
-                  <div className="summary-subtabs">
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "work" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("work")}
-                      title={t.workTagsTab}
-                    >
-                      💼 {t.workTagsShortTab} (
-                      {summaryReasonsData?.totalWorkSubjects ?? 0})
-                    </button>
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "contexts" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("contexts")}
-                      title={t.contextFullTab}
-                    >
-                      🎯 {t.contextShortTab} ({contextStats.length})
-                    </button>
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "apps" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("apps")}
-                      title={t.appsFullTab}
-                    >
-                      🌐 {t.appsShortTab} (
-                      {appDistractions.reduce(
-                        (acc, g) => acc + g.totalCount,
-                        0,
-                      )}
-                      )
-                    </button>
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "distractions" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("distractions")}
-                      title={t.distractionReasonsTab}
-                    >
-                      ⚡ {t.distractionShortTab} (
-                      {summaryReasonsData?.totalDistractions ?? 0})
-                    </button>
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "overtime" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("overtime")}
-                      title={t.breakOvertimeTab}
-                    >
-                      ⏰ {t.breakOvertimeShortTab} (
-                      {summaryReasonsData?.totalBreakOvertimes ?? 0})
-                    </button>
-                    <button
-                      className={`subtab-btn ${summaryReasonsTab === "endings" ? "active" : ""}`}
-                      onClick={() => setSummaryReasonsTab("endings")}
-                      title={t.endingReasonsTab}
-                    >
-                      ⏹ {t.endingShortTab} (
-                      {summaryReasonsData?.totalEndings ?? 0})
-                    </button>
-                    <button
-                      className="ghost-btn"
-                      onClick={toggleFreqFilter}
-                      title={freqOnlyToday ? t.filterToday : t.filterAll}
-                    >
-                      {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                    </button>
-                  </div>
-
-                  <div className="accordion-list">
-                    {(() => {
-                      if (summaryReasonsTab === "contexts") {
-                        if (contextStats.length === 0) {
-                          return (
-                            <div
-                              style={{
-                                fontSize: "10px",
-                                color: "#a1a1aa",
-                                padding: "6px",
-                              }}
-                            >
-                              {t.noContextStats}
-                            </div>
-                          );
-                        }
-                        return contextStats.map((ctx) => {
-                          const expandKey = `ctx:${ctx.contextText}`;
-                          const isExpanded = !!expandedTags[expandKey];
-                          return (
-                            <div
-                              key={ctx.contextText}
-                              className="accordion-card"
-                            >
-                              <div
-                                className="accordion-header"
-                                onClick={() => toggleAccordionTag(expandKey)}
-                              >
-                                <div
-                                  className="accordion-title"
-                                  style={{ minWidth: 0, overflow: "hidden" }}
-                                >
-                                  <span className="accordion-arrow">
-                                    {isExpanded ? "▼" : "▶"}
-                                  </span>
-                                  <span
-                                    style={{
-                                      whiteSpace: "nowrap",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                    }}
-                                  >
-                                    🎯 {ctx.contextText}
-                                  </span>
-                                </div>
-                                <span
-                                  className="accordion-count"
-                                  style={{ flexShrink: 0 }}
-                                >
-                                  {t.formatDuration(ctx.totalDurationSec)} • ⚡
-                                  {ctx.distractionCount}
-                                </span>
-                              </div>
-                              {isExpanded && (
-                                <div className="accordion-body">
-                                  {ctx.lastWorkTag && (
-                                    <div className="explanation-row">
-                                      <span className="explanation-text">
-                                        💼 {ctx.lastWorkTag}
-                                      </span>
-                                      <span className="explanation-badge">
-                                        {ctx.entryCount}x
-                                      </span>
-                                    </div>
-                                  )}
-                                  {ctx.topApp && (
-                                    <div className="explanation-row">
-                                      <span className="explanation-text">
-                                        🌐 {ctx.topApp}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        });
-                      }
-
-                      if (summaryReasonsTab === "apps") {
-                        const totalAppDist = appDistractions.reduce(
-                          (acc, g) => acc + g.totalCount,
-                          0,
-                        );
-                        if (appDistractions.length === 0) {
-                          return (
-                            <div
-                              style={{
-                                fontSize: "10px",
-                                color: "#a1a1aa",
-                                padding: "6px",
-                              }}
-                            >
-                              {t.noAppDistractions}
-                            </div>
-                          );
-                        }
-                        return appDistractions.map((grp) => {
-                          const expandKey = `app:${grp.appName}`;
-                          const isExpanded = !!expandedTags[expandKey];
-                          const pct =
-                            totalAppDist > 0
-                              ? Math.round(
-                                  (grp.totalCount / totalAppDist) * 100,
-                                )
-                              : 0;
-                          return (
-                            <div key={grp.appName} className="accordion-card">
-                              <div
-                                className="accordion-header"
-                                onClick={() => toggleAccordionTag(expandKey)}
-                              >
-                                <div className="accordion-title">
-                                  <span className="accordion-arrow">
-                                    {isExpanded ? "▼" : "▶"}
-                                  </span>
-                                  <span>🌐 {grp.appName}</span>
-                                </div>
-                                <span className="accordion-count">
-                                  {t.timesCount(grp.totalCount, pct)}
-                                </span>
-                              </div>
-                              {isExpanded && (
-                                <div className="accordion-body">
-                                  {grp.details.map((d, idx) => (
-                                    <div key={idx} className="explanation-row">
-                                      <span className="explanation-text">
-                                        <span className="explanation-bullet">
-                                          •
-                                        </span>
-                                        {d.windowTitle && (
-                                          <>
-                                            <b>{d.windowTitle}</b>
-                                            {" — "}
-                                          </>
-                                        )}
-                                        <span style={{ color: "#fbbf24" }}>
-                                          [{t.catKeyHints[d.category]}]
-                                        </span>{" "}
-                                        {d.reason}
-                                        {d.contextText
-                                          ? ` (🎯 ${d.contextText})`
-                                          : ""}
-                                      </span>
-                                      <span className="explanation-badge">
-                                        {d.count}x
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        });
-                      }
-
-                      const activeList =
-                        summaryReasonsTab === "work"
-                          ? summaryReasonsData?.workTags ?? []
-                          : summaryReasonsTab === "overtime"
-                            ? summaryReasonsData?.breakOvertimeTags ?? []
-                            : summaryReasonsTab === "distractions"
-                              ? summaryReasonsData?.distractionTags ?? []
-                              : summaryReasonsData?.endingTags ?? [];
-                      const totalCount =
-                        summaryReasonsTab === "work"
-                          ? summaryReasonsData?.totalWorkSubjects ?? 0
-                          : summaryReasonsTab === "overtime"
-                            ? summaryReasonsData?.totalBreakOvertimes ?? 0
-                            : summaryReasonsTab === "distractions"
-                              ? summaryReasonsData?.totalDistractions ?? 0
-                              : summaryReasonsData?.totalEndings ?? 0;
-                      const emptyMsg =
-                        summaryReasonsTab === "work"
-                          ? activeLang === "tr"
-                            ? "Henüz çalışma konusu kaydedilmedi."
-                            : "No work topics recorded yet."
-                          : summaryReasonsTab === "overtime"
-                            ? activeLang === "tr"
-                              ? "Henüz mola gecikmesi kaydedilmedi."
-                              : "No break overtime recorded yet."
-                            : summaryReasonsTab === "distractions"
-                              ? t.noDistractions
-                              : t.noEndingReasons;
-
-                      if (activeList.length === 0) {
-                        return (
-                          <div
-                            style={{
-                              fontSize: "10px",
-                              color: "#a1a1aa",
-                              padding: "6px",
-                            }}
-                          >
-                            {emptyMsg}
-                          </div>
-                        );
-                      }
-
-                      return activeList.map((item) => {
-                        const expandKey = `${summaryReasonsTab}:${item.tag}`;
-                        const isExpanded = !!expandedTags[expandKey];
-                        const pct =
-                          totalCount > 0
-                            ? Math.round((item.count / totalCount) * 100)
-                            : 0;
-                        return (
-                          <div key={item.tag} className="accordion-card">
-                            <div
-                              className="accordion-header"
-                              onClick={() => toggleAccordionTag(expandKey)}
-                            >
-                              <div className="accordion-title">
-                                <span className="accordion-arrow">
-                                  {isExpanded ? "▼" : "▶"}
-                                </span>
-                                <span>{item.tag}</span>
-                              </div>
-                              <span className="accordion-count">
-                                {t.timesCount(item.count, pct)}
-                              </span>
-                            </div>
-                            {isExpanded && (
-                              <div className="accordion-body">
-                                {item.explanations.map((exp, idx) => (
-                                  <div key={idx} className="explanation-row">
-                                    <span className="explanation-text">
-                                      <span className="explanation-bullet">
-                                        •
-                                      </span>
-                                      {exp.reason}
-                                    </span>
-                                    <span className="explanation-badge">
-                                      {exp.count}x
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-
-                  {/* VERİLERİ SIFIRLAMA & DIŞA AKTARMA BUTONLARI */}
-                  <div
-                    className="summary-bottom-row"
-                    style={{ justifyContent: "space-between" }}
-                  >
-                    <button
-                      className="ghost-btn"
-                      onClick={handleExportData}
-                      title={t.exportDataBtn}
-                    >
-                      {t.exportDataBtn}
-                    </button>
-                    <button
-                      className="ghost-btn reset-data-btn"
-                      onClick={() => setShowResetConfirm(true)}
-                    >
-                      🗑 {t.resetAllData}
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
+            <SummaryPage
+              t={t}
+              activeLang={activeLang}
+              summaryTab={summaryTab}
+              summaryReasonsTab={summaryReasonsTab}
+              summaryParkingData={summaryParkingData}
+              workStoryEntries={workStoryEntries}
+              showResetConfirm={showResetConfirm}
+              hoveredTimelineItem={hoveredTimelineItem}
+              timelineSessions={timelineSessions}
+              weeklySummary={weeklySummary}
+              summaryReasonsData={summaryReasonsData}
+              hoveredWeekDay={hoveredWeekDay}
+              maxWeeklyHours={maxWeeklyHours}
+              hoveredDay={hoveredDay}
+              summaryDays={summaryDays}
+              maxRecentHours={maxRecentHours}
+              adhdInsights={adhdInsights}
+              freqOnlyToday={freqOnlyToday}
+              docsStatusMsg={docsStatusMsg}
+              contextStats={contextStats}
+              appDistractions={appDistractions}
+              expandedTags={expandedTags}
+              onSetSummaryTab={setSummaryTab}
+              onSetSummaryReasonsTab={setSummaryReasonsTab}
+              onOpenDashboard={openDashboard}
+              onOpenMenu={openMenu}
+              onSetShowResetConfirm={setShowResetConfirm}
+              onResetAllData={handleResetAllData}
+              onSetHoveredTimelineItem={setHoveredTimelineItem}
+              onSetHoveredWeekDay={setHoveredWeekDay}
+              onSetHoveredDay={setHoveredDay}
+              onToggleFreqFilter={toggleFreqFilter}
+              onSyncParkingToDocs={handleSyncParkingToDocs}
+              onSyncSingleItemToDocs={handleSyncSingleItemToDocs}
+              onToggleParkingTask={handleToggleParkingTask}
+              onRateParkingIdea={handleRateParkingIdea}
+              onDeleteParkingEntry={handleDeleteParkingEntry}
+              onOpenLightbox={setLightboxEntry}
+              onToggleAccordionTag={toggleAccordionTag}
+              onExportData={handleExportData}
+            />
           )}
 
-          {/* =================================================================
-              DASHBOARD SAYFASI (Google Auth, Bulut Senkronizasyonu, Detaylı Görselleştirme,
-              Yapılan/Yapılmayan Görevler, Fikirler ve Çalışma Hikayesi)
-             ================================================================= */}
           {page === "dashboard" && (
-            <div className="dashboard-container">
-              <div className="top-bar">
-                <div className="top-bar-left" style={{ gap: "6px" }}>
-                  <span className="badge">📊 {t.dashboardTitle}</span>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={toggleFreqFilter}
-                    title={freqOnlyToday ? t.filterToday : t.filterAll}
-                  >
-                    {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                  </button>
-                </div>
-                <div className="top-bar-right">
-                  <button
-                    className="ghost-btn"
-                    onClick={openSummary}
-                    title={t.summaryTitle}
-                  >
-                    📈 {t.summary}
-                  </button>
-                  <button className="ghost-btn" onClick={openMenu}>
-                    ← {t.home}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title={t.miniDockTooltip}
-                    onClick={enterMiniDock}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              <div className="dashboard-scroll">
-                {/* BULUT VE GOOGLE AUTH ÇUBUĞU */}
-                <div className="cloud-auth-bar">
-                  {cloudAuth.email ? (
-                    <div className="cloud-auth-logged">
-                      <div className="cloud-user-meta">
-                        <span className="cloud-online-dot" />
-                        <span className="cloud-user-name">
-                          🟢 <b>{cloudAuth.email}</b>
-                          {cloudAuth.name ? ` (${cloudAuth.name})` : ""}
-                        </span>
-                        <span className="cloud-sync-meta">
-                          {isOnline ? "🌐 Online" : "📴 Offline"} •{" "}
-                          {t.pendingSyncQueueBadge(pendingSyncCount)}
-                          {cloudAuth.lastSyncAt && (
-                            <>
-                              {" "}
-                              • {t.lastSyncLabel}:{" "}
-                              {cloudAuth.lastSyncAt.slice(11, 16)}
-                            </>
-                          )}
-                        </span>
-                      </div>
-                      <div className="cloud-auth-actions">
-                        {syncStatusMsg && (
-                          <span className="docs-status-pill">
-                            {syncStatusMsg}
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          className="docs-sync-btn"
-                          onClick={() => {
-                            const url = cloudAuth.googleDocUrl || "https://docs.google.com/";
-                            openUrl(url).catch(() => window.open(url, "_blank"));
-                          }}
-                          title={t.googleDocUrlHint}
-                        >
-                          {t.openGoogleDocBtn}
-                        </button>
-                        <button
-                          type="button"
-                          className="primary-btn"
-                          disabled={isSyncingCloud}
-                          onClick={handleManualCloudSync}
-                        >
-                          🔄{" "}
-                          {isSyncingCloud ? t.syncRunning : t.manualSyncBtn}
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={handleGoogleSignOut}
-                        >
-                          {t.cloudAuthSignOut}
-                        </button>
-                      </div>
-                      <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "6px" }}>
-                        <input
-                          type="password"
-                          className="cloud-input"
-                          style={{ flex: 1 }}
-                          placeholder={t.cloudTokenPlaceholder}
-                          value={cloudTokenInput}
-                          onChange={(e) => setCloudTokenInput(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={async () => {
-                            const nextAuth = { ...cloudAuth, accessToken: cloudTokenInput.trim() };
-                            await saveCloudAuthState(nextAuth);
-                            setCloudAuth(nextAuth);
-                            setSyncStatusMsg("Google Token kaydedildi!");
-                            setTimeout(() => setSyncStatusMsg(null), 3000);
-                          }}
-                        >
-                          💾 Token Kaydet
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="cloud-auth-signin-box">
-                      <div className="cloud-signin-header">
-                        <span style={{ fontWeight: 600, fontSize: "11px" }}>
-                          ☁️ {t.cloudAuthTitle}
-                        </span>
-                        <span className="cloud-sync-meta">
-                          {isOnline ? "🌐 Çevrimiçi" : "📴 Çevrimdışı (Kuyruk Aktif)"} •{" "}
-                          {t.pendingSyncQueueBadge(pendingSyncCount)}
-                        </span>
-                      </div>
-                      <div className="cloud-signin-fields">
-                        <input
-                          type="email"
-                          className="cloud-input"
-                          placeholder={t.cloudEmailPlaceholder}
-                          value={cloudEmailInput}
-                          onChange={(e) => setCloudEmailInput(e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          className="cloud-input"
-                          placeholder={t.cloudNamePlaceholder}
-                          value={cloudNameInput}
-                          onChange={(e) => setCloudNameInput(e.target.value)}
-                        />
-                        <input
-                          type="password"
-                          className="cloud-input"
-                          placeholder={t.cloudTokenPlaceholder}
-                          value={cloudTokenInput}
-                          onChange={(e) => setCloudTokenInput(e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          className="cloud-input"
-                          placeholder={t.cloudServerPlaceholder}
-                          value={cloudServerInput}
-                          onChange={(e) => setCloudServerInput(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="primary-btn"
-                          onClick={handleGoogleSignIn}
-                        >
-                          {t.cloudAuthSignIn}
-                        </button>
-                      </div>
-                      <div style={{ fontSize: "9px", color: "#a1a1aa", marginTop: "2px" }}>
-                        {t.cloudAuthHint}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* KPI KARTLARI */}
-                <div className="dashboard-kpi-grid">
-                  <div className="stat-card">
-                    <div className="stat-val">
-                      {t.formatDuration(dayStats.totalSec)}
-                    </div>
-                    <div className="stat-lbl">{t.totalWork}</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-val">{dayStats.sessionCount}</div>
-                    <div className="stat-lbl">{t.sessions}</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-val">
-                      {summaryParkingData.pendingTasks.length}
-                    </div>
-                    <div className="stat-lbl">
-                      {t.dashboardUnfinishedTasks}
-                    </div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="stat-val">
-                      {summaryParkingData.doneTasks.length}
-                    </div>
-                    <div className="stat-lbl">{t.dashboardFinishedTasks}</div>
-                  </div>
-                </div>
-
-                {/* ÇİFT KOLONLU GÖSTERGE ALANI */}
-                <div className="dashboard-split-grid">
-                  {/* SOL KOLON: GÖREVLER & FİKİRLER */}
-                  <div className="dashboard-col">
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          ⏳ {t.dashboardUnfinishedTasks} (
-                          {summaryParkingData.pendingTasks.length})
-                        </span>
-                        <button
-                          type="button"
-                          className="docs-sync-btn"
-                          onClick={handleSyncParkingToKeep}
-                          title={t.docsSyncAllBtn}
-                        >
-                          📄 Docs
-                        </button>
-                      </div>
-                      <div className="dashboard-list">
-                        {summaryParkingData.pendingTasks.length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noUnfinishedTasks}
-                          </div>
-                        ) : (
-                          summaryParkingData.pendingTasks.map((it) => (
-                            <div
-                              key={it.id}
-                              className="parking-todo-row"
-                              title={renderParkingItemTooltip(it)}
-                            >
-                              <label className="parking-todo-left">
-                                <input
-                                  type="checkbox"
-                                  checked={false}
-                                  onChange={() =>
-                                    handleToggleParkingTask(it.id, true)
-                                  }
-                                />
-                                <span className="parking-todo-text">
-                                  {it.content}
-                                </span>
-                              </label>
-                              <div className="parking-row-right">
-                                <button
-                                  type="button"
-                                  className={`docs-chip-btn ${
-                                    it.keep_synced ? "synced" : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleSyncSingleItemToKeep(it)
-                                  }
-                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-                                >
-                                  {it.keep_synced ? "✓" : "📄"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="tag-icon-btn del-btn"
-                                  onClick={() =>
-                                    handleDeleteParkingEntry(it.id)
-                                  }
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          ✅ {t.dashboardFinishedTasks} (
-                          {summaryParkingData.doneTasks.length})
-                        </span>
-                      </div>
-                      <div className="dashboard-list">
-                        {summaryParkingData.doneTasks.length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noFinishedTasks}
-                          </div>
-                        ) : (
-                          summaryParkingData.doneTasks.map((it) => (
-                            <div
-                              key={it.id}
-                              className="parking-todo-row"
-                              title={renderParkingItemTooltip(it)}
-                            >
-                              <label className="parking-todo-left">
-                                <input
-                                  type="checkbox"
-                                  checked={true}
-                                  onChange={() =>
-                                    handleToggleParkingTask(it.id, false)
-                                  }
-                                />
-                                <span className="parking-todo-text done">
-                                  {it.content}
-                                </span>
-                              </label>
-                              <div className="parking-row-right">
-                                <button
-                                  type="button"
-                                  className={`docs-chip-btn ${
-                                    it.keep_synced ? "synced" : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleSyncSingleItemToKeep(it)
-                                  }
-                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-                                >
-                                  {it.keep_synced ? "✓" : "📄"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="tag-icon-btn del-btn"
-                                  onClick={() =>
-                                    handleDeleteParkingEntry(it.id)
-                                  }
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          ⭐ {t.dashboardImportantIdeas} (
-                          {summaryParkingData.importantIdeas.length})
-                        </span>
-                      </div>
-                      <div className="dashboard-list">
-                        {summaryParkingData.importantIdeas.length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noImportantIdeas}
-                          </div>
-                        ) : (
-                          summaryParkingData.importantIdeas.map((it) => (
-                            <div
-                              key={it.id}
-                              className="parking-idea-row"
-                              title={renderParkingItemTooltip(it)}
-                            >
-                              <span className="parking-todo-text">
-                                {it.content}
-                              </span>
-                              <div className="parking-idea-actions">
-                                <button
-                                  type="button"
-                                  className="idea-rate-btn active-imp"
-                                  onClick={() =>
-                                    handleRateParkingIdea(it.id, "unrated")
-                                  }
-                                >
-                                  {t.parkingMarkImportant}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`docs-chip-btn ${
-                                    it.keep_synced ? "synced" : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleSyncSingleItemToKeep(it)
-                                  }
-                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-                                >
-                                  {it.keep_synced ? "✓" : "📄"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="tag-icon-btn del-btn"
-                                  onClick={() =>
-                                    handleDeleteParkingEntry(it.id)
-                                  }
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          💤 {t.dashboardUnimportantIdeas} (
-                          {summaryParkingData.unimportantIdeas.length +
-                            summaryParkingData.unratedIdeas.length}
-                          )
-                        </span>
-                      </div>
-                      <div className="dashboard-list">
-                        {[
-                          ...summaryParkingData.unratedIdeas,
-                          ...summaryParkingData.unimportantIdeas,
-                        ].length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noUnimportantIdeas}
-                          </div>
-                        ) : (
-                          [
-                            ...summaryParkingData.unratedIdeas,
-                            ...summaryParkingData.unimportantIdeas,
-                          ].map((it) => (
-                            <div
-                              key={it.id}
-                              className="parking-idea-row"
-                              title={renderParkingItemTooltip(it)}
-                            >
-                              <span className="parking-todo-text">
-                                {it.content}
-                              </span>
-                              <div className="parking-idea-actions">
-                                <button
-                                  type="button"
-                                  className={`idea-rate-btn ${
-                                    it.status === "important"
-                                      ? "active-imp"
-                                      : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleRateParkingIdea(it.id, "important")
-                                  }
-                                >
-                                  {t.parkingMarkImportant}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`docs-chip-btn ${
-                                    it.keep_synced ? "synced" : ""
-                                  }`}
-                                  onClick={() =>
-                                    handleSyncSingleItemToKeep(it)
-                                  }
-                                  title={it.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-                                >
-                                  {it.keep_synced ? "✓" : "📄"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="tag-icon-btn del-btn"
-                                  onClick={() =>
-                                    handleDeleteParkingEntry(it.id)
-                                  }
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* SAĞ KOLON: ÇALIŞMA HİKAYESİ & MEŞGULİYET / SEKME ANALİZİ */}
-                  <div className="dashboard-col">
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          📸 {t.workStoryTitle} ({workStoryEntries.length})
-                        </span>
-                        <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
-                          {t.workStoryDesc}
-                        </span>
-                      </div>
-                      {workStoryEntries.length === 0 ? (
-                        <div className="dashboard-empty-msg">
-                          {t.workStoryEmpty}
-                        </div>
-                      ) : (
-                        <div className="work-story-grid">
-                          {workStoryEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="work-story-card"
-                              onClick={() => setLightboxEntry(entry)}
-                            >
-                              <img
-                                src={entry.screenshot_data || ""}
-                                alt="screenshot"
-                                className="work-story-thumb"
-                                loading="lazy"
-                              />
-                              <div className="work-story-meta">
-                                <span className="work-story-time">
-                                  {entry.created_at.slice(11, 16)} •{" "}
-                                  {entry.entry_type === "periodic"
-                                    ? "⏱ 5dk"
-                                    : "📸 SS"}
-                                </span>
-                                {entry.active_app && (
-                                  <span
-                                    className="work-story-app"
-                                    title={
-                                      entry.active_window || entry.active_app
-                                    }
-                                  >
-                                    🌐 {entry.active_app}
-                                  </span>
-                                )}
-                                {entry.context_text && (
-                                  <span
-                                    className="work-story-ctx"
-                                    title={entry.context_text}
-                                  >
-                                    🎯 {entry.context_text}
-                                  </span>
-                                )}
-                                {entry.note && (
-                                  <span
-                                    className="work-story-note"
-                                    title={entry.note}
-                                  >
-                                    {entry.note}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          🎯 {t.contextStatsTitle} ({contextStats.length})
-                        </span>
-                      </div>
-                      <div className="dashboard-list">
-                        {contextStats.length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noContextStats}
-                          </div>
-                        ) : (
-                          contextStats.map((ctx) => (
-                            <div
-                              key={ctx.contextText}
-                              className="dashboard-stat-row"
-                            >
-                              <div className="dashboard-stat-main">
-                                <span style={{ fontWeight: 600 }}>
-                                  🎯 {ctx.contextText}
-                                </span>
-                                <span className="dashboard-stat-sub">
-                                  {ctx.lastWorkTag && `💼 ${ctx.lastWorkTag} `}
-                                  {ctx.topApp && `• 🌐 ${ctx.topApp}`}
-                                </span>
-                              </div>
-                              <span className="dashboard-stat-badge">
-                                {t.formatDuration(ctx.totalDurationSec)} • ⚡
-                                {ctx.distractionCount}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="dashboard-section-card">
-                      <div className="dashboard-section-header">
-                        <span className="dashboard-card-title">
-                          🌐 {t.appDistractionTitle} (
-                          {appDistractions.reduce(
-                            (acc, g) => acc + g.totalCount,
-                            0,
-                          )}
-                          )
-                        </span>
-                      </div>
-                      <div className="dashboard-list">
-                        {appDistractions.length === 0 ? (
-                          <div className="dashboard-empty-msg">
-                            {t.noAppDistractions}
-                          </div>
-                        ) : (
-                          appDistractions.map((grp) => (
-                            <div
-                              key={grp.appName}
-                              className="dashboard-stat-row"
-                            >
-                              <div className="dashboard-stat-main">
-                                <span style={{ fontWeight: 600 }}>
-                                  🌐 {grp.appName}
-                                </span>
-                                {grp.details[0]?.windowTitle && (
-                                  <span className="dashboard-stat-sub">
-                                    {grp.details[0].windowTitle}
-                                  </span>
-                                )}
-                              </div>
-                              <span className="dashboard-stat-badge">
-                                {grp.totalCount}x
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <DashboardPage
+              t={t}
+              freqOnlyToday={freqOnlyToday}
+              cloudAuth={cloudAuth}
+              isOnline={isOnline}
+              pendingSyncCount={pendingSyncCount}
+              syncStatusMsg={syncStatusMsg}
+              isSyncingCloud={isSyncingCloud}
+              cloudEmailInput={cloudEmailInput}
+              cloudNameInput={cloudNameInput}
+              cloudTokenInput={cloudTokenInput}
+              cloudServerInput={cloudServerInput}
+              dayStats={dayStats}
+              summaryParkingData={summaryParkingData}
+              workStoryEntries={workStoryEntries}
+              contextStats={contextStats}
+              appDistractions={appDistractions}
+              onToggleFreqFilter={toggleFreqFilter}
+              onOpenSummary={openSummary}
+              onOpenMenu={openMenu}
+              onEnterMiniDock={enterMiniDock}
+              onManualCloudSync={handleManualCloudSync}
+              onGoogleSignOut={handleGoogleSignOut}
+              onGoogleSignIn={handleGoogleSignIn}
+              onSaveCloudToken={handleSaveCloudToken}
+              onSetCloudEmailInput={setCloudEmailInput}
+              onSetCloudNameInput={setCloudNameInput}
+              onSetCloudTokenInput={setCloudTokenInput}
+              onSetCloudServerInput={setCloudServerInput}
+              onSyncParkingToDocs={handleSyncParkingToDocs}
+              onSyncSingleItemToDocs={handleSyncSingleItemToDocs}
+              onToggleParkingTask={handleToggleParkingTask}
+              onRateParkingIdea={handleRateParkingIdea}
+              onDeleteParkingEntry={handleDeleteParkingEntry}
+              onOpenLightbox={setLightboxEntry}
+            />
           )}
 
-          {/* EKRAN GÖRÜNTÜSÜ BÜYÜTÜCÜ MODAL (LIGHTBOX) */}
           {lightboxEntry && (
-            <div
-              className="lightbox-overlay no-drag"
-              onClick={() => setLightboxEntry(null)}
-            >
-              <div
-                className="lightbox-content"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="lightbox-header">
-                  <span className="lightbox-title">
-                    📸{" "}
-                    {lightboxEntry.entry_type === "periodic"
-                      ? "5dk Periyodik Ekran Kaydı"
-                      : "📸 Ekran Alıntısı Notu"}{" "}
-                    • {lightboxEntry.created_at.replace("T", " ").slice(0, 16)}
-                  </span>
-                  <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                    <button
-                      type="button"
-                      className="tag-icon-btn del-btn"
-                      onClick={async () => {
-                        await deleteWorkStoryEntry(lightboxEntry.id);
-                        setLightboxEntry(null);
-                        setWorkStoryEntries(
-                          await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
-                        );
-                      }}
-                      title={t.cancel}
-                    >
-                      🗑
-                    </button>
-                    <button
-                      type="button"
-                      className="tag-icon-btn"
-                      onClick={() => setLightboxEntry(null)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <div className="lightbox-img-wrap">
-                  <img
-                    src={lightboxEntry.screenshot_data || ""}
-                    alt="full screenshot"
-                    className="lightbox-img"
-                  />
-                </div>
-                <div className="lightbox-footer">
-                  {lightboxEntry.context_text && (
-                    <div className="lightbox-meta-item">
-                      🎯 <b>Meşguliyet:</b> {lightboxEntry.context_text}
-                    </div>
-                  )}
-                  {lightboxEntry.active_app && (
-                    <div className="lightbox-meta-item">
-                      🌐 <b>Uygulama / Sekme:</b> {lightboxEntry.active_app}
-                      {lightboxEntry.active_window
-                        ? ` — ${lightboxEntry.active_window}`
-                        : ""}
-                    </div>
-                  )}
-                  {lightboxEntry.note && (
-                    <div className="lightbox-meta-item">
-                      📝 <b>Not:</b> {lightboxEntry.note}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <LightboxModal
+              entry={lightboxEntry}
+              t={t}
+              onClose={() => setLightboxEntry(null)}
+              onDelete={handleDeleteWorkStoryItem}
+            />
           )}
         </>
       )}

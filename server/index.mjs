@@ -7,7 +7,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const STORE_PATH = path.join(DATA_DIR, "users-store.json");
+const PKG_PATH = path.join(__dirname, "..", "package.json");
 const PORT = Number(process.env.PORT || 4000);
+
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(PKG_PATH, "utf8")).version || "0.1.15";
+  } catch {
+    return "0.1.15";
+  }
+})();
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -16,8 +25,7 @@ if (!fs.existsSync(DATA_DIR)) {
 function loadStore() {
   try {
     if (fs.existsSync(STORE_PATH)) {
-      const raw = fs.readFileSync(STORE_PATH, "utf8");
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
       if (parsed && typeof parsed === "object" && parsed.users) {
         return parsed;
       }
@@ -60,16 +68,15 @@ function ensureUserBucket(store, userObj) {
         context_logs: [],
         work_story_entries: [],
         tags: [],
-        keep_notes: [],
-        docs_entries: [],
       },
     };
   } else {
+    const p = store.users[userId].profile;
     store.users[userId].profile = {
-      ...store.users[userId].profile,
-      email: email || store.users[userId].profile.email,
-      name: userObj?.name || store.users[userId].profile.name,
-      picture: userObj?.picture || store.users[userId].profile.picture,
+      ...p,
+      email: email || p.email,
+      name: userObj?.name || p.name,
+      picture: userObj?.picture || p.picture,
     };
   }
   return store.users[userId];
@@ -78,8 +85,7 @@ function ensureUserBucket(store, userObj) {
 function dedupeByKey(existingArr, incomingArr, keyFn) {
   const map = new Map();
   for (const item of existingArr || []) {
-    if (!item) continue;
-    map.set(keyFn(item), item);
+    if (item) map.set(keyFn(item), item);
   }
   for (const item of incomingArr || []) {
     if (!item) continue;
@@ -93,7 +99,6 @@ function dedupeByKey(existingArr, incomingArr, keyFn) {
 function mergeUserSnapshot(bucket, snapshot, mutations) {
   const d = bucket.data;
 
-  // 1. Önce çevrimdışı kuyruktan (mutations) gelen tekil işlemleri uygula
   if (Array.isArray(mutations)) {
     for (const m of mutations) {
       const p = m?.payload;
@@ -133,7 +138,6 @@ function mergeUserSnapshot(bucket, snapshot, mutations) {
     }
   }
 
-  // 2. Tam snapshot ile birleştir
   if (snapshot && typeof snapshot === "object") {
     d.study_days = dedupeByKey(
       d.study_days,
@@ -292,6 +296,15 @@ const WEB_DASHBOARD_HTML = `<!DOCTYPE html>
   </div>
   <div id="content">Yükleniyor...</div>
   <script>
+    function esc(v) {
+      return String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
     async function loadDashboard() {
       const sel = document.getElementById('userSelect');
       const res = await fetch('/api/users');
@@ -301,7 +314,7 @@ const WEB_DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       const currentVal = sel.value || users[0].userId;
-      sel.innerHTML = users.map(u => '<option value="' + u.userId + '"' + (u.userId === currentVal ? ' selected' : '') + '>' + u.name + ' (' + u.email + ')</option>').join('');
+      sel.innerHTML = users.map(u => '<option value="' + esc(u.userId) + '"' + (u.userId === currentVal ? ' selected' : '') + '>' + esc(u.name) + ' (' + esc(u.email) + ')</option>').join('');
       const uRes = await fetch('/api/user-data?userId=' + encodeURIComponent(currentVal));
       const { user } = await uRes.json();
       if (!user) return;
@@ -320,33 +333,27 @@ const WEB_DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="grid">
           <div class="card">
             <h3>⏳ Yapılmayan Görevler (\${pending.length})</h3>
-            <ul>\${pending.map(t => '<li><span>☐ ' + t.content + '</span><small>' + (t.context_text || '') + '</small></li>').join('') || '<li>Yok</li>'}</ul>
+            <ul>\${pending.map(t => '<li><span>☐ ' + esc(t.content) + '</span><small>' + esc(t.context_text || '') + '</small></li>').join('') || '<li>Yok</li>'}</ul>
           </div>
           <div class="card">
             <h3>✅ Yapılan Görevler (\${done.length})</h3>
-            <ul>\${done.map(t => '<li><span>☑ ' + t.content + '</span></li>').join('') || '<li>Yok</li>'}</ul>
+            <ul>\${done.map(t => '<li><span>☑ ' + esc(t.content) + '</span></li>').join('') || '<li>Yok</li>'}</ul>
           </div>
           <div class="card">
             <h3>💡 Fikirler (Önemli / Önemsiz) (\${ideas.length})</h3>
-            <ul>\${ideas.map(i => '<li><span>' + (i.status === 'important' ? '⭐ ' : i.status === 'unimportant' ? '💤 ' : '💡 ') + i.content + '</span></li>').join('') || '<li>Yok</li>'}</ul>
+            <ul>\${ideas.map(i => '<li><span>' + (i.status === 'important' ? '⭐ ' : i.status === 'unimportant' ? '💤 ' : '💡 ') + esc(i.content) + '</span></li>').join('') || '<li>Yok</li>'}</ul>
           </div>
         </div>
-        \${d.docs_entries && d.docs_entries.length > 0 ? \`
-        <div class="card" style="margin-bottom:14px">
-          <h3>📄 Google Docs & Drive Odak Defteri Güncellemeleri (\${d.docs_entries.length})</h3>
-          <div style="max-height: 180px; overflow-y: auto; font-family: monospace; font-size: 11px; white-space: pre-wrap; background: #12110e; padding: 10px; border-radius: 6px; border: 1px solid #2f2a22; color: #d4d4d8;">\${d.docs_entries.slice(0, 3).map(e => '--- ' + (e.title || 'Odak Defteri') + ' (' + new Date(e.syncedAt).toLocaleString('tr-TR') + ') ---\\n' + (e.textToAppend || '')).join('\\n\\n')}</div>
-        </div>
-        \` : ''}
         <div class="card">
           <h3>📸 Çalışma Hikayesi (5 dk'da 1 Screenshot + Açık Pencere + Context)</h3>
           <div class="story-grid">
             \${(d.work_story_entries || []).map(s => \`
               <div class="story-card">
-                \${s.screenshot_data ? '<img src="' + s.screenshot_data + '" />' : ''}
+                \${s.screenshot_data && String(s.screenshot_data).startsWith('data:image/') ? '<img src="' + esc(s.screenshot_data) + '" />' : ''}
                 <div class="story-meta">
-                  <div><strong>🎯 \${s.context_text || s.work_tag || 'Genel Çalışma'}</strong></div>
-                  <div style="color:#a8a29e">\${s.active_app || ''} \${s.active_window ? '— ' + s.active_window : ''}</div>
-                  \${s.note ? '<div style="color:#fbbf24;margin-top:4px">📝 ' + s.note + '</div>' : ''}
+                  <div><strong>🎯 \${esc(s.context_text || s.work_tag || 'Genel Çalışma')}</strong></div>
+                  <div style="color:#a8a29e">\${esc(s.active_app || '')} \${s.active_window ? '— ' + esc(s.active_window) : ''}</div>
+                  \${s.note ? '<div style="color:#fbbf24;margin-top:4px">📝 ' + esc(s.note) + '</div>' : ''}
                 </div>
               </div>
             \`).join('') || '<div>Henüz çalışma hikayesi görüntüsü yok.</div>'}
@@ -374,7 +381,7 @@ const server = http.createServer(async (req, res) => {
       const store = loadStore();
       sendJson(res, 200, {
         ok: true,
-        version: "0.1.15",
+        version: APP_VERSION,
         usersCount: Object.keys(store.users).length,
       });
       return;
@@ -421,59 +428,6 @@ const server = http.createServer(async (req, res) => {
         syncedMutationsCount: Array.isArray(body.mutations)
           ? body.mutations.length
           : 0,
-      });
-      return;
-    }
-
-    if (pathname === "/api/docs/sync" && req.method === "POST") {
-      const body = await readJsonBody(req);
-      const store = loadStore();
-      const bucket = ensureUserBucket(store, {
-        userId: body.userId,
-        email: body.email,
-      });
-      const docEntryId = "docs_" + Date.now();
-      bucket.data.docs_entries = bucket.data.docs_entries || [];
-      bucket.data.docs_entries.unshift({
-        entryId: docEntryId,
-        title: body.title || "🎯 Pomodoro Odak & Fikir Defteri",
-        textToAppend: body.textToAppend || "",
-        itemCount: Array.isArray(body.items) ? body.items.length : 0,
-        syncedAt: new Date().toISOString(),
-      });
-      bucket.data.docs_entries = bucket.data.docs_entries.slice(0, 50);
-      saveStore(store);
-      sendJson(res, 200, {
-        ok: true,
-        docEntryId,
-        docUrl: "https://docs.google.com/",
-        message: `${Array.isArray(body.items) ? body.items.length : 1} kayıt Google Docs Odak Defteri'ne başarıyla senkronize edildi.`,
-      });
-      return;
-    }
-
-    if (pathname === "/api/keep/sync" && req.method === "POST") {
-      const body = await readJsonBody(req);
-      const store = loadStore();
-      const bucket = ensureUserBucket(store, {
-        userId: body.userId,
-        email: body.email,
-      });
-      const noteId = "keep_" + Date.now();
-      bucket.data.keep_notes = bucket.data.keep_notes || [];
-      bucket.data.keep_notes.unshift({
-        noteId,
-        title: body.title,
-        bodyText: body.bodyText,
-        itemCount: Array.isArray(body.items) ? body.items.length : 0,
-        syncedAt: new Date().toISOString(),
-      });
-      bucket.data.keep_notes = bucket.data.keep_notes.slice(0, 30);
-      saveStore(store);
-      sendJson(res, 200, {
-        ok: true,
-        noteId,
-        message: "Görevler ve düşünceler sunucu Keep deposuna ve Google Keep'e aktarıldı.",
       });
       return;
     }

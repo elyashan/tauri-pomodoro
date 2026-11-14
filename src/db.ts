@@ -9,8 +9,6 @@ export type PageType = "menu" | "timer" | "work" | "break" | "summary" | "settin
 export type TimerMode = "work" | "break";
 export type BreakKind = "standard" | "long" | "short";
 
-// Uygulama kapanıp açıldığında seansın kaldığı yerden devam edebilmesi için
-// sayaç dışındaki çalışma zamanı durumu.
 export interface RuntimeState {
   sessionActive: boolean;
   mode: TimerMode;
@@ -67,11 +65,6 @@ export interface DaySummary {
   is_active: number;
 }
 
-export interface DistractionFrequency {
-  reason: string;
-  count: number;
-}
-
 export type TagKind = "distraction" | "ending" | "work" | "break_overtime";
 export type DistractionTrigger = "internal" | "external";
 export type DistractionCategory =
@@ -83,12 +76,12 @@ export type DistractionCategory =
   | "escape";
 
 export function doesCategoryAddPenalty(cat: DistractionCategory): boolean {
-  // 1: Dürtüsel görev, 2: Akla gelen fikir ve 3: SS Alma (Ekran Görüntüsü Notu) için ek süre eklenmez.
+  // 1: Dürtüsel görev, 2: Akla gelen fikir ve 3: SS Alma için ek süre eklenmez.
   // 4: İçsel tetikleyici, 5: Dışsal tetikleyici ve 6: Zorluktan kaçış için süre eklenir.
   return cat === "internal" || cat === "external" || cat === "escape";
 }
 
-export function categoryToTrigger(cat: DistractionCategory): DistractionTrigger {
+function categoryToTrigger(cat: DistractionCategory): DistractionTrigger {
   return cat === "external" ? "external" : "internal";
 }
 
@@ -311,7 +304,6 @@ export interface StudyPlan {
   longBreakInterval: number;
 }
 
-// Plan adı boş ("") ise arayüz, aktif dile göre varsayılan kısa adı gösterir.
 export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
   {
     id: "classic",
@@ -351,7 +343,6 @@ export const DEFAULT_STUDY_PLANS: StudyPlan[] = [
   },
 ];
 
-// Önceki sürümlerin kaydettiği uzun varsayılan adlar; bunlar da "varsayılan ad" sayılır.
 const LEGACY_PLAN_NAMES = new Set([
   "Geliştirici Standardı",
   "Klasik Pomodoro",
@@ -385,21 +376,42 @@ export const DEFAULT_BREAK_SEC = 10 * 60;
 
 const DB_URL = "sqlite:pomodoro.db";
 const SUMMARY_DAY_LIMIT = 7;
-const VALID_PAGES: PageType[] = ["menu", "timer", "work", "break", "summary", "settings", "dashboard"];
-
-const DEFAULT_REASONS = [
-  "Telefon",
-  "Sosyal Medya",
-  "Mesaj / Bildirim",
-  "Dış Gürültü",
+const VALID_PAGES: PageType[] = [
+  "menu",
+  "timer",
+  "work",
+  "break",
+  "summary",
+  "settings",
+  "dashboard",
 ];
 
 // ---------------------------------------------------------------------------
 // Bağlantı ve şema
 // ---------------------------------------------------------------------------
 
-// Promise'i önbelleğe alıyoruz; böylece aynı anda gelen çağrılar
-// birden fazla bağlantı açıp şemayı paralel oluşturmaya çalışmaz.
+const ALTER_MIGRATIONS = [
+  "ALTER TABLE parking_items ADD COLUMN screenshot_data TEXT",
+  "ALTER TABLE parking_items ADD COLUMN keep_synced INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE parking_items ADD COLUMN keep_note_id TEXT",
+  "ALTER TABLE distractions ADD COLUMN elapsed_work_sec INTEGER DEFAULT 0",
+  "ALTER TABLE distractions ADD COLUMN trigger_type TEXT DEFAULT 'internal'",
+  "ALTER TABLE distractions ADD COLUMN category TEXT DEFAULT 'internal'",
+  "ALTER TABLE distractions ADD COLUMN active_app TEXT",
+  "ALTER TABLE distractions ADD COLUMN active_window TEXT",
+  "ALTER TABLE distractions ADD COLUMN context_text TEXT",
+  "ALTER TABLE distractions ADD COLUMN penalty_sec INTEGER DEFAULT 0",
+  "ALTER TABLE distractions ADD COLUMN tag TEXT",
+  "ALTER TABLE tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'distraction'",
+  "ALTER TABLE sessions ADD COLUMN tag TEXT",
+  "ALTER TABLE sessions ADD COLUMN reason TEXT",
+  "ALTER TABLE sessions ADD COLUMN started_at TEXT",
+  "ALTER TABLE sessions ADD COLUMN ended_at TEXT",
+  "ALTER TABLE sessions ADD COLUMN overtime_sec INTEGER DEFAULT 0",
+  "ALTER TABLE sessions ADD COLUMN end_tag TEXT",
+  "ALTER TABLE sessions ADD COLUMN end_reason TEXT",
+];
+
 let dbPromise: Promise<Database> | null = null;
 
 async function initDb(): Promise<Database> {
@@ -517,120 +529,12 @@ async function initDb(): Promise<Database> {
     )
   `);
 
-  try {
-    await db.execute("ALTER TABLE parking_items ADD COLUMN screenshot_data TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE parking_items ADD COLUMN keep_synced INTEGER NOT NULL DEFAULT 0");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE parking_items ADD COLUMN keep_note_id TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN elapsed_work_sec INTEGER DEFAULT 0");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN trigger_type TEXT DEFAULT 'internal'");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN category TEXT DEFAULT 'internal'");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN active_app TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN active_window TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN context_text TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN penalty_sec INTEGER DEFAULT 0");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'distraction'");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE distractions ADD COLUMN tag TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN tag TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN reason TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN started_at TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN ended_at TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN overtime_sec INTEGER DEFAULT 0");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  // Erken bitirme nedeni, çalışma konusundan (tag/reason) ayrı tutulur.
-  // Önceden ikisi aynı sütunları paylaştığı için özet verileri birbirine karışıyordu.
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN end_tag TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
-  }
-
-  try {
-    await db.execute("ALTER TABLE sessions ADD COLUMN end_reason TEXT");
-  } catch {
-    // sütun zaten varsa hata yok sayılır
+  for (const sql of ALTER_MIGRATIONS) {
+    try {
+      await db.execute(sql);
+    } catch {
+      // Sütun zaten varsa yoksay
+    }
   }
 
   // v0.1.7 ve öncesinde (started_at olmayan kayıtlar) tag/reason sadece erken
@@ -648,7 +552,6 @@ async function initDb(): Promise<Database> {
 export function getDb(): Promise<Database> {
   if (!dbPromise) {
     dbPromise = initDb().catch((err) => {
-      // Başarısız olursa bir sonraki çağrıda tekrar denensin
       dbPromise = null;
       throw err;
     });
@@ -671,12 +574,50 @@ async function enqueueSyncMutation(
   }
 }
 
+async function getSetting(key: string): Promise<string | null> {
+  const db = await getDb();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = $1",
+    [key],
+  );
+  return rows[0]?.value ?? null;
+}
+
+async function getSettingsMap(keys: string[]): Promise<Map<string, string>> {
+  const db = await getDb();
+  const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
+  const rows = await db.select<{ key: string; value: string }[]>(
+    `SELECT key, value FROM settings WHERE key IN (${placeholders})`,
+    keys,
+  );
+  return new Map(rows.map((r) => [r.key, r.value]));
+}
+
+async function setSetting(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `INSERT INTO settings (key, value) VALUES ($1, $2)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [key, value],
+  );
+}
+
+async function setSettings(entries: [string, string][]): Promise<void> {
+  const db = await getDb();
+  for (const [key, value] of entries) {
+    await db.execute(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, value],
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Yardımcılar
 // ---------------------------------------------------------------------------
 
 function makeDayLabel(date: Date, locale = "tr-TR"): string {
-  // Örn: "06 Kas" veya "06 Nov"
   return date.toLocaleDateString(locale, { day: "2-digit", month: "short" });
 }
 
@@ -779,7 +720,6 @@ export async function getActiveDayStats(locale = "tr-TR"): Promise<ActiveDayStat
   };
 }
 
-// Aktif günü bitirir, yeni bir gün açar ve yeni günün (boş) istatistiklerini döner
 export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   const db = await getDb();
   const nowIso = new Date().toISOString();
@@ -796,8 +736,6 @@ export async function startNewDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   return getActiveDayStats(locale);
 }
 
-// Yeni bir seans başlatırken çağrılır. Aktif gün hâlihazırda boşsa (hiç kayıt
-// yoksa) onu yeniden kullanır; böylece boş gün kayıtları birikmez.
 export async function beginSessionDay(locale = "tr-TR"): Promise<ActiveDayStats> {
   const db = await getDb();
   const day = await getOrCreateActiveDay(db, locale);
@@ -916,11 +854,7 @@ export async function getTimelineSessions(
   dayId?: number,
 ): Promise<TimelineSessionItem[]> {
   const db = await getDb();
-  let targetDayId = dayId;
-  if (!targetDayId) {
-    const activeDay = await getOrCreateActiveDay(db);
-    targetDayId = activeDay.id;
-  }
+  const targetDayId = dayId || (await getOrCreateActiveDay(db)).id;
 
   const rows = await db.select<{
     id: number;
@@ -941,6 +875,8 @@ export async function getTimelineSessions(
     [targetDayId],
   );
 
+  const pad = (n: number) => n.toString().padStart(2, "0");
+
   return rows.map((r) => {
     const dur = Number(r.duration_sec);
     const overtime = Number(r.overtime_sec ?? 0);
@@ -953,9 +889,7 @@ export async function getTimelineSessions(
       23.95,
       Math.max(
         0,
-        start.getHours() +
-          start.getMinutes() / 60 +
-          start.getSeconds() / 3600,
+        start.getHours() + start.getMinutes() / 60 + start.getSeconds() / 3600,
       ),
     );
     const crossedMidnight =
@@ -967,14 +901,10 @@ export async function getTimelineSessions(
       : end.getHours() + end.getMinutes() / 60 + end.getSeconds() / 3600;
     const eH = Math.min(24, Math.max(sH + 0.05, rawEndH));
 
-    const pad = (n: number) => n.toString().padStart(2, "0");
     const timeRangeLabel = `${pad(start.getHours())}:${pad(start.getMinutes())} - ${pad(end.getHours())}:${pad(end.getMinutes())}`;
-
     const mins = Math.round(dur / 60);
-    const durLabel =
-      mins < 60
-        ? `${mins} dk`
-        : `${Math.floor(mins / 60)} sa ${mins % 60} dk`;
+    const durationLabel =
+      mins < 60 ? `${mins} dk` : `${Math.floor(mins / 60)} sa ${mins % 60} dk`;
 
     return {
       id: Number(r.id),
@@ -989,15 +919,13 @@ export async function getTimelineSessions(
       startHour: sH,
       endHour: eH,
       timeRangeLabel,
-      durationLabel: durLabel,
+      durationLabel,
     };
   });
 }
 
-// Özet grafiği için son N günü (eskiden yeniye) getirir
 export async function getDaysSummary(): Promise<DaySummary[]> {
   const db = await getDb();
-  // Hiç gün yoksa aktif günü oluştur ki grafik boş kalmasın
   await getOrCreateActiveDay(db);
 
   const rows = await db.select<DaySummary[]>(
@@ -1116,61 +1044,6 @@ export async function recordDistraction(
   });
 }
 
-// Daha önce seçilen şıkları en sık kullanılandan başlayarak getirir
-export async function getReasonChoices(fallbackDefaults?: string[]): Promise<string[]> {
-  const db = await getDb();
-  const rows = await db.select<{ reason: string; cnt: number }[]>(`
-    SELECT reason, COUNT(id) AS cnt, MAX(id) AS last_id
-    FROM distractions
-    GROUP BY reason
-    ORDER BY cnt DESC, last_id DESC
-    LIMIT 10
-  `);
-
-  const saved = rows.map((r) => r.reason);
-  const defaults = fallbackDefaults && fallbackDefaults.length > 0 ? fallbackDefaults : DEFAULT_REASONS;
-  for (const def of defaults) {
-    if (
-      !saved.some(
-        (s) => s.toLocaleLowerCase() === def.toLocaleLowerCase(),
-      )
-    ) {
-      saved.push(def);
-    }
-  }
-  return saved.slice(0, 8);
-}
-
-// Özet ekranı için dikkat dağılma sıklığını (Bugün veya Tüm Günler) getirir
-export async function getDistractionFrequencies(
-  onlyToday: boolean,
-): Promise<DistractionFrequency[]> {
-  const db = await getDb();
-
-  let rows: DistractionFrequency[];
-  if (onlyToday) {
-    const day = await getOrCreateActiveDay(db);
-    rows = await db.select<DistractionFrequency[]>(
-      `SELECT reason, COUNT(id) AS count
-       FROM distractions
-       WHERE day_id = $1
-       GROUP BY reason
-       ORDER BY count DESC`,
-      [day.id],
-    );
-  } else {
-    rows = await db.select<DistractionFrequency[]>(`
-      SELECT reason, COUNT(id) AS count
-      FROM distractions
-      GROUP BY reason
-      ORDER BY count DESC
-      LIMIT 8
-    `);
-  }
-
-  return rows.map((r) => ({ reason: r.reason, count: Number(r.count) }));
-}
-
 // ---------------------------------------------------------------------------
 // Haftalık Özet
 // ---------------------------------------------------------------------------
@@ -1179,8 +1052,7 @@ export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary>
   const db = await getDb();
 
   const now = new Date();
-  const currentDay = now.getDay(); // 0: Pazar, 1: Pazartesi...
-  const mondayOffset = (currentDay + 6) % 7; // Pazartesi 0, Salı 1... Pazar 6
+  const mondayOffset = (now.getDay() + 6) % 7;
 
   const monday = new Date(now);
   monday.setDate(now.getDate() - mondayOffset);
@@ -1197,9 +1069,9 @@ export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary>
   );
 
   const isTr = locale.toLowerCase().startsWith("tr");
-  const shortDaysTr = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
-  const shortDaysEn = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const shortNames = isTr ? shortDaysTr : shortDaysEn;
+  const shortNames = isTr
+    ? ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
+    : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   const days: WeekDayStat[] = [];
   let totalSec = 0;
@@ -1244,15 +1116,12 @@ export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary>
     });
   }
 
-  const activeDaysCount = days.filter((d) => d.total_sec > 0).length;
-  const dailyAvgSec = Math.round(totalSec / 7);
-
   return {
     days,
     totalSec,
     sessionCount: totalSessions,
-    dailyAvgSec,
-    activeDaysCount,
+    dailyAvgSec: Math.round(totalSec / 7),
+    activeDaysCount: days.filter((d) => d.total_sec > 0).length,
   };
 }
 
@@ -1262,13 +1131,17 @@ export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary>
 
 export async function clearAllData(locale = "tr-TR"): Promise<void> {
   const db = await getDb();
-  await db.execute("DELETE FROM sessions");
-  await db.execute("DELETE FROM distractions");
-  await db.execute("DELETE FROM parking_items");
-  await db.execute("DELETE FROM context_logs");
-  await db.execute("DELETE FROM work_story_entries");
-  await db.execute("DELETE FROM sync_queue");
-  await db.execute("DELETE FROM study_days");
+  for (const table of [
+    "sessions",
+    "distractions",
+    "parking_items",
+    "context_logs",
+    "work_story_entries",
+    "sync_queue",
+    "study_days",
+  ]) {
+    await db.execute(`DELETE FROM ${table}`);
+  }
   await db.execute(
     "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
   );
@@ -1283,7 +1156,7 @@ export async function clearAllData(locale = "tr-TR"): Promise<void> {
 // Tag ve Açıklama Yönetimi
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_DISTRACTION_TAGS_TR = [
+const DEFAULT_DISTRACTION_TAGS_TR = [
   "Telefon",
   "Sosyal Medya",
   "Çevre / İnsanlar",
@@ -1292,7 +1165,7 @@ export const DEFAULT_DISTRACTION_TAGS_TR = [
   "Diğer",
 ];
 
-export const DEFAULT_ENDING_TAGS_TR = [
+const DEFAULT_ENDING_TAGS_TR = [
   "Toplantı",
   "Yemek",
   "Mola İhtiyacı",
@@ -1376,28 +1249,28 @@ export async function updateTag(
   const oldName = oldRows[0]?.name;
 
   await db.execute("UPDATE tags SET name = $1 WHERE id = $2", [normalized, id]);
-  if (oldName) {
-    if (kind === "distraction") {
-      await db.execute("UPDATE distractions SET tag = $1 WHERE tag = $2", [
-        normalized,
-        oldName,
-      ]);
-    } else if (kind === "ending") {
-      await db.execute(
-        "UPDATE sessions SET end_tag = $1 WHERE end_tag = $2 AND mode = 'work'",
-        [normalized, oldName],
-      );
-    } else if (kind === "work") {
-      await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'work'", [
-        normalized,
-        oldName,
-      ]);
-    } else if (kind === "break_overtime") {
-      await db.execute("UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'break'", [
-        normalized,
-        oldName,
-      ]);
-    }
+  if (!oldName) return;
+
+  if (kind === "distraction") {
+    await db.execute("UPDATE distractions SET tag = $1 WHERE tag = $2", [
+      normalized,
+      oldName,
+    ]);
+  } else if (kind === "ending") {
+    await db.execute(
+      "UPDATE sessions SET end_tag = $1 WHERE end_tag = $2 AND mode = 'work'",
+      [normalized, oldName],
+    );
+  } else if (kind === "work") {
+    await db.execute(
+      "UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'work'",
+      [normalized, oldName],
+    );
+  } else if (kind === "break_overtime") {
+    await db.execute(
+      "UPDATE sessions SET tag = $1 WHERE tag = $2 AND mode = 'break'",
+      [normalized, oldName],
+    );
   }
 }
 
@@ -1406,96 +1279,70 @@ export async function deleteTag(id: number): Promise<void> {
   await db.execute("DELETE FROM tags WHERE id = $1", [id]);
 }
 
-// Seçilen tag için (veya genel) daha önce girilen açıklamaları getirir
 export async function getPreviousReasons(
   kind: TagKind,
   tag?: string,
 ): Promise<string[]> {
   const db = await getDb();
-  if (kind === "distraction") {
-    if (tag && tag.trim()) {
-      const rows = await db.select<{ reason: string; cnt: number }[]>(
-        `SELECT reason, COUNT(id) AS cnt FROM distractions
-         WHERE tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-        [tag.trim()],
-      );
-      if (rows.length > 0) return rows.map((r) => r.reason);
-    }
-    const rows = await db.select<{ reason: string; cnt: number }[]>(
-      `SELECT reason, COUNT(id) AS cnt FROM distractions
-       WHERE reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
+  const cfg =
+    kind === "distraction"
+      ? { table: "distractions", baseWhere: "1=1", tagCol: "tag", reasonCol: "reason" }
+      : kind === "work"
+        ? { table: "sessions", baseWhere: "mode = 'work'", tagCol: "tag", reasonCol: "reason" }
+        : kind === "break_overtime"
+          ? {
+              table: "sessions",
+              baseWhere: "mode = 'break' AND overtime_sec > 0",
+              tagCol: "tag",
+              reasonCol: "reason",
+            }
+          : {
+              table: "sessions",
+              baseWhere: "mode = 'work'",
+              tagCol: "end_tag",
+              reasonCol: "end_reason",
+            };
+
+  const trimmedTag = tag?.trim();
+  if (trimmedTag) {
+    const rows = await db.select<{ reason: string }[]>(
+      `SELECT ${cfg.reasonCol} AS reason, COUNT(id) AS cnt
+       FROM ${cfg.table}
+       WHERE ${cfg.baseWhere} AND ${cfg.tagCol} = $1
+         AND ${cfg.reasonCol} IS NOT NULL AND ${cfg.reasonCol} != ''
+         AND ${cfg.reasonCol} != ${cfg.tagCol}
+       GROUP BY ${cfg.reasonCol}
+       ORDER BY cnt DESC, MAX(id) DESC
+       LIMIT 8`,
+      [trimmedTag],
     );
-    return rows.map((r) => r.reason);
-  } else if (kind === "work") {
-    if (tag && tag.trim()) {
-      const rows = await db.select<{ reason: string; cnt: number }[]>(
-        `SELECT reason, COUNT(id) AS cnt FROM sessions
-         WHERE mode = 'work' AND tag = $1 AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-        [tag.trim()],
-      );
-      if (rows.length > 0) return rows.map((r) => r.reason);
-    }
-    const rows = await db.select<{ reason: string; cnt: number }[]>(
-      `SELECT reason, COUNT(id) AS cnt FROM sessions
-       WHERE mode = 'work' AND reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-    );
-    return rows.map((r) => r.reason);
-  } else if (kind === "break_overtime") {
-    if (tag && tag.trim()) {
-      const rows = await db.select<{ reason: string; cnt: number }[]>(
-        `SELECT reason, COUNT(id) AS cnt FROM sessions
-         WHERE mode = 'break' AND overtime_sec > 0 AND tag = $1
-           AND reason IS NOT NULL AND reason != '' AND reason != tag
-         GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-        [tag.trim()],
-      );
-      if (rows.length > 0) return rows.map((r) => r.reason);
-    }
-    const rows = await db.select<{ reason: string; cnt: number }[]>(
-      `SELECT reason, COUNT(id) AS cnt FROM sessions
-       WHERE mode = 'break' AND overtime_sec > 0 AND reason IS NOT NULL AND reason != ''
-       GROUP BY reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-    );
-    return rows.map((r) => r.reason);
-  } else {
-    // ending (ayrı end_tag / end_reason sütunlarını kullanır)
-    if (tag && tag.trim()) {
-      const rows = await db.select<{ reason: string; cnt: number }[]>(
-        `SELECT end_reason AS reason, COUNT(id) AS cnt FROM sessions
-         WHERE mode = 'work' AND end_tag = $1
-           AND end_reason IS NOT NULL AND end_reason != '' AND end_reason != end_tag
-         GROUP BY end_reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-        [tag.trim()],
-      );
-      if (rows.length > 0) return rows.map((r) => r.reason);
-    }
-    const rows = await db.select<{ reason: string; cnt: number }[]>(
-      `SELECT end_reason AS reason, COUNT(id) AS cnt FROM sessions
-       WHERE mode = 'work' AND end_reason IS NOT NULL AND end_reason != ''
-       GROUP BY end_reason ORDER BY cnt DESC, MAX(id) DESC LIMIT 8`,
-    );
-    return rows.map((r) => r.reason);
+    if (rows.length > 0) return rows.map((r) => r.reason);
   }
+
+  const rows = await db.select<{ reason: string }[]>(
+    `SELECT ${cfg.reasonCol} AS reason, COUNT(id) AS cnt
+     FROM ${cfg.table}
+     WHERE ${cfg.baseWhere}
+       AND ${cfg.reasonCol} IS NOT NULL AND ${cfg.reasonCol} != ''
+     GROUP BY ${cfg.reasonCol}
+     ORDER BY cnt DESC, MAX(id) DESC
+     LIMIT 8`,
+  );
+  return rows.map((r) => r.reason);
 }
 
-// Özet için Tag kategorilerine ayrılmış ve açıklamaları içeren detaylı veri
 export async function getSummaryReasonsData(
   onlyToday: boolean,
 ): Promise<SummaryReasonsData> {
   const db = await getDb();
-  let dayFilter = "";
-  const params: any[] = [];
+  const params: number[] = [];
+  let dayClause = "";
   if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
-    dayFilter = "WHERE day_id = $1";
+    dayClause = "AND day_id = $1";
     params.push(day.id);
   }
 
-  // Helper to aggregate tag-reason breakdown
   const buildTagItems = (
     rows: { tag: string | null; reason: string | null }[],
   ): TagSummaryItem[] => {
@@ -1522,134 +1369,81 @@ export async function getSummaryReasonsData(
     return list;
   };
 
-  // 1. Çalışma Konuları (Work tags)
-  const workFilter = onlyToday
-    ? "WHERE mode = 'work' AND day_id = $1 AND (tag IS NOT NULL OR reason IS NOT NULL)"
-    : "WHERE mode = 'work' AND (tag IS NOT NULL OR reason IS NOT NULL)";
   const workRows = await db.select<{ tag: string | null; reason: string | null }[]>(
-    `SELECT tag, reason FROM sessions ${workFilter}`,
+    `SELECT tag, reason FROM sessions WHERE mode = 'work' ${dayClause} AND (tag IS NOT NULL OR reason IS NOT NULL)`,
     params,
   );
-  const workTags = buildTagItems(workRows);
-
-  // 2. Mola Gecikmeleri (yalnızca gerçekten süre aşımı olan molalar: overtime_sec > 0)
-  const breakFilter = onlyToday
-    ? "WHERE mode = 'break' AND day_id = $1 AND overtime_sec > 0"
-    : "WHERE mode = 'break' AND overtime_sec > 0";
   const breakRows = await db.select<{ tag: string | null; reason: string | null }[]>(
-    `SELECT tag, reason FROM sessions ${breakFilter}`,
+    `SELECT tag, reason FROM sessions WHERE mode = 'break' ${dayClause} AND overtime_sec > 0`,
     params,
   );
-  const breakOvertimeTags = buildTagItems(breakRows);
-
-  // 3. Dikkat Dağılma Kayıtları
   const distRows = await db.select<{ tag: string | null; reason: string }[]>(
-    `SELECT tag, reason FROM distractions ${dayFilter}`,
+    `SELECT tag, reason FROM distractions ${onlyToday ? "WHERE day_id = $1" : ""}`,
     params,
   );
-  const distractionTags = buildTagItems(distRows);
-
-  // 4. Erken Bitirme Kayıtları (end_tag / end_reason sütunlarından okunur)
-  const endingFilter = onlyToday
-    ? "WHERE mode = 'work' AND day_id = $1 AND (end_tag IS NOT NULL OR end_reason IS NOT NULL)"
-    : "WHERE mode = 'work' AND (end_tag IS NOT NULL OR end_reason IS NOT NULL)";
   const endingRows = await db.select<{ tag: string | null; reason: string | null }[]>(
-    `SELECT end_tag AS tag, end_reason AS reason FROM sessions ${endingFilter}`,
+    `SELECT end_tag AS tag, end_reason AS reason FROM sessions WHERE mode = 'work' ${dayClause} AND (end_tag IS NOT NULL OR end_reason IS NOT NULL)`,
     params,
   );
-  const endingTags = buildTagItems(endingRows);
-
-  // Seans Başı Ortalama Dikkat Dağılması
   const sessRows = await db.select<{ cnt: number }[]>(
-    `SELECT COUNT(id) AS cnt FROM sessions ${dayFilter ? "WHERE day_id = $1 AND mode = 'work'" : "WHERE mode = 'work'"}`,
+    `SELECT COUNT(id) AS cnt FROM sessions WHERE mode = 'work' ${dayClause}`,
     params,
   );
+
   const totalSessions = sessRows[0]?.cnt || 0;
   const totalDistractions = distRows.length;
-  const avgDistractionsPerSession =
-    totalSessions > 0 ? Number((totalDistractions / totalSessions).toFixed(1)) : 0;
 
   return {
-    workTags,
-    breakOvertimeTags,
-    distractionTags,
-    endingTags,
+    workTags: buildTagItems(workRows),
+    breakOvertimeTags: buildTagItems(breakRows),
+    distractionTags: buildTagItems(distRows),
+    endingTags: buildTagItems(endingRows),
     totalWorkSubjects: workRows.length,
     totalBreakOvertimes: breakRows.length,
     totalDistractions,
     totalEndings: endingRows.length,
-    avgDistractionsPerSession,
+    avgDistractionsPerSession:
+      totalSessions > 0 ? Number((totalDistractions / totalSessions).toFixed(1)) : 0,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Dikkat Dağılması Ek Süre Ayarı (Settings)
+// Dikkat Dağılması Ek Süre Ayarı, Dil, Tema & Her Zaman Üstte
 // ---------------------------------------------------------------------------
 
 export async function loadDistractPenalty(): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'distractPenaltyMins'",
-  );
-  if (rows.length === 0) return 1;
-  const n = parseInt(rows[0]?.value, 10);
+  const val = await getSetting("distractPenaltyMins");
+  if (val === null) return 1;
+  const n = parseInt(val, 10);
   return Number.isFinite(n) && n >= 0 && n <= 30 ? n : 1;
 }
 
 export async function saveDistractPenalty(mins: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('distractPenaltyMins', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(mins)],
-  );
+  await setSetting("distractPenaltyMins", String(mins));
 }
-
-// ---------------------------------------------------------------------------
-// Dil ve Tema ayarları
-// ---------------------------------------------------------------------------
 
 export type LangCode = "auto" | "tr" | "en";
 
 export async function loadLanguagePreference(): Promise<LangCode> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'language'",
-  );
-  const val = rows[0]?.value;
-  if (val === "tr" || val === "en" || val === "auto") {
-    return val;
-  }
-  return "auto";
+  const val = await getSetting("language");
+  return val === "tr" || val === "en" || val === "auto" ? val : "auto";
 }
 
 export async function saveLanguagePreference(lang: LangCode): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('language', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [lang],
-  );
+  await setSetting("language", lang);
 }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 export async function loadThemeSettings(): Promise<ThemeSettings> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT key, value FROM settings WHERE key IN ('bgColor', 'bgOpacity', 'timerColor')",
-  );
-  const map = new Map(rows.map((r) => [r.key, r.value]));
-
+  const map = await getSettingsMap(["bgColor", "bgOpacity", "timerColor"]);
   const bgColor = map.get("bgColor") ?? "";
   const timerColor = map.get("timerColor") ?? "";
   const opacity = Number(map.get("bgOpacity"));
 
   return {
     bgColor: HEX_COLOR.test(bgColor) ? bgColor : DEFAULT_THEME.bgColor,
-    timerColor: HEX_COLOR.test(timerColor)
-      ? timerColor
-      : DEFAULT_THEME.timerColor,
+    timerColor: HEX_COLOR.test(timerColor) ? timerColor : DEFAULT_THEME.timerColor,
     bgOpacity:
       Number.isFinite(opacity) && opacity >= 30 && opacity <= 100
         ? Math.round(opacity)
@@ -1658,79 +1452,26 @@ export async function loadThemeSettings(): Promise<ThemeSettings> {
 }
 
 export async function saveThemeSettings(theme: ThemeSettings): Promise<void> {
-  const db = await getDb();
-  const entries: [string, string][] = [
+  await setSettings([
     ["bgColor", theme.bgColor],
     ["bgOpacity", String(theme.bgOpacity)],
     ["timerColor", theme.timerColor],
-  ];
-  for (const [key, value] of entries) {
-    await db.execute(
-      `INSERT INTO settings (key, value) VALUES ($1, $2)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [key, value],
-    );
-  }
+  ]);
 }
 
-// ---------------------------------------------------------------------------
-// Her Zaman Üstte (Always on Top) & Mola Ayarları & Veri Dışa Aktarma
-// ---------------------------------------------------------------------------
-
 export async function loadAlwaysOnTop(): Promise<boolean> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'alwaysOnTop'",
-  );
-  if (rows.length === 0) return true; // Varsayılan açık
-  return rows[0].value === "1";
+  const val = await getSetting("alwaysOnTop");
+  return val === null ? true : val === "1";
 }
 
 export async function saveAlwaysOnTop(on: boolean): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('alwaysOnTop', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [on ? "1" : "0"],
-  );
-}
-
-export async function loadDefaultBreakMins(): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'defaultBreakMins'",
-  );
-  if (rows.length === 0) return 10;
-  const n = parseInt(rows[0].value, 10);
-  return n === 7 || n === 10 || n === 20 ? n : 10;
-}
-
-export async function saveDefaultBreakMins(mins: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('defaultBreakMins', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [mins.toString()],
-  );
+  await setSetting("alwaysOnTop", on ? "1" : "0");
 }
 
 export async function exportAllData(): Promise<string> {
   const db = await getDb();
-  const days = await db.select("SELECT * FROM study_days ORDER BY id ASC");
-  const sessions = await db.select("SELECT * FROM sessions ORDER BY id ASC");
-  const distractions = await db.select("SELECT * FROM distractions ORDER BY id ASC");
-  const parking_items = await db.select("SELECT * FROM parking_items ORDER BY id ASC");
-  const context_logs = await db.select("SELECT * FROM context_logs ORDER BY id ASC");
-  const work_story_entries = await db.select("SELECT * FROM work_story_entries ORDER BY id ASC");
-  const tags = await db.select("SELECT * FROM tags ORDER BY id ASC");
-  const feedbacks = await db.select("SELECT * FROM feedbacks ORDER BY id DESC");
-  const settings = await db.select("SELECT * FROM settings ORDER BY key ASC");
-
-  const data = {
-    app: "pomodoro-widget",
-    version: "0.1.14",
-    exported_at: new Date().toISOString(),
-    study_days: days,
+  const [
+    study_days,
     sessions,
     distractions,
     parking_items,
@@ -1739,9 +1480,36 @@ export async function exportAllData(): Promise<string> {
     tags,
     feedbacks,
     settings,
-  };
+  ] = await Promise.all([
+    db.select("SELECT * FROM study_days ORDER BY id ASC"),
+    db.select("SELECT * FROM sessions ORDER BY id ASC"),
+    db.select("SELECT * FROM distractions ORDER BY id ASC"),
+    db.select("SELECT * FROM parking_items ORDER BY id ASC"),
+    db.select("SELECT * FROM context_logs ORDER BY id ASC"),
+    db.select("SELECT * FROM work_story_entries ORDER BY id ASC"),
+    db.select("SELECT * FROM tags ORDER BY id ASC"),
+    db.select("SELECT * FROM feedbacks ORDER BY id DESC"),
+    db.select("SELECT * FROM settings ORDER BY key ASC"),
+  ]);
 
-  return JSON.stringify(data, null, 2);
+  return JSON.stringify(
+    {
+      app: "pomodoro-widget",
+      version: "0.1.15",
+      exported_at: new Date().toISOString(),
+      study_days,
+      sessions,
+      distractions,
+      parking_items,
+      context_logs,
+      work_story_entries,
+      tags,
+      feedbacks,
+      settings,
+    },
+    null,
+    2,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1802,13 +1570,10 @@ export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
 };
 
 export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'customWindowSizes'",
-  );
-  if (rows.length === 0) return {};
+  const raw = await getSetting("customWindowSizes");
+  if (!raw) return {};
   try {
-    const parsed = JSON.parse(rows[0].value);
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const out: CustomWindowSizes = {};
     for (const k of ["timer", "menu", "summary", "settings", "dashboard"] as SizeTargetPage[]) {
@@ -1816,7 +1581,14 @@ export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
       if (item && typeof item === "object") {
         const w = Math.round(Number(item.width));
         const h = Math.round(Number(item.height));
-        if (Number.isFinite(w) && Number.isFinite(h) && w >= 200 && w <= 1400 && h >= 110 && h <= 1100) {
+        if (
+          Number.isFinite(w) &&
+          Number.isFinite(h) &&
+          w >= 200 &&
+          w <= 1400 &&
+          h >= 110 &&
+          h <= 1100
+        ) {
           out[k] = { width: w, height: h };
         }
       }
@@ -1830,12 +1602,7 @@ export async function loadCustomWindowSizes(): Promise<CustomWindowSizes> {
 export async function saveCustomWindowSizes(
   sizes: CustomWindowSizes,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('customWindowSizes', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [JSON.stringify(sizes)],
-  );
+  await setSetting("customWindowSizes", JSON.stringify(sizes));
 }
 
 export async function resetCustomWindowSizes(): Promise<void> {
@@ -1859,45 +1626,35 @@ export async function getAdhdInsights(
     params.push(day.id);
   }
 
-  // 1. Çalışma seansları
-  const workSessions = await db.select<{
-    duration_sec: number;
-    started_at: string | null;
-    created_at: string;
-    end_tag: string | null;
-    end_reason: string | null;
-  }[]>(
-    `SELECT duration_sec, started_at, created_at, end_tag, end_reason
-     FROM sessions
-     WHERE mode = 'work' ${dayClause}`,
-    params,
-  );
+  const [workSessions, breakSessions, distRows] = await Promise.all([
+    db.select<{
+      duration_sec: number;
+      started_at: string | null;
+      created_at: string;
+      end_tag: string | null;
+      end_reason: string | null;
+    }[]>(
+      `SELECT duration_sec, started_at, created_at, end_tag, end_reason
+       FROM sessions WHERE mode = 'work' ${dayClause}`,
+      params,
+    ),
+    db.select<{ duration_sec: number; overtime_sec: number | null }[]>(
+      `SELECT duration_sec, overtime_sec
+       FROM sessions WHERE mode = 'break' ${dayClause}`,
+      params,
+    ),
+    db.select<{
+      tag: string | null;
+      created_at: string;
+      elapsed_work_sec: number | null;
+      trigger_type: string | null;
+    }[]>(
+      `SELECT tag, created_at, elapsed_work_sec, trigger_type
+       FROM distractions ${onlyToday ? "WHERE day_id = $1" : ""}`,
+      params,
+    ),
+  ]);
 
-  // 2. Mola seansları
-  const breakSessions = await db.select<{
-    duration_sec: number;
-    overtime_sec: number | null;
-  }[]>(
-    `SELECT duration_sec, overtime_sec
-     FROM sessions
-     WHERE mode = 'break' ${dayClause}`,
-    params,
-  );
-
-  // 3. Dikkat dağılmaları
-  const distRows = await db.select<{
-    tag: string | null;
-    created_at: string;
-    elapsed_work_sec: number | null;
-    trigger_type: string | null;
-  }[]>(
-    `SELECT tag, created_at, elapsed_work_sec, trigger_type
-     FROM distractions
-     ${onlyToday ? "WHERE day_id = $1" : ""}`,
-    params,
-  );
-
-  // Odak Eşiği (kaçıncı dakikada dağılıyor)
   const validElapsed = distRows
     .map((d) => Number(d.elapsed_work_sec ?? 0))
     .filter((s) => s >= 30 && s <= 180 * 60);
@@ -1911,11 +1668,10 @@ export async function getAdhdInsights(
         )
       : null;
 
-  // İçsel dürtü vs Dışsal bölünme
   let internalCount = 0;
   let externalCount = 0;
   const tagFreq = new Map<string, number>();
-  const distBuckets = new Array<number>(12).fill(0); // 2 saatlik dilimler (0..11)
+  const distBuckets = new Array<number>(12).fill(0);
 
   for (const d of distRows) {
     if (d.trigger_type === "external") {
@@ -1946,7 +1702,6 @@ export async function getAdhdInsights(
     }
   }
 
-  // Verimli Saat Dilimi (2 saatlik bloklarda toplam çalışma süresi)
   const workBuckets = new Array<number>(12).fill(0);
   let earlyStopCount = 0;
   let hyperfocusCount = 0;
@@ -1969,28 +1724,18 @@ export async function getAdhdInsights(
     return `${pad(idx * 2)}:00–${pad(idx * 2 + 2)}:00`;
   };
 
-  let peakBucket = -1;
-  let maxWorkSec = 0;
-  for (let i = 0; i < 12; i++) {
-    if (workBuckets[i] > maxWorkSec) {
-      maxWorkSec = workBuckets[i];
-      peakBucket = i;
+  const findMaxBucket = (buckets: number[]): string | null => {
+    let bestIdx = -1;
+    let maxVal = 0;
+    for (let i = 0; i < buckets.length; i++) {
+      if (buckets[i] > maxVal) {
+        maxVal = buckets[i];
+        bestIdx = i;
+      }
     }
-  }
-  const peakFocusHoursLabel = peakBucket >= 0 ? formatBucket(peakBucket) : null;
+    return bestIdx >= 0 ? formatBucket(bestIdx) : null;
+  };
 
-  let worstBucket = -1;
-  let maxDistCnt = 0;
-  for (let i = 0; i < 12; i++) {
-    if (distBuckets[i] > maxDistCnt) {
-      maxDistCnt = distBuckets[i];
-      worstBucket = i;
-    }
-  }
-  const mostDistractedHoursLabel =
-    worstBucket >= 0 ? formatBucket(worstBucket) : null;
-
-  // Mola sarkması / geçiş direnci
   const overtimeBreaks = breakSessions.filter(
     (b) => Number(b.overtime_sec ?? 0) > 0,
   );
@@ -2025,8 +1770,8 @@ export async function getAdhdInsights(
     internalCount,
     externalCount,
     internalPct,
-    peakFocusHoursLabel,
-    mostDistractedHoursLabel,
+    peakFocusHoursLabel: findMaxBucket(workBuckets),
+    mostDistractedHoursLabel: findMaxBucket(distBuckets),
     avgBreakOvertimeMins,
     overtimeBreakRatePct,
     completionRatePct,
@@ -2040,13 +1785,10 @@ export async function getAdhdInsights(
 // ---------------------------------------------------------------------------
 
 export async function loadStudyPlans(): Promise<StudyPlan[]> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'studyPlans'",
-  );
-  if (rows.length === 0) return DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
+  const raw = await getSetting("studyPlans");
+  if (!raw) return DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
   try {
-    const parsed = JSON.parse(rows[0].value);
+    const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
       return DEFAULT_STUDY_PLANS.map((def) => {
         const found = parsed.find(
@@ -2062,26 +1804,18 @@ export async function loadStudyPlans(): Promise<StudyPlan[]> {
 }
 
 export async function saveStudyPlans(plans: StudyPlan[]): Promise<void> {
-  const db = await getDb();
   const sanitized = DEFAULT_STUDY_PLANS.map((def) => {
     const found = plans.find((p) => p.id === def.id);
     return found ? sanitizePlan(found, def) : { ...def };
   });
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('studyPlans', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [JSON.stringify(sanitized)],
-  );
+  await setSetting("studyPlans", JSON.stringify(sanitized));
 }
 
 export async function loadRuntimeState(): Promise<RuntimeState | null> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'runtimeState'",
-  );
-  if (rows.length === 0) return null;
+  const rawStr = await getSetting("runtimeState");
+  if (!rawStr) return null;
   try {
-    const raw = JSON.parse(rows[0].value) as Partial<RuntimeState>;
+    const raw = JSON.parse(rawStr) as Partial<RuntimeState>;
     if (!raw || typeof raw !== "object") return null;
     const mode: TimerMode = raw.mode === "break" ? "break" : "work";
     const breakKind: BreakKind =
@@ -2125,41 +1859,22 @@ export async function loadRuntimeState(): Promise<RuntimeState | null> {
 }
 
 export async function saveRuntimeState(state: RuntimeState): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('runtimeState', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [JSON.stringify(state)],
-  );
+  await setSetting("runtimeState", JSON.stringify(state));
 }
 
 export async function loadActivePlanId(): Promise<string> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'activePlanId'",
-  );
-  if (rows.length === 0) return "developer";
-  return rows[0].value || "developer";
+  return (await getSetting("activePlanId")) || "developer";
 }
 
 export async function saveActivePlanId(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('activePlanId', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [id],
-  );
+  await setSetting("activePlanId", id);
 }
 
 export async function loadSessionCycleStats(): Promise<{
   completedWorkCount: number;
   shortBreakCount: number;
 }> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT key, value FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount')",
-  );
-  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const map = await getSettingsMap(["completedWorkCount", "sessionShortBreakCount"]);
   const c = parseInt(map.get("completedWorkCount") || "0", 10);
   const s = parseInt(map.get("sessionShortBreakCount") || "0", 10);
   return {
@@ -2172,22 +1887,14 @@ export async function saveSessionCycleStats(
   completedWorkCount: number,
   shortBreakCount: number,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('completedWorkCount', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(completedWorkCount)],
-  );
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('sessionShortBreakCount', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(shortBreakCount)],
-  );
+  await setSettings([
+    ["completedWorkCount", String(completedWorkCount)],
+    ["sessionShortBreakCount", String(shortBreakCount)],
+  ]);
 }
 
 // ---------------------------------------------------------------------------
 // "Sonra Bak" Otoparkı (Parking Lot: Dürtüsel Görevler, Fikirler & Ekran Notları)
-// Ekleme sırasına göre (ORDER BY id ASC) saklanır ve ayrıştırılır.
 // ---------------------------------------------------------------------------
 
 export async function addParkingItem(params: {
@@ -2198,7 +1905,9 @@ export async function addParkingItem(params: {
   contextText?: string;
   screenshotData?: string;
 }): Promise<ParkingItem | null> {
-  const trimmed = params.content.trim() || (params.itemType === "screenshot" ? "📸 Ekran Görüntüsü Notu" : "");
+  const trimmed =
+    params.content.trim() ||
+    (params.itemType === "screenshot" ? "📸 Ekran Görüntüsü Notu" : "");
   if (!trimmed) return null;
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
@@ -2217,9 +1926,8 @@ export async function addParkingItem(params: {
     [day.id, params.itemType, trimmed, status, app, win, ctx, shot, nowIso, nowIso],
   );
 
-  const insertedId = Number(res.lastInsertId);
   const item: ParkingItem = {
-    id: insertedId,
+    id: Number(res.lastInsertId),
     day_id: day.id,
     item_type: params.itemType,
     content: trimmed,
@@ -2242,24 +1950,23 @@ export async function getParkingLotData(
   onlyToday = false,
 ): Promise<ParkingLotData> {
   const db = await getDb();
-  let rows: ParkingItem[];
-
+  const params: number[] = [];
+  let whereClause = "";
   if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
-    rows = await db.select<ParkingItem[]>(
-      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced, keep_note_id, created_at, updated_at
-       FROM parking_items
-       WHERE day_id = $1
-       ORDER BY id ASC`,
-      [day.id],
-    );
-  } else {
-    rows = await db.select<ParkingItem[]>(
-      `SELECT id, day_id, item_type, content, status, active_app, active_window, context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced, keep_note_id, created_at, updated_at
-       FROM parking_items
-       ORDER BY id ASC`,
-    );
+    whereClause = "WHERE day_id = $1";
+    params.push(day.id);
   }
+
+  const rows = await db.select<ParkingItem[]>(
+    `SELECT id, day_id, item_type, content, status, active_app, active_window,
+            context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced,
+            keep_note_id, created_at, updated_at
+     FROM parking_items
+     ${whereClause}
+     ORDER BY id ASC`,
+    params,
+  );
 
   const pendingTasks: ParkingItem[] = [];
   const doneTasks: ParkingItem[] = [];
@@ -2300,14 +2007,12 @@ export async function getParkingLotData(
       }
     } else if (item.item_type === "screenshot") {
       screenshotNotes.push(item);
+    } else if (item.status === "important") {
+      importantIdeas.push(item);
+    } else if (item.status === "unimportant") {
+      unimportantIdeas.push(item);
     } else {
-      if (item.status === "important") {
-        importantIdeas.push(item);
-      } else if (item.status === "unimportant") {
-        unimportantIdeas.push(item);
-      } else {
-        unratedIdeas.push(item);
-      }
+      unratedIdeas.push(item);
     }
   }
 
@@ -2558,7 +2263,8 @@ export async function getAppDistractionSummary(
 ): Promise<AppDistractionGroup[]> {
   const db = await getDb();
   const params: number[] = [];
-  let whereClause = "WHERE (active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != '')";
+  let whereClause =
+    "WHERE (active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != '')";
   if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     whereClause =
@@ -2636,11 +2342,7 @@ export async function getAppDistractionSummary(
 // ---------------------------------------------------------------------------
 
 export async function loadGlobalShortcuts(): Promise<GlobalShortcutSettings> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT key, value FROM settings WHERE key IN ('distractionShortcut', 'contextShortcut')",
-  );
-  const map = new Map(rows.map((r) => [r.key, r.value]));
+  const map = await getSettingsMap(["distractionShortcut", "contextShortcut"]);
   return {
     distractionShortcut:
       map.get("distractionShortcut")?.trim() ||
@@ -2653,17 +2355,10 @@ export async function loadGlobalShortcuts(): Promise<GlobalShortcutSettings> {
 export async function saveGlobalShortcuts(
   shortcuts: GlobalShortcutSettings,
 ): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('distractionShortcut', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [shortcuts.distractionShortcut.trim()],
-  );
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('contextShortcut', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [shortcuts.contextShortcut.trim()],
-  );
+  await setSettings([
+    ["distractionShortcut", shortcuts.distractionShortcut.trim()],
+    ["contextShortcut", shortcuts.contextShortcut.trim()],
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -2723,32 +2418,23 @@ export async function getWorkStoryEntries(
 ): Promise<WorkStoryEntry[]> {
   const db = await getDb();
   const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));
+  const params: number[] = [];
+  let whereClause = "";
   if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
-    const rows = await db.select<WorkStoryEntry[]>(
-      `SELECT id, day_id, entry_type, context_text, work_tag, active_app, active_window,
-              note, screenshot_data, elapsed_work_sec, created_at
-       FROM work_story_entries
-       WHERE day_id = $1
-       ORDER BY id DESC
-       LIMIT $2`,
-      [day.id, safeLimit],
-    );
-    return rows.map((r) => ({
-      ...r,
-      id: Number(r.id),
-      day_id: Number(r.day_id),
-      elapsed_work_sec: Number(r.elapsed_work_sec ?? 0),
-    }));
+    whereClause = "WHERE day_id = $1";
+    params.push(day.id);
   }
+  params.push(safeLimit);
 
   const rows = await db.select<WorkStoryEntry[]>(
     `SELECT id, day_id, entry_type, context_text, work_tag, active_app, active_window,
             note, screenshot_data, elapsed_work_sec, created_at
      FROM work_story_entries
+     ${whereClause}
      ORDER BY id DESC
-     LIMIT $1`,
-    [safeLimit],
+     LIMIT $${params.length}`,
+    params,
   );
   return rows.map((r) => ({
     ...r,
@@ -2769,13 +2455,10 @@ export async function deleteWorkStoryEntry(id: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function loadCloudAuthState(): Promise<CloudAuthState> {
-  const db = await getDb();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'cloudAuthState'",
-  );
-  if (rows.length === 0) return { ...DEFAULT_CLOUD_AUTH };
+  const raw = await getSetting("cloudAuthState");
+  if (!raw) return { ...DEFAULT_CLOUD_AUTH };
   try {
-    const parsed = JSON.parse(rows[0].value);
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CLOUD_AUTH };
     return {
       userId: typeof parsed.userId === "string" ? parsed.userId : "",
@@ -2803,12 +2486,7 @@ export async function loadCloudAuthState(): Promise<CloudAuthState> {
 }
 
 export async function saveCloudAuthState(state: CloudAuthState): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO settings (key, value) VALUES ('cloudAuthState', $1)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [JSON.stringify(state)],
-  );
+  await setSetting("cloudAuthState", JSON.stringify(state));
 }
 
 export async function getPendingSyncQueue(limit = 100): Promise<SyncQueueItem[]> {
@@ -2842,27 +2520,35 @@ export async function removeSyncedQueueIds(ids: number[]): Promise<void> {
 }
 
 export interface UserCloudSnapshot {
-  study_days: any[];
-  sessions: any[];
-  distractions: any[];
-  parking_items: any[];
-  context_logs: any[];
-  work_story_entries: any[];
-  tags: any[];
+  study_days: unknown[];
+  sessions: unknown[];
+  distractions: unknown[];
+  parking_items: unknown[];
+  context_logs: unknown[];
+  work_story_entries: unknown[];
+  tags: unknown[];
   exported_at: string;
 }
 
 export async function exportUserCloudSnapshot(): Promise<UserCloudSnapshot> {
   const db = await getDb();
-  const study_days = await db.select<any[]>("SELECT * FROM study_days ORDER BY id ASC");
-  const sessions = await db.select<any[]>("SELECT * FROM sessions ORDER BY id ASC");
-  const distractions = await db.select<any[]>("SELECT * FROM distractions ORDER BY id ASC");
-  const parking_items = await db.select<any[]>("SELECT * FROM parking_items ORDER BY id ASC");
-  const context_logs = await db.select<any[]>("SELECT * FROM context_logs ORDER BY id ASC");
-  const work_story_entries = await db.select<any[]>(
-    "SELECT * FROM work_story_entries ORDER BY id DESC LIMIT 60",
-  );
-  const tags = await db.select<any[]>("SELECT * FROM tags ORDER BY id ASC");
+  const [
+    study_days,
+    sessions,
+    distractions,
+    parking_items,
+    context_logs,
+    work_story_entries,
+    tags,
+  ] = await Promise.all([
+    db.select<unknown[]>("SELECT * FROM study_days ORDER BY id ASC"),
+    db.select<unknown[]>("SELECT * FROM sessions ORDER BY id ASC"),
+    db.select<unknown[]>("SELECT * FROM distractions ORDER BY id ASC"),
+    db.select<unknown[]>("SELECT * FROM parking_items ORDER BY id ASC"),
+    db.select<unknown[]>("SELECT * FROM context_logs ORDER BY id ASC"),
+    db.select<unknown[]>("SELECT * FROM work_story_entries ORDER BY id DESC LIMIT 60"),
+    db.select<unknown[]>("SELECT * FROM tags ORDER BY id ASC"),
+  ]);
 
   return {
     study_days,
@@ -2886,15 +2572,18 @@ export async function mergeRemoteSnapshotToLocal(
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
 
-  // Parking items (content + created_at eşleşmesine göre eksik olanları ekle veya durumunu güncelle)
   if (Array.isArray(remote.parking_items)) {
-    const localRows = await db.select<{ id: number; content: string; created_at: string; status: string }[]>(
-      "SELECT id, content, created_at, status FROM parking_items",
-    );
+    const localRows = await db.select<{
+      id: number;
+      content: string;
+      created_at: string;
+      status: string;
+    }[]>("SELECT id, content, created_at, status FROM parking_items");
     const localKeyMap = new Map(
       localRows.map((r) => [`${r.content}|||${r.created_at}`, r]),
     );
-    for (const item of remote.parking_items) {
+    for (const rawItem of remote.parking_items) {
+      const item = rawItem as Partial<ParkingItem> | null;
       if (!item || typeof item.content !== "string") continue;
       const key = `${item.content}|||${item.created_at || ""}`;
       const existing = localKeyMap.get(key);
@@ -2928,13 +2617,13 @@ export async function mergeRemoteSnapshotToLocal(
     }
   }
 
-  // Work story entries (created_at eşleşmesine göre eksik olanları ekle)
   if (Array.isArray(remote.work_story_entries)) {
     const localStories = await db.select<{ created_at: string }[]>(
       "SELECT created_at FROM work_story_entries",
     );
     const seen = new Set(localStories.map((s) => s.created_at));
-    for (const st of remote.work_story_entries) {
+    for (const rawSt of remote.work_story_entries) {
+      const st = rawSt as Partial<WorkStoryEntry> | null;
       if (!st || !st.created_at || seen.has(st.created_at)) continue;
       seen.add(st.created_at);
       await db.execute(

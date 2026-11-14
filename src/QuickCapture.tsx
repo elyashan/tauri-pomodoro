@@ -11,6 +11,9 @@ import {
   compressAndCropDataUrl,
 } from "./screenshot";
 import { ActiveLang, translations } from "./i18n";
+import { DISTRACT_CATEGORIES } from "./constants";
+import { isLightColor } from "./lib/color";
+import { ScreenshotCropper } from "./components/ScreenshotCropper";
 import "./App.css";
 
 interface FrontendContextSnapshot {
@@ -40,24 +43,6 @@ export interface CaptureSubmittedEvent {
   activeApp: string;
   activeWindow: string;
   screenshotData?: string;
-}
-
-const CATEGORIES_ORDER: DistractionCategory[] = [
-  "impulsive_task",
-  "idea",
-  "screenshot_note",
-  "internal",
-  "external",
-  "escape",
-];
-
-function isLightHex(hex: string): boolean {
-  if (!hex || !hex.startsWith("#") || hex.length < 7) return false;
-  const n = parseInt(hex.slice(1, 7), 16);
-  const r = (n >> 16) & 255;
-  const g = (n >> 8) & 255;
-  const b = n & 255;
-  return (r * 299 + g * 587 + b * 114) / 1000 > 150;
 }
 
 function matchCategoryKey(key: string): DistractionCategory | null {
@@ -100,13 +85,9 @@ export default function QuickCapture() {
   const [rawShotUrl, setRawShotUrl] = useState<string>("");
   const [previewShotUrl, setPreviewShotUrl] = useState<string>("");
   const [cropBox, setCropBox] = useState<CropRegionPct | null>(null);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
-    null,
-  );
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const previewWrapRef = useRef<HTMLDivElement | null>(null);
   const reminderTimerRef = useRef<number | null>(null);
 
   const lang: ActiveLang = payload.snapshot.lang === "en" ? "en" : "tr";
@@ -139,7 +120,6 @@ export default function QuickCapture() {
     setText("");
     setRecentIdx(-1);
     setCropBox(null);
-    setDragStart(null);
     if (next.mode === "context") {
       setStage("input");
       invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
@@ -282,37 +262,6 @@ export default function QuickCapture() {
     }, 2400);
   };
 
-  const handlePreviewMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = previewWrapRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const xPct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-    const yPct = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-    setDragStart({ x: xPct, y: yPct });
-    setCropBox({ xPct, yPct, wPct: 0, hPct: 0 });
-  };
-
-  const handlePreviewMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!dragStart) return;
-    const rect = previewWrapRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const curX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-    const curY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
-    const xPct = Math.min(dragStart.x, curX);
-    const yPct = Math.min(dragStart.y, curY);
-    const wPct = Math.abs(curX - dragStart.x);
-    const hPct = Math.abs(curY - dragStart.y);
-    setCropBox({ xPct, yPct, wPct, hPct });
-  };
-
-  const handlePreviewMouseUp = () => {
-    if (!dragStart) return;
-    setDragStart(null);
-    if (cropBox && (cropBox.wPct < 4 || cropBox.hPct < 4)) {
-      setCropBox(null);
-    }
-    inputRef.current?.focus();
-  };
-
   const handleShellKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -338,21 +287,21 @@ export default function QuickCapture() {
       }
       if (e.key === "ArrowRight" || e.key === "Tab") {
         e.preventDefault();
-        const idx = CATEGORIES_ORDER.indexOf(category);
+        const idx = DISTRACT_CATEGORIES.indexOf(category);
         const next =
-          CATEGORIES_ORDER[
-            (idx + (e.shiftKey ? CATEGORIES_ORDER.length - 1 : 1)) %
-              CATEGORIES_ORDER.length
+          DISTRACT_CATEGORIES[
+            (idx + (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
+              DISTRACT_CATEGORIES.length
           ];
         setCategory(next);
         return;
       }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        const idx = CATEGORIES_ORDER.indexOf(category);
+        const idx = DISTRACT_CATEGORIES.indexOf(category);
         const prev =
-          CATEGORIES_ORDER[
-            (idx + CATEGORIES_ORDER.length - 1) % CATEGORIES_ORDER.length
+          DISTRACT_CATEGORIES[
+            (idx + DISTRACT_CATEGORIES.length - 1) % DISTRACT_CATEGORIES.length
           ];
         setCategory(prev);
         return;
@@ -383,11 +332,11 @@ export default function QuickCapture() {
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        const idx = CATEGORIES_ORDER.indexOf(category);
+        const idx = DISTRACT_CATEGORIES.indexOf(category);
         const next =
-          CATEGORIES_ORDER[
-            (idx + (e.shiftKey ? CATEGORIES_ORDER.length - 1 : 1)) %
-              CATEGORIES_ORDER.length
+          DISTRACT_CATEGORIES[
+            (idx + (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
+              DISTRACT_CATEGORIES.length
           ];
         setCategory(next);
         return;
@@ -427,7 +376,7 @@ export default function QuickCapture() {
     }
   };
 
-  const isLight = isLightHex(payload.snapshot.bgColor);
+  const isLight = isLightColor(payload.snapshot.bgColor);
   const addsPenalty = doesCategoryAddPenalty(category);
   const penaltyMins = payload.snapshot.distractPenaltyMins;
   const activeTabDisplay =
@@ -473,7 +422,7 @@ export default function QuickCapture() {
 
           {/* 6 Kategori Seçici (1-6 veya Harfler: G, F, S [SS Notu], İ, D, Z) */}
           <div className="qc-cat-row">
-            {CATEGORIES_ORDER.map((cat) => {
+            {DISTRACT_CATEGORIES.map((cat) => {
               const selected = category === cat;
               const isZeroPenalty = !doesCategoryAddPenalty(cat);
               return (
@@ -497,59 +446,17 @@ export default function QuickCapture() {
 
           {/* 3. Şık (3·S): Ufak Ekran Görüntüsü Penceresi & Bölge Kırpıcı */}
           {category === "screenshot_note" && (
-            <div className="qc-ss-box">
-              <div className="qc-ss-toolbar">
-                <span className="qc-ss-hint">{t.ssCropHint}</span>
-                <div className="qc-ss-actions">
-                  {cropBox && (
-                    <button
-                      type="button"
-                      className="qc-mini-btn"
-                      onClick={() => setCropBox(null)}
-                    >
-                      {t.ssResetCropBtn}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="qc-mini-btn"
-                    onClick={() => loadScreenshotPreview(true)}
-                  >
-                    {t.ssRetakeBtn}
-                  </button>
-                </div>
-              </div>
-              <div
-                ref={previewWrapRef}
-                className="qc-ss-preview-wrap"
-                onMouseDown={handlePreviewMouseDown}
-                onMouseMove={handlePreviewMouseMove}
-                onMouseUp={handlePreviewMouseUp}
-                onMouseLeave={handlePreviewMouseUp}
-              >
-                {previewShotUrl ? (
-                  <img
-                    src={previewShotUrl}
-                    alt="Screenshot preview"
-                    className="qc-ss-img"
-                    draggable={false}
-                  />
-                ) : (
-                  <div className="qc-ss-empty">📸 ...</div>
-                )}
-                {cropBox && cropBox.wPct > 1 && cropBox.hPct > 1 && (
-                  <div
-                    className="qc-ss-crop-rect"
-                    style={{
-                      left: `${cropBox.xPct}%`,
-                      top: `${cropBox.yPct}%`,
-                      width: `${cropBox.wPct}%`,
-                      height: `${cropBox.hPct}%`,
-                    }}
-                  />
-                )}
-              </div>
-            </div>
+            <ScreenshotCropper
+              previewUrl={previewShotUrl}
+              cropBox={cropBox}
+              onChangeCropBox={setCropBox}
+              onRetake={() => loadScreenshotPreview(true)}
+              cropHint={t.ssCropHint}
+              resetCropLabel={t.ssResetCropBtn}
+              retakeLabel={t.ssRetakeBtn}
+              minCropPct={4}
+              onCropEnd={() => inputRef.current?.focus()}
+            />
           )}
 
           {/* Tek Satır Hızlı Input */}

@@ -202,18 +202,6 @@ button.icon-btn:hover {
   margin-top: 3px;
 }
 
-.timer-input {
-  width: 96px;
-  font-size: 32px;
-  font-weight: 700;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  outline: none;
-}
-
 /* Alt kontrol butonları */
 .btn-row {
   display: flex;
@@ -266,26 +254,6 @@ button.ghost-btn {
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Dikkat dağılma mini formu */
-.distract-box {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 100%;
-}
-
-.distract-input {
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(0, 0, 0, 0.35);
-  color: #fff;
-  font-size: 12px;
-  outline: none;
-}
-
 /* Ana Menü */
 .stats-grid {
   display: grid;
@@ -311,15 +279,6 @@ button.ghost-btn {
   font-size: 10px;
   color: #a1a1aa;
   margin-top: 2px;
-}
-
-.last-pos-bar {
-  font-size: 11px;
-  color: #cbd5e1;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 6px 8px;
-  border-radius: 7px;
-  text-align: center;
 }
 
 .menu-actions {
@@ -394,16 +353,6 @@ button.ghost-btn {
   white-space: nowrap;
 }
 
-.distract-list {
-  margin-top: 6px;
-  max-height: 58px;
-  overflow-y: auto;
-  font-size: 10px;
-  color: #a1a1aa;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 /* Dikkat dağılma şıkları (Chip yapısı) */
 .reason-chips {
   display: flex;
@@ -436,55 +385,6 @@ button.ghost-btn {
 .new-reason-row {
   display: flex;
   gap: 5px;
-}
-
-/* Özet ekranı: Dikkat dağılma sıklığı bölümü */
-.freq-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-  margin-bottom: 4px;
-  font-size: 11px;
-  color: #d4d4d8;
-  font-weight: 600;
-}
-
-.freq-list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  max-height: 96px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.freq-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.freq-label-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #d4d4d8;
-}
-
-.freq-bar-bg {
-  width: 100%;
-  height: 5px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.freq-bar-fill {
-  height: 100%;
-  background: #f87171;
-  border-radius: 4px;
-  transition: width 0.2s ease;
 }
 
 /* Güncelleme bildirimi */
@@ -617,8 +517,6 @@ button:disabled {
 .light-theme .badge,
 .light-theme .settings-label,
 .light-theme .stat-val,
-.light-theme .freq-header,
-.light-theme .freq-label-row,
 .light-theme .tooltip-banner {
   color: #27272a;
 }
@@ -627,8 +525,7 @@ button:disabled {
 .light-theme .stat-lbl,
 .light-theme .bar-hours,
 .light-theme .bar-label,
-.light-theme .update-row,
-.light-theme .last-pos-bar {
+.light-theme .update-row {
   color: #52525b;
 }
 
@@ -652,7 +549,6 @@ button:disabled {
 }
 
 .light-theme .stat-card,
-.light-theme .last-pos-bar,
 .light-theme .settings-section,
 .light-theme .tooltip-banner {
   background: rgba(0, 0, 0, 0.05);
@@ -664,13 +560,6 @@ button:disabled {
 
 .light-theme .update-banner {
   color: #14532d;
-}
-
-.light-theme .distract-input,
-.light-theme .timer-input {
-  background: rgba(255, 255, 255, 0.7);
-  color: #18181b;
-  border-color: rgba(0, 0, 0, 0.2);
 }
 
 .light-theme button.swatch {
@@ -1291,39 +1180,6 @@ button:disabled {
 
 .pin-btn:hover {
   opacity: 1;
-}
-
-/* ==========================================================================
-   MOLA SEÇENEKLERİ (BREAK PRESET CHIPS)
-   ========================================================================== */
-.break-presets-row {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.break-chip-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  font-size: 9px;
-  padding: 2px 8px;
-  color: #cbd5e1;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.break-chip-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
-}
-
-.break-chip-btn.active {
-  background: rgba(56, 189, 248, 0.28);
-  border-color: #38bdf8;
-  color: #7dd3fc;
-  font-weight: 600;
 }
 
 /* ==========================================================================
@@ -2096,40 +1952,6 @@ button.mini-dock-btn:hover {
   border-color: rgba(0, 0, 0, 0.2);
 }
 
-/* Dikkat Dağılma Tetikleyici Seçici (İçsel Dürtü vs Dışsal Etken) */
-.trigger-toggle-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
-}
-
-button.trigger-btn {
-  padding: 4px 6px;
-  font-size: 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: #cbd5e1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-
-button.trigger-btn.active-internal {
-  background: rgba(168, 85, 247, 0.28);
-  border-color: #c084fc;
-  color: #f3e8ff;
-  font-weight: 600;
-}
-
-button.trigger-btn.active-external {
-  background: rgba(245, 158, 11, 0.26);
-  border-color: #fbbf24;
-  color: #fef3c7;
-  font-weight: 600;
-}
-
 /* Özet Ekranı: ADHD Öz-Farkındalık Sekmesi */
 .adhd-insights-wrap {
   display: flex;
@@ -2665,18 +2487,8 @@ button.cat5-btn.active.has-pen {
   max-width: 100%;
 }
 
-.reminder-banner.short-break-note {
-  background: rgba(56, 189, 248, 0.16);
-  border-color: rgba(56, 189, 248, 0.45);
-  color: #e0f2fe;
-}
-
 .light-theme .reminder-banner {
   color: #064e3b;
-}
-
-.light-theme .reminder-banner.short-break-note {
-  color: #0c4a6e;
 }
 
 .reminder-banner-text {
@@ -2989,7 +2801,6 @@ button.qc-mini-btn:hover {
   margin-bottom: 4px;
 }
 
-button.keep-sync-btn,
 button.docs-sync-btn {
   font-size: 9px;
   font-weight: 700;
@@ -3001,12 +2812,10 @@ button.docs-sync-btn {
   cursor: pointer;
 }
 
-button.keep-sync-btn:hover,
 button.docs-sync-btn:hover {
   background: #1d4ed8;
 }
 
-.keep-status-pill,
 .docs-status-pill {
   font-size: 8.5px;
   color: #dbeafe;
@@ -3022,7 +2831,6 @@ button.docs-sync-btn:hover {
   flex-shrink: 0;
 }
 
-button.keep-chip-btn,
 button.docs-chip-btn {
   font-size: 8.5px;
   padding: 1px 5px;
@@ -3033,12 +2841,10 @@ button.docs-chip-btn {
   cursor: pointer;
 }
 
-button.keep-chip-btn:hover,
 button.docs-chip-btn:hover {
   background: #3f3f46;
 }
 
-button.keep-chip-btn.synced,
 button.docs-chip-btn.synced {
   background: #14532d;
   border-color: #22c55e;
@@ -3242,12 +3048,6 @@ button.docs-chip-btn.synced {
 }
 
 /* 📸 Çalışma Hikayesi (Work Story) Galerisi */
-.work-story-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .work-story-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
