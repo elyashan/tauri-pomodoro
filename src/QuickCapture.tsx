@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  addCategoryTag,
   DistractionCategory,
   doesCategoryAddPenalty,
+  getCategoryTagsByPopularity,
+  getTopCategoryReasons,
+  TagItem,
 } from "./db";
-import {
-  CropRegionPct,
-  captureScreenSnapshotRaw,
-  compressAndCropDataUrl,
-} from "./screenshot";
 import { ActiveLang, translations } from "./i18n";
 import { DISTRACT_CATEGORIES } from "./constants";
 import { isLightColor } from "./lib/color";
-import { ScreenshotCropper } from "./components/ScreenshotCropper";
-import "./App.css";
 
 interface FrontendContextSnapshot {
   currentContext: string;
@@ -26,6 +24,7 @@ interface FrontendContextSnapshot {
   lang: string;
   bgColor: string;
   recentContexts: string[];
+  uiScale?: number;
 }
 
 interface CaptureOpenPayload {
@@ -39,20 +38,21 @@ interface CaptureOpenPayload {
 export interface CaptureSubmittedEvent {
   mode: "distraction" | "context";
   category?: DistractionCategory;
+  tag?: string;
   text: string;
+  newContext?: string;
   activeApp: string;
   activeWindow: string;
-  screenshotData?: string;
 }
+
+type CaptureStage = "category" | "tag" | "input" | "context" | "reminder";
 
 function matchCategoryKey(key: string): DistractionCategory | null {
   const k = key.toLocaleLowerCase("tr-TR");
   if (k === "1" || k === "g" || k === "t") return "impulsive_task";
   if (k === "2" || k === "f") return "idea";
-  if (k === "3" || k === "s") return "screenshot_note";
-  if (k === "4" || k === "i" || k === "ı" || k === "n") return "internal";
-  if (k === "5" || k === "d" || k === "e") return "external";
-  if (k === "6" || k === "z" || k === "k") return "escape";
+  if (k === "3" || k === "i" || k === "ı") return "internal";
+  if (k === "4" || k === "d" || k === "e") return "external";
   return null;
 }
 
@@ -75,67 +75,105 @@ export default function QuickCapture() {
     },
   });
 
-  const [stage, setStage] = useState<"select" | "input" | "reminder">("select");
+  const [stage, setStage] = useState<CaptureStage>("category");
   const [category, setCategory] =
     useState<DistractionCategory>("impulsive_task");
+  const [categoryTags, setCategoryTags] = useState<TagItem[]>([]);
+  const [tagIdx, setTagIdx] = useState<number>(0); // 0 = No Tag
+  const [selectedTag, setSelectedTag] = useState<string>("");
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTagInput, setNewTagInput] = useState("");
+
   const [text, setText] = useState("");
-  const [recentIdx, setRecentIdx] = useState<number>(-1);
+  const [popularEntries, setPopularEntries] = useState<string[]>([]);
+  const [focusedEntryIdx, setFocusedEntryIdx] = useState<number>(-1); // -1 = input
 
-  // 3. Şık (3·S): Ufak Ekran Görüntüsü Önizleme & Bölge Kırpma (Crop) durumu
-  const [rawShotUrl, setRawShotUrl] = useState<string>("");
-  const [previewShotUrl, setPreviewShotUrl] = useState<string>("");
-  const [cropBox, setCropBox] = useState<CropRegionPct | null>(null);
+  const [contextText, setContextText] = useState("");
+  const [focusedContextIdx, setFocusedContextIdx] = useState<number>(-1); // -1 = input
 
-  const shellRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const contextInputRef = useRef<HTMLInputElement>(null);
+  const newTagInputRef = useRef<HTMLInputElement>(null);
+  const entryRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const reminderTimerRef = useRef<number | null>(null);
 
   const lang: ActiveLang = payload.snapshot.lang === "en" ? "en" : "tr";
   const t = translations[lang];
+  const uiScaleMult = Math.max(1, (payload?.snapshot?.uiScale ?? 100) / 100);
 
-  const closeAndRestore = () => {
+  const clearReminderTimer = () => {
     if (reminderTimerRef.current) {
       window.clearTimeout(reminderTimerRef.current);
       reminderTimerRef.current = null;
     }
+  };
+
+  const closeAndRestore = () => {
+    clearReminderTimer();
     invoke("close_capture_and_restore_focus").catch(() => {});
   };
 
-  const loadScreenshotPreview = async (fresh: boolean) => {
-    const res = await captureScreenSnapshotRaw(fresh);
-    if (res.dataUrl) {
-      setRawShotUrl(res.dataUrl);
-      const compressed = await compressAndCropDataUrl(res.dataUrl, null, 760, 0.72);
-      setPreviewShotUrl(compressed);
-      setCropBox(null);
+  const resizeForStage = (nextStage: CaptureStage, scalePct?: number) => {
+    const mult = Math.max(1, (scalePct ?? 100) / 100);
+    const dims =
+      nextStage === "reminder"
+        ? { w: 540, h: 205 }
+        : nextStage === "input"
+          ? { w: 580, h: 395 }
+          : nextStage === "context"
+            ? { w: 580, h: 325 }
+            : { w: 580, h: 280 };
+    invoke("set_capture_window_size", {
+      width: Math.round(dims.w * mult),
+      height: Math.round(dims.h * mult),
+    }).catch(() => {});
+  };
+
+  const getCategoryLabel = (c: DistractionCategory): string => {
+    switch (c) {
+      case "impulsive_task":
+        return t.catImpulsiveTask;
+      case "idea":
+        return t.catIdea;
+      case "internal":
+        return t.catInternal;
+      case "external":
+        return t.catExternal;
     }
   };
 
+  const loadTagsForCategory = async (cat: DistractionCategory, l: ActiveLang) => {
+    const trObj = translations[l];
+    const loaded = await getCategoryTagsByPopularity(
+      cat,
+      trObj.defaultCategoryTags[cat],
+    );
+    setCategoryTags(loaded);
+  };
+
   const applyOpenPayload = (next: CaptureOpenPayload) => {
-    if (reminderTimerRef.current) {
-      window.clearTimeout(reminderTimerRef.current);
-      reminderTimerRef.current = null;
-    }
+    clearReminderTimer();
     setPayload(next);
+    setCategory("impulsive_task");
+    setTagIdx(0);
+    setSelectedTag("");
+    setAddingTag(false);
+    setNewTagInput("");
     setText("");
-    setRecentIdx(-1);
-    setCropBox(null);
-    if (next.mode === "context") {
-      setStage("input");
-      invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-    } else {
-      setCategory("impulsive_task");
-      setStage("select");
-      invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
-      // Arka planda kısayol basıldığı andaki ekran görüntüsünü hazırla
-      loadScreenshotPreview(false);
-      requestAnimationFrame(() => {
-        shellRef.current?.focus();
-      });
-    }
+    setPopularEntries([]);
+    setFocusedEntryIdx(-1);
+    setContextText(next.snapshot.currentContext || "");
+    setFocusedContextIdx(-1);
+    setStage("category");
+    resizeForStage("category", next.snapshot.uiScale);
+
+    const nextLang: ActiveLang = next.snapshot.lang === "en" ? "en" : "tr";
+    loadTagsForCategory("impulsive_task", nextLang).catch(() => {});
+
+    requestAnimationFrame(() => {
+      shellRef.current?.focus();
+    });
   };
 
   useEffect(() => {
@@ -154,53 +192,81 @@ export default function QuickCapture() {
 
     return () => {
       if (unlisten) unlisten();
-      if (reminderTimerRef.current) {
-        window.clearTimeout(reminderTimerRef.current);
-      }
+      clearReminderTimer();
     };
   }, []);
 
-  // 3. şık (screenshot_note) seçildiğinde pencereyi önizleme için büyüt, diğerlerinde küçült
   useEffect(() => {
-    if (payload.mode === "distraction" && stage !== "reminder") {
-      if (category === "screenshot_note") {
-        invoke("set_capture_window_size", { width: 560, height: 390 }).catch(() => {});
-        if (!previewShotUrl) {
-          loadScreenshotPreview(false);
-        }
-      } else {
-        invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
+    resizeForStage(stage, payload?.snapshot?.uiScale);
+  }, [stage, payload?.snapshot?.uiScale]);
+
+  useEffect(() => {
+    document.documentElement.style.zoom = "";
+    if (payload?.snapshot?.uiScale !== undefined) {
+      invoke("set_window_zoom", { zoom: uiScaleMult }).catch(() => {});
+    }
+  }, [uiScaleMult, payload?.snapshot?.uiScale]);
+
+  useEffect(() => {
+    if (stage === "tag") {
+      loadTagsForCategory(category, lang).catch(() => {});
+    }
+  }, [category, stage, lang]);
+
+  const enterTagStage = (targetCat: DistractionCategory) => {
+    setCategory(targetCat);
+    setTagIdx(0);
+    setSelectedTag("");
+    setAddingTag(false);
+    setNewTagInput("");
+    setStage("tag");
+    loadTagsForCategory(targetCat, lang).catch(() => {});
+    requestAnimationFrame(() => {
+      shellRef.current?.focus();
+    });
+  };
+
+  const enterInputStage = async (tagValue: string) => {
+    setSelectedTag(tagValue);
+    setFocusedEntryIdx(-1);
+    setStage("input");
+    const entries = await getTopCategoryReasons(category, tagValue, 5);
+    setPopularEntries(entries);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
+
+  const confirmTagByIndex = (idx: number) => {
+    const chosen = idx <= 0 ? "" : categoryTags[idx - 1]?.name || "";
+    setTagIdx(idx);
+    enterInputStage(chosen).catch(() => {});
+  };
+
+  const handleSaveNewTag = async () => {
+    const trimmed = newTagInput.trim();
+    if (!trimmed) {
+      setAddingTag(false);
+      setNewTagInput("");
+      requestAnimationFrame(() => shellRef.current?.focus());
+      return;
+    }
+    const created = await addCategoryTag(trimmed, category);
+    const updated = await getCategoryTagsByPopularity(
+      category,
+      t.defaultCategoryTags[category],
+    );
+    setCategoryTags(updated);
+    setAddingTag(false);
+    setNewTagInput("");
+    if (created) {
+      const idx = updated.findIndex((item) => item.name === created.name);
+      if (idx >= 0) {
+        setTagIdx(idx + 1);
+        setSelectedTag(created.name);
       }
     }
-  }, [category, stage, payload.mode]);
-
-  useEffect(() => {
-    if (stage === "input") {
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-    } else if (stage === "select" || stage === "reminder") {
-      requestAnimationFrame(() => {
-        shellRef.current?.focus();
-      });
-    }
-  }, [stage]);
-
-  const getCategoryLabel = (cat: DistractionCategory): string => {
-    switch (cat) {
-      case "impulsive_task":
-        return t.catImpulsiveTask;
-      case "idea":
-        return t.catIdea;
-      case "screenshot_note":
-        return t.catScreenshotNote;
-      case "internal":
-        return t.catInternal;
-      case "external":
-        return t.catExternal;
-      case "escape":
-        return t.catEscape;
-    }
+    requestAnimationFrame(() => shellRef.current?.focus());
   };
 
   const effectiveContext =
@@ -211,168 +277,251 @@ export default function QuickCapture() {
         }`
       : "");
 
-  const submitCapture = async (overrideText?: string) => {
-    const finalVal = (overrideText !== undefined ? overrideText : text).trim();
-    if (payload.mode === "context") {
-      if (!finalVal) {
-        closeAndRestore();
-        return;
-      }
-      const msg: CaptureSubmittedEvent = {
-        mode: "context",
-        text: finalVal,
-        activeApp: payload.activeApp,
-        activeWindow: payload.activeWindow,
-      };
-      closeAndRestore();
-      await emitTo("main", "capture-submitted", msg).catch(() => {});
-      return;
-    }
-
-    // Distraction / Görev / Fikir / SS Notu modu
-    let finalScreenshotData: string | undefined;
-    if (category === "screenshot_note") {
-      const srcUrl = rawShotUrl || previewShotUrl;
-      if (srcUrl) {
-        finalScreenshotData = await compressAndCropDataUrl(
-          srcUrl,
-          cropBox,
-          760,
-          0.72,
-        );
-      }
-    }
-
-    const fallbackReason = getCategoryLabel(category);
+  const emitDistractionAndFinish = async (
+    finalNote: string,
+    updatedContext?: string,
+  ) => {
     const msg: CaptureSubmittedEvent = {
       mode: "distraction",
       category,
-      text: finalVal || fallbackReason,
+      tag: selectedTag || undefined,
+      text: finalNote,
+      newContext: updatedContext ? updatedContext.trim() : undefined,
       activeApp: payload.activeApp,
       activeWindow: payload.activeWindow,
-      screenshotData: finalScreenshotData,
     };
     await emitTo("main", "capture-submitted", msg).catch(() => {});
 
-    // Sebebi yazdıktan sonra ekrana son kalınan meşguliyet (context) gelsin
-    invoke("set_capture_window_size", { width: 540, height: 205 }).catch(() => {});
-    setStage("reminder");
-    reminderTimerRef.current = window.setTimeout(() => {
+    const isTrigger = category === "internal" || category === "external";
+    if (!isTrigger && effectiveContext) {
+      setStage("reminder");
+      reminderTimerRef.current = window.setTimeout(() => {
+        closeAndRestore();
+      }, 1700);
+    } else {
       closeAndRestore();
-    }, 2400);
+    }
   };
 
-  const handleShellKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeAndRestore();
-      return;
-    }
+  const advanceFromInput = async (overrideNote?: string) => {
+    const finalNote = (
+      overrideNote !== undefined ? overrideNote : text
+    ).trim();
+    if (!finalNote) return;
 
+    setText(finalNote);
+    if (category === "internal" || category === "external") {
+      setContextText(payload.snapshot.currentContext || "");
+      setFocusedContextIdx(-1);
+      setStage("context");
+      requestAnimationFrame(() => {
+        contextInputRef.current?.focus();
+        contextInputRef.current?.select();
+      });
+    } else {
+      await emitDistractionAndFinish(finalNote);
+    }
+  };
+
+  const recentContexts = payload.snapshot.recentContexts.slice(0, 5);
+
+  const handleShellKeyDown = (e: React.KeyboardEvent) => {
     if (stage === "reminder") {
-      if (e.key === "Enter" || e.key === " ") {
+      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         closeAndRestore();
       }
       return;
     }
 
-    if (payload.mode === "distraction" && stage === "select") {
-      const matched = matchCategoryKey(e.key);
-      if (matched) {
+    if (addingTag) {
+      if (e.key === "Escape") {
         e.preventDefault();
-        setCategory(matched);
-        setStage("input");
-        return;
-      }
-      if (e.key === "ArrowRight" || e.key === "Tab") {
+        e.stopPropagation();
+        setAddingTag(false);
+        setNewTagInput("");
+        requestAnimationFrame(() => shellRef.current?.focus());
+      } else if (e.key === "Enter") {
         e.preventDefault();
-        const idx = DISTRACT_CATEGORIES.indexOf(category);
-        const next =
-          DISTRACT_CATEGORIES[
-            (idx + (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
-              DISTRACT_CATEGORIES.length
-          ];
-        setCategory(next);
-        return;
+        e.stopPropagation();
+        handleSaveNewTag().catch(() => {});
       }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        const idx = DISTRACT_CATEGORIES.indexOf(category);
-        const prev =
-          DISTRACT_CATEGORIES[
-            (idx + DISTRACT_CATEGORIES.length - 1) % DISTRACT_CATEGORIES.length
-          ];
-        setCategory(prev);
-        return;
-      }
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        setStage("input");
-        return;
-      }
-    }
-  };
-
-  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closeAndRestore();
       return;
     }
 
-    if (payload.mode === "distraction") {
-      if (e.altKey) {
-        const matched = matchCategoryKey(e.key);
-        if (matched) {
-          e.preventDefault();
-          setCategory(matched);
-          return;
-        }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (stage === "category") {
+        closeAndRestore();
+      } else if (stage === "tag") {
+        setStage("category");
+        requestAnimationFrame(() => shellRef.current?.focus());
+      } else if (stage === "input") {
+        setStage("tag");
+        requestAnimationFrame(() => shellRef.current?.focus());
+      } else if (stage === "context") {
+        // Save the distraction even if user skips context update
+        emitDistractionAndFinish(text.trim(), undefined).catch(() => {});
       }
-      if (e.key === "Tab") {
+      return;
+    }
+
+    if (stage === "category") {
+      if (e.key === "Tab" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
         e.preventDefault();
         const idx = DISTRACT_CATEGORIES.indexOf(category);
-        const next =
-          DISTRACT_CATEGORIES[
-            (idx + (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
-              DISTRACT_CATEGORIES.length
-          ];
-        setCategory(next);
-        return;
-      }
-      if (e.key === "Backspace" && text.length === 0) {
-        e.preventDefault();
-        setStage("select");
+        const step = e.shiftKey || e.key === "ArrowLeft" ? -1 : 1;
+        const nextIdx =
+          (idx + step + DISTRACT_CATEGORIES.length) %
+          DISTRACT_CATEGORIES.length;
+        setCategory(DISTRACT_CATEGORIES[nextIdx]);
         return;
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        submitCapture();
+        enterTagStage(category);
+        return;
+      }
+      const matched = matchCategoryKey(e.key);
+      if (matched) {
+        e.preventDefault();
+        enterTagStage(matched);
       }
       return;
     }
 
-    // Context mode
-    const recents = payload.snapshot.recentContexts || [];
-    if (e.key === "ArrowDown" && recents.length > 0) {
-      e.preventDefault();
-      const nextIdx = (recentIdx + 1) % recents.length;
-      setRecentIdx(nextIdx);
-      setText(recents[nextIdx]);
+    if (stage === "tag") {
+      const addTagOptionIdx = 1 + categoryTags.length;
+      const totalTagOptions = addTagOptionIdx + 1;
+      if (e.key === "Tab" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const step = e.shiftKey || e.key === "ArrowLeft" ? -1 : 1;
+        const nextIdx = (tagIdx + step + totalTagOptions) % totalTagOptions;
+        setTagIdx(nextIdx);
+        setSelectedTag(
+          nextIdx === 0 || nextIdx === addTagOptionIdx
+            ? ""
+            : categoryTags[nextIdx - 1]?.name || "",
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (tagIdx === addTagOptionIdx) {
+          setAddingTag(true);
+          requestAnimationFrame(() => newTagInputRef.current?.focus());
+        } else {
+          confirmTagByIndex(tagIdx);
+        }
+        return;
+      }
       return;
     }
-    if (e.key === "ArrowUp" && recents.length > 0) {
-      e.preventDefault();
-      const prevIdx =
-        recentIdx <= 0 ? recents.length - 1 : (recentIdx - 1) % recents.length;
-      setRecentIdx(prevIdx);
-      setText(recents[prevIdx]);
+
+    if (stage === "input") {
+      if (e.key === "Tab" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (popularEntries.length === 0) {
+          inputRef.current?.focus();
+          return;
+        }
+        const total = popularEntries.length + 1; // -1 mapped as index 0
+        const currentPos = focusedEntryIdx + 1; // 0 = input, 1..N = entries
+        const back = e.shiftKey || e.key === "ArrowUp";
+        const nextPos = (currentPos + (back ? -1 : 1) + total) % total;
+        const nextIdx = nextPos - 1;
+        setFocusedEntryIdx(nextIdx);
+        if (nextIdx === -1) {
+          requestAnimationFrame(() => inputRef.current?.focus());
+        } else {
+          inputRef.current?.blur();
+          shellRef.current?.focus();
+          requestAnimationFrame(() =>
+            entryRowRefs.current[nextIdx]?.scrollIntoView({ block: "nearest" }),
+          );
+        }
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (focusedEntryIdx >= 0 && popularEntries[focusedEntryIdx]) {
+          advanceFromInput(popularEntries[focusedEntryIdx]).catch(() => {});
+        } else {
+          advanceFromInput().catch(() => {});
+        }
+        return;
+      }
+      if (e.key === " " && focusedEntryIdx >= 0 && popularEntries[focusedEntryIdx]) {
+        e.preventDefault();
+        setText(popularEntries[focusedEntryIdx]);
+        setFocusedEntryIdx(-1);
+        requestAnimationFrame(() => inputRef.current?.focus());
+        return;
+      }
+      if (
+        focusedEntryIdx >= 0 &&
+        e.key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        setFocusedEntryIdx(-1);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
       return;
     }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submitCapture();
+
+    if (stage === "context") {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (recentContexts.length === 0) {
+          contextInputRef.current?.focus();
+          return;
+        }
+        const total = recentContexts.length + 1;
+        const currentPos = focusedContextIdx + 1;
+        const nextPos = (currentPos + (e.shiftKey ? -1 : 1) + total) % total;
+        const nextIdx = nextPos - 1;
+        setFocusedContextIdx(nextIdx);
+        if (nextIdx === -1) {
+          requestAnimationFrame(() => contextInputRef.current?.focus());
+        } else {
+          contextInputRef.current?.blur();
+          shellRef.current?.focus();
+        }
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const chosenContext =
+          focusedContextIdx >= 0 && recentContexts[focusedContextIdx]
+            ? recentContexts[focusedContextIdx]
+            : contextText.trim();
+        emitDistractionAndFinish(text.trim(), chosenContext).catch(() => {});
+        return;
+      }
+      if (
+        e.key === " " &&
+        focusedContextIdx >= 0 &&
+        recentContexts[focusedContextIdx]
+      ) {
+        e.preventDefault();
+        setContextText(recentContexts[focusedContextIdx]);
+        setFocusedContextIdx(-1);
+        requestAnimationFrame(() => contextInputRef.current?.focus());
+        return;
+      }
+      if (
+        focusedContextIdx >= 0 &&
+        e.key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        setFocusedContextIdx(-1);
+        requestAnimationFrame(() => contextInputRef.current?.focus());
+      }
     }
   };
 
@@ -384,11 +533,37 @@ export default function QuickCapture() {
       ? `${payload.activeApp} — ${payload.activeWindow}`
       : payload.activeApp || payload.activeWindow || "—";
 
+  const footerHint =
+    stage === "category"
+      ? t.qcStepCategoryHint
+      : stage === "tag"
+        ? t.qcStepTagHint
+        : stage === "input"
+          ? t.qcStepInputHint
+          : t.qcStepContextHint;
+
+  const handleShellMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "button, input, textarea, select, a, [role='button'], .no-drag, .qc-reminder-card",
+      )
+    ) {
+      return;
+    }
+    shellRef.current?.focus();
+    getCurrentWindow()
+      .startDragging()
+      .catch(() => {});
+  };
+
   return (
     <div
       ref={shellRef}
       tabIndex={0}
       onKeyDown={handleShellKeyDown}
+      onMouseDown={handleShellMouseDown}
       className={`qc-shell ${isLight ? "light-theme" : ""}`}
       style={
         {
@@ -407,35 +582,32 @@ export default function QuickCapture() {
           )}
           <div className="qc-reminder-hint">{t.qcReminderCloseHint}</div>
         </div>
-      ) : payload.mode === "distraction" ? (
+      ) : (
         <>
-          {/* Üst Bilgi Şeridi: Son Kalınan Context & Açık Uygulama/Sekme */}
           <div className="qc-top-strip">
             <div className="qc-context-pill" title={effectiveContext}>
-              <span className="qc-muted">🎯 {t.qcCurrentContextLabel}:</span>{" "}
-              <b>{effectiveContext || t.qcContextNone}</b>
+              <span className="qc-muted">⠿ 🎯 {t.qcCurrentContextLabel}:</span>{" "}
+              <span>{effectiveContext || t.qcContextNone}</span>
             </div>
             <div className="qc-tab-pill" title={activeTabDisplay}>
-              🌐 {activeTabDisplay}
+              <span className="qc-muted">🌐 {t.qcActiveTabLabel}:</span>{" "}
+              <span>{activeTabDisplay}</span>
             </div>
           </div>
 
-          {/* 6 Kategori Seçici (1-6 veya Harfler: G, F, S [SS Notu], İ, D, Z) */}
           <div className="qc-cat-row">
             {DISTRACT_CATEGORIES.map((cat) => {
+              const isParking = !doesCategoryAddPenalty(cat);
               const selected = category === cat;
-              const isZeroPenalty = !doesCategoryAddPenalty(cat);
               return (
                 <button
                   key={cat}
                   type="button"
+                  tabIndex={-1}
                   className={`qc-cat-pill ${selected ? "selected" : ""} ${
-                    isZeroPenalty ? "zero-penalty" : "has-penalty"
+                    isParking ? "parking" : "penalty"
                   }`}
-                  onClick={() => {
-                    setCategory(cat);
-                    setStage("input");
-                  }}
+                  onClick={() => enterTagStage(cat)}
                 >
                   <span className="qc-key-badge">{t.catKeyHints[cat]}</span>
                   <span className="qc-cat-name">{getCategoryLabel(cat)}</span>
@@ -444,134 +616,213 @@ export default function QuickCapture() {
             })}
           </div>
 
-          {/* 3. Şık (3·S): Ufak Ekran Görüntüsü Penceresi & Bölge Kırpıcı */}
-          {category === "screenshot_note" && (
-            <ScreenshotCropper
-              previewUrl={previewShotUrl}
-              cropBox={cropBox}
-              onChangeCropBox={setCropBox}
-              onRetake={() => loadScreenshotPreview(true)}
-              cropHint={t.ssCropHint}
-              resetCropLabel={t.ssResetCropBtn}
-              retakeLabel={t.ssRetakeBtn}
-              minCropPct={4}
-              onCropEnd={() => inputRef.current?.focus()}
-            />
+          {stage === "tag" && (
+            <div className="qc-tags-row">
+              <button
+                type="button"
+                tabIndex={-1}
+                className={`qc-tag-chip ${tagIdx === 0 ? "selected" : ""}`}
+                onClick={() => confirmTagByIndex(0)}
+              >
+                {t.noTagLabel}
+              </button>
+              {categoryTags.map((tagItem, idx) => (
+                <button
+                  key={tagItem.id}
+                  type="button"
+                  tabIndex={-1}
+                  className={`qc-tag-chip ${tagIdx === idx + 1 ? "selected" : ""}`}
+                  onClick={() => confirmTagByIndex(idx + 1)}
+                >
+                  {tagItem.name}
+                </button>
+              ))}
+              {addingTag ? (
+                <div className="qc-tag-inline-form">
+                  <input
+                    ref={newTagInputRef}
+                    type="text"
+                    className="qc-tag-inline-input"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    placeholder={t.newTagPlaceholder}
+                    autoFocus
+                    maxLength={24}
+                  />
+                  <button
+                    type="button"
+                    className="qc-tag-inline-btn save"
+                    onClick={() => handleSaveNewTag().catch(() => {})}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    className="qc-tag-inline-btn cancel"
+                    onClick={() => {
+                      setAddingTag(false);
+                      setNewTagInput("");
+                      requestAnimationFrame(() => shellRef.current?.focus());
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className={`qc-tag-chip add-chip ${
+                    tagIdx === 1 + categoryTags.length ? "selected" : ""
+                  }`}
+                  onClick={() => {
+                    setTagIdx(1 + categoryTags.length);
+                    setAddingTag(true);
+                    requestAnimationFrame(() => newTagInputRef.current?.focus());
+                  }}
+                >
+                  {t.addNewTagBtn}
+                </button>
+              )}
+            </div>
           )}
 
-          {/* Tek Satır Hızlı Input */}
-          <div className="qc-input-row">
-            <input
-              ref={inputRef}
-              type="text"
-              className={`qc-single-input ${
-                stage === "select" ? "waiting-cat" : ""
-              }`}
-              value={text}
-              onFocus={() => {
-                if (stage === "select") setStage("input");
-              }}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={handleInputKeyDown}
-              placeholder={
-                stage === "select"
-                  ? t.qcSelectKeyHint
-                  : t.qcInputPlaceholders[category]
-              }
-            />
-            <span
-              className={`qc-penalty-tag ${
-                addsPenalty ? "penalty" : "no-penalty"
-              }`}
-            >
-              {addsPenalty
-                ? t.addsPenaltyBadge(penaltyMins)
-                : t.noPenaltyParkingBadge}
-            </span>
-          </div>
+          {stage === "input" && (
+            <>
+              <div className="qc-step-hint">
+                <span>
+                  {getCategoryLabel(category)} •{" "}
+                  {selectedTag || t.noTagLabel}
+                </span>
+              </div>
+              <div className="qc-input-row">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className={`qc-single-input ${
+                    focusedEntryIdx === -1 ? "is-focused" : ""
+                  }`}
+                  value={text}
+                  onFocus={() => setFocusedEntryIdx(-1)}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder={t.qcInputPlaceholders[category]}
+                  maxLength={240}
+                />
+                <span
+                  className={`qc-penalty-tag ${addsPenalty ? "penalty" : "parking"}`}
+                >
+                  {addsPenalty
+                    ? t.addsPenaltyBadge(penaltyMins)
+                    : t.noPenaltyParkingBadge}
+                </span>
+              </div>
+
+              {popularEntries.length > 0 && (
+                <div className="qc-entries-box">
+                  <div className="qc-entries-header">
+                    {t.popularEntriesLabel}
+                  </div>
+                  <div className="qc-entries-list">
+                    {popularEntries.map((entry, idx) => {
+                      const isFocused = focusedEntryIdx === idx;
+                      return (
+                        <button
+                          key={`${entry}-${idx}`}
+                          ref={(el) => {
+                            entryRowRefs.current[idx] = el;
+                          }}
+                          type="button"
+                          tabIndex={-1}
+                          className={`qc-entry-row ${isFocused ? "selected" : ""}`}
+                          onClick={() => advanceFromInput(entry).catch(() => {})}
+                        >
+                          <span className="qc-entry-idx">
+                            {isFocused ? "▶" : `${idx + 1}.`}
+                          </span>
+                          <span className="qc-entry-text">{entry}</span>
+                          <span className="qc-entry-hint">
+                            {isFocused ? "Enter ↵" : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {stage === "context" && (
+            <>
+              <div className="qc-step-hint">
+                <span>
+                  🎯 {t.qcContextHeader} — {getCategoryLabel(category)}:{" "}
+                  <strong>{text}</strong>
+                </span>
+              </div>
+              <div className="qc-input-row">
+                <input
+                  ref={contextInputRef}
+                  type="text"
+                  className="qc-single-input"
+                  value={contextText}
+                  onFocus={() => setFocusedContextIdx(-1)}
+                  onChange={(e) => setContextText(e.target.value)}
+                  placeholder={t.qcContextPlaceholder}
+                  maxLength={120}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="primary-btn"
+                  onClick={() =>
+                    emitDistractionAndFinish(
+                      text.trim(),
+                      contextText.trim(),
+                    ).catch(() => {})
+                  }
+                >
+                  ✓
+                </button>
+              </div>
+              {recentContexts.length > 0 && (
+                <div className="qc-recent-row">
+                  <span className="qc-muted">{t.qcRecentContextsLabel}</span>
+                  <div className="qc-recent-chips">
+                    {recentContexts.map((ctx, idx) => (
+                      <button
+                        key={ctx}
+                        type="button"
+                        tabIndex={-1}
+                        className={`qc-recent-chip ${
+                          focusedContextIdx === idx ? "selected" : ""
+                        }`}
+                        onClick={() =>
+                          emitDistractionAndFinish(text.trim(), ctx).catch(
+                            () => {},
+                          )
+                        }
+                      >
+                        {ctx}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           <div className="qc-footer-hint">
-            <span>
-              {stage === "select" ? t.qcSelectKeyHint : t.qcSwitchCatHint}
-            </span>
+            <span>{footerHint}</span>
             <button
               type="button"
+              tabIndex={-1}
               className="qc-close-btn"
               onClick={closeAndRestore}
             >
-              Esc
+              Esc ✕
             </button>
           </div>
-        </>
-      ) : (
-        /* MEŞGULİYET (CONTEXT) HIZLI GİRİŞ MODU */
-        <>
-          <div className="qc-top-strip">
-            <div className="qc-context-pill">
-              <b>{t.qcContextHeader}</b>
-            </div>
-            <div className="qc-tab-pill" title={activeTabDisplay}>
-              🌐 {activeTabDisplay}
-            </div>
-          </div>
-
-          <div className="qc-input-row">
-            <input
-              ref={inputRef}
-              type="text"
-              className="qc-single-input"
-              value={text}
-              autoFocus
-              onChange={(e) => {
-                setText(e.target.value);
-                setRecentIdx(-1);
-              }}
-              onKeyDown={handleInputKeyDown}
-              placeholder={
-                payload.snapshot.currentContext
-                  ? `${t.qcCurrentContextLabel}: ${payload.snapshot.currentContext}`
-                  : t.qcContextPlaceholder
-              }
-            />
-            <button
-              type="button"
-              className="primary-btn"
-              onClick={() => submitCapture()}
-            >
-              Enter ↵
-            </button>
-          </div>
-
-          {payload.snapshot.recentContexts.length > 0 ? (
-            <div className="qc-recent-row">
-              <span className="qc-muted">{t.qcRecentContextsLabel}</span>
-              <div className="qc-recent-chips">
-                {payload.snapshot.recentContexts.slice(0, 5).map((rc, idx) => (
-                  <button
-                    key={rc}
-                    type="button"
-                    className={`qc-recent-chip ${
-                      recentIdx === idx ? "active" : ""
-                    }`}
-                    onClick={() => submitCapture(rc)}
-                  >
-                    {rc}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="qc-footer-hint">
-              <span>{t.qcContextPlaceholder}</span>
-              <button
-                type="button"
-                className="qc-close-btn"
-                onClick={closeAndRestore}
-              >
-                Esc
-              </button>
-            </div>
-          )}
         </>
       )}
     </div>

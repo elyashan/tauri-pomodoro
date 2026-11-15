@@ -15,6 +15,7 @@ import {
   PENALTY_OPTIONS,
   ShortcutStatus,
   TIMER_PRESETS,
+  UI_SCALE_OPTIONS,
 } from "../constants";
 import { formatKeyCombo } from "../lib/keyCombo";
 
@@ -23,10 +24,9 @@ export interface SettingsPageProps {
   activeLang: ActiveLang;
   langPref: LangCode;
   distractPenaltyMins: number;
-  alwaysOnTop: boolean;
   shortcuts: GlobalShortcutSettings;
   shortcutStatus: ShortcutStatus | null;
-  recordingShortcutFor: "distraction" | "context" | null;
+  recordingShortcutFor: "distraction" | null;
   studyPlans: StudyPlan[];
   editingPlanId: string;
   theme: ThemeSettings;
@@ -43,16 +43,12 @@ export interface SettingsPageProps {
   onOpenMenu: () => void;
   onLanguageChange: (lang: LangCode) => void;
   onPenaltyChange: (mins: number) => void;
-  onToggleAlwaysOnTop: () => void;
   onResetShortcuts: () => void;
   onSetRecordingShortcutFor: (
     next:
       | "distraction"
-      | "context"
       | null
-      | ((
-          cur: "distraction" | "context" | null,
-        ) => "distraction" | "context" | null),
+      | ((cur: "distraction" | null) => "distraction" | null),
   ) => void;
   onApplyShortcuts: (next: GlobalShortcutSettings) => void;
   onOpenQuickCapture: (mode: "distraction" | "context") => void;
@@ -82,7 +78,6 @@ export function SettingsPage({
   activeLang,
   langPref,
   distractPenaltyMins,
-  alwaysOnTop,
   shortcuts,
   shortcutStatus,
   recordingShortcutFor,
@@ -102,7 +97,6 @@ export function SettingsPage({
   onOpenMenu,
   onLanguageChange,
   onPenaltyChange,
-  onToggleAlwaysOnTop,
   onResetShortcuts,
   onSetRecordingShortcutFor,
   onApplyShortcuts,
@@ -183,23 +177,6 @@ export function SettingsPage({
         </div>
       </div>
 
-      {/* HER ZAMAN ÜSTTE (ALWAYS ON TOP) */}
-      <div className="settings-section">
-        <div className="settings-label">{t.alwaysOnTop}</div>
-        <button
-          className={`penalty-btn ${alwaysOnTop ? "active" : ""}`}
-          onClick={onToggleAlwaysOnTop}
-        >
-          {alwaysOnTop
-            ? activeLang === "tr"
-              ? "Açık (📌 Üstte)"
-              : "Enabled (📌 On Top)"
-            : activeLang === "tr"
-              ? "Kapalı"
-              : "Disabled"}
-        </button>
-      </div>
-
       {/* GLOBAL KISAYOLLAR (EKRAN ORTASINDA HIZLI TEK SATIR INPUT) */}
       <div className="settings-section no-drag">
         <div
@@ -272,69 +249,17 @@ export function SettingsPage({
           </button>
         </div>
 
-        <div className="shortcut-setting-row">
-          <span className="shortcut-lbl" title={t.shortcutContextLabel}>
-            {t.shortcutContextLabel}
-          </span>
-          <button
-            type="button"
-            className={`shortcut-record-btn ${
-              recordingShortcutFor === "context" ? "recording" : ""
-            }`}
-            onClick={() =>
-              onSetRecordingShortcutFor(
-                recordingShortcutFor === "context" ? null : "context",
-              )
-            }
-            onBlur={() =>
-              onSetRecordingShortcutFor((cur) =>
-                cur === "context" ? null : cur,
-              )
-            }
-            onKeyDown={(e) => {
-              if (recordingShortcutFor !== "context") return;
-              if (e.key === "Escape") {
-                e.preventDefault();
-                onSetRecordingShortcutFor(null);
-                return;
-              }
-              const combo = formatKeyCombo(e);
-              if (combo) {
-                e.preventDefault();
-                onSetRecordingShortcutFor(null);
-                onApplyShortcuts({
-                  ...shortcuts,
-                  contextShortcut: combo,
-                });
-              }
-            }}
-            title={t.shortcutRecordPressKeys}
-          >
-            {recordingShortcutFor === "context"
-              ? "..."
-              : shortcuts.contextShortcut}
-          </button>
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => onOpenQuickCapture("context")}
-          >
-            {t.shortcutTestBtn}
-          </button>
-        </div>
-
         {recordingShortcutFor && (
           <div style={{ fontSize: "9px", color: "#fbbf24" }}>
             {t.shortcutRecordPressKeys}
           </div>
         )}
 
-        {shortcutStatus &&
-          (!shortcutStatus.distractionOk || !shortcutStatus.contextOk) && (
-            <div style={{ fontSize: "9px", color: "#fca5a5" }}>
-              {shortcutStatus.distractionError || shortcutStatus.contextError}
-            </div>
-          )}
+        {shortcutStatus && !shortcutStatus.distractionOk && (
+          <div style={{ fontSize: "9px", color: "#fca5a5" }}>
+            {shortcutStatus.distractionError}
+          </div>
+        )}
       </div>
 
       {/* ÇALIŞMA PLANLARI & MOLA AYARLARI */}
@@ -581,6 +506,33 @@ export function SettingsPage({
               {t.sizeSavedBadge}
             </span>
           )}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+            marginBottom: "4px",
+          }}
+        >
+          <div style={{ fontSize: "10px", fontWeight: 600 }}>
+            {t.uiScaleLabel}
+          </div>
+          <div
+            className="penalty-selector"
+            style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+          >
+            {UI_SCALE_OPTIONS.map((scale) => (
+              <button
+                key={scale}
+                type="button"
+                className={`penalty-btn ${theme.uiScale === scale ? "active" : ""}`}
+                onClick={() => onUpdateTheme({ ...theme, uiScale: scale })}
+              >
+                %{scale}
+              </button>
+            ))}
+          </div>
         </div>
         <div style={{ fontSize: "9.5px", color: "#a1a1aa" }}>
           {t.windowSizeHint(currentWinSize.w, currentWinSize.h)}

@@ -1,7 +1,6 @@
 import type React from "react";
 import type {
   ActiveDayStats,
-  GlobalShortcutSettings,
   StudyPlan,
   TimerMode,
 } from "../db";
@@ -12,7 +11,6 @@ export interface MenuPageProps {
   t: Translations;
   activeLang: ActiveLang;
   dayStats: ActiveDayStats;
-  alwaysOnTop: boolean;
   updateAvailable: boolean;
   updateStatus: UpdateStatus;
   sessionActive: boolean;
@@ -29,19 +27,16 @@ export interface MenuPageProps {
   planDropdownOpen: boolean;
   planDropdownRef: React.RefObject<HTMLDivElement | null>;
   liveClockStr: string;
-  currentContext: string;
-  shortcuts: GlobalShortcutSettings;
   getPlanDisplayName: (plan: StudyPlan) => string;
-  onToggleAlwaysOnTop: () => void;
   onOpenDashboard: () => void;
   onOpenSummary: () => void;
   onOpenSettings: () => void;
   onEnterMiniDock: () => void;
+  onHideToTray: () => void;
   onInstallUpdate: () => void;
   onTogglePlanDropdown: () => void;
   onSelectPlan: (planId: string) => void;
   onOpenWorkTopicBox: () => void;
-  onOpenQuickCapture: (mode: "distraction" | "context") => void;
   onReturnToTimer: () => void;
   onFinishSession: () => void;
   onStartSession: () => void;
@@ -51,7 +46,6 @@ export function MenuPage({
   t,
   activeLang,
   dayStats,
-  alwaysOnTop,
   updateAvailable,
   updateStatus,
   sessionActive,
@@ -68,19 +62,16 @@ export function MenuPage({
   planDropdownOpen,
   planDropdownRef,
   liveClockStr,
-  currentContext,
-  shortcuts,
   getPlanDisplayName,
-  onToggleAlwaysOnTop,
   onOpenDashboard,
   onOpenSummary,
   onOpenSettings,
   onEnterMiniDock,
+  onHideToTray,
   onInstallUpdate,
   onTogglePlanDropdown,
   onSelectPlan,
   onOpenWorkTopicBox,
-  onOpenQuickCapture,
   onReturnToTimer,
   onFinishSession,
   onStartSession,
@@ -90,13 +81,6 @@ export function MenuPage({
       <div className="top-bar">
         <span className="badge">⠿ {dayStats.label}</span>
         <div className="top-bar-right">
-          <button
-            className={`icon-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
-            title={t.alwaysOnTopTooltip(alwaysOnTop)}
-            onClick={onToggleAlwaysOnTop}
-          >
-            📌
-          </button>
           <button
             className="ghost-btn"
             title={t.dashboardBtn}
@@ -124,6 +108,13 @@ export function MenuPage({
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
           >
+            −
+          </button>
+          <button
+            className="icon-btn"
+            title={t.hideToTrayOnlyTooltip}
+            onClick={onHideToTray}
+          >
             ✕
           </button>
         </div>
@@ -139,10 +130,7 @@ export function MenuPage({
           <div className="stat-lbl">{t.sessions}</div>
         </div>
         <div className="stat-card" title={t.average}>
-          <div className="stat-val">
-            {Math.round(dayStats.avgSec / 60)}{" "}
-            {activeLang === "tr" ? "dk" : "m"}
-          </div>
+          <div className="stat-val">{t.formatDuration(dayStats.avgSec)}</div>
           <div className="stat-lbl">{t.average}</div>
         </div>
       </div>
@@ -314,20 +302,9 @@ export function MenuPage({
               type="button"
               className="work-topic-badge menu-topic"
               onClick={onOpenWorkTopicBox}
-              title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
+              title={`${t.changeWorkTopic}: ${fullTopicLabel}`}
             >
               🏷️ {fullTopicLabel}
-            </button>
-
-            <button
-              type="button"
-              className="context-badge"
-              onClick={() => onOpenQuickCapture("context")}
-              title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
-                currentContext || t.qcContextNone
-              }`}
-            >
-              🎯 {currentContext || t.setContextBadgePlaceholder}
             </button>
           </div>
 
@@ -340,56 +317,52 @@ export function MenuPage({
             </span>
             <span
               className="plan-chip"
-              title={`${t.planShortBreakMins}: ${currentPlan.shortBreakMins}`}
+              title={t.planBreaksChipTooltip(
+                currentPlan.shortBreakMins,
+                currentPlan.standardBreakMins,
+                currentPlan.longBreakMins,
+                currentPlan.longBreakInterval,
+              )}
             >
-              ☕{currentPlan.shortBreakMins}
-            </span>
-            <span
-              className="plan-chip"
-              title={`${t.planStandardBreakMins}: ${currentPlan.standardBreakMins}`}
-            >
-              🌴{currentPlan.standardBreakMins}
-            </span>
-            <span
-              className="plan-chip"
-              title={`${t.planLongBreakMins}: ${currentPlan.longBreakMins} (${t.planLongBreakIntervalDesc(currentPlan.longBreakInterval)})`}
-            >
-              🎉{currentPlan.longBreakMins}
+              ☕ {currentPlan.shortBreakMins}/{currentPlan.standardBreakMins}/
+              {currentPlan.longBreakMins}
             </span>
           </div>
         </div>
       </div>
 
-      {/* SEANS AKSİYON BUTONLARI */}
-      <div className="menu-actions">
-        {sessionActive ? (
-          <>
-            <button className="primary-btn" onClick={onReturnToTimer}>
-              {timerMode === "work"
-                ? t.returnToWorkMenuBtn
-                : t.returnToBreakMenuBtn}
-            </button>
+      {/* SEANS AKSİYON BUTONLARI & CREDITS */}
+      <div className="menu-footer-group">
+        <div className="menu-actions">
+          {sessionActive ? (
+            <>
+              <button className="primary-btn" onClick={onReturnToTimer}>
+                {timerMode === "work"
+                  ? t.returnToWorkMenuBtn
+                  : t.returnToBreakMenuBtn}
+              </button>
+              <button
+                className="warn-btn"
+                onClick={onFinishSession}
+                title={t.finishSessionTooltip}
+              >
+                {t.finishSessionBtn}
+              </button>
+            </>
+          ) : (
             <button
-              className="warn-btn"
-              onClick={onFinishSession}
-              title={t.finishSessionTooltip}
+              className="primary-btn full-width"
+              onClick={onStartSession}
+              title={t.startSessionTooltip}
             >
-              {t.finishSessionBtn}
+              {t.startSessionBtn}
             </button>
-          </>
-        ) : (
-          <button
-            className="primary-btn full-width"
-            onClick={onStartSession}
-            title={t.startSessionTooltip}
-          >
-            {t.startSessionBtn}
-          </button>
-        )}
-      </div>
+          )}
+        </div>
 
-      <div className="credits-bar">
-        Credits by <b>Elyas</b>
+        <div className="credits-bar">
+          Credits by <b>Elyas</b>
+        </div>
       </div>
     </>
   );

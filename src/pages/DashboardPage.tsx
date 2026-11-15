@@ -6,13 +6,11 @@ import type {
   ContextStatItem,
   ParkingItem,
   ParkingLotData,
-  WorkStoryEntry,
 } from "../db";
 import type { Translations } from "../i18n";
 import {
   ParkingIdeaRow,
   ParkingTaskRow,
-  WorkStoryGrid,
 } from "../components/ParkingLot";
 
 export interface DashboardPageProps {
@@ -29,13 +27,13 @@ export interface DashboardPageProps {
   cloudServerInput: string;
   dayStats: ActiveDayStats;
   summaryParkingData: ParkingLotData;
-  workStoryEntries: WorkStoryEntry[];
   contextStats: ContextStatItem[];
   appDistractions: AppDistractionGroup[];
   onToggleFreqFilter: () => void;
   onOpenSummary: () => void;
   onOpenMenu: () => void;
   onEnterMiniDock: () => void;
+  onHideToTray: () => void;
   onManualCloudSync: () => void;
   onGoogleSignOut: () => void;
   onGoogleSignIn: () => void;
@@ -52,7 +50,6 @@ export interface DashboardPageProps {
     rating: "important" | "unimportant" | "unrated",
   ) => void;
   onDeleteParkingEntry: (id: number) => void;
-  onOpenLightbox: (entry: WorkStoryEntry) => void;
 }
 
 export function DashboardPage({
@@ -69,13 +66,13 @@ export function DashboardPage({
   cloudServerInput,
   dayStats,
   summaryParkingData,
-  workStoryEntries,
   contextStats,
   appDistractions,
   onToggleFreqFilter,
   onOpenSummary,
   onOpenMenu,
   onEnterMiniDock,
+  onHideToTray,
   onManualCloudSync,
   onGoogleSignOut,
   onGoogleSignIn,
@@ -89,7 +86,6 @@ export function DashboardPage({
   onToggleParkingTask,
   onRateParkingIdea,
   onDeleteParkingEntry,
-  onOpenLightbox,
 }: DashboardPageProps) {
   const nonImportantIdeas = [
     ...summaryParkingData.unratedIdeas,
@@ -125,6 +121,13 @@ export function DashboardPage({
             className="icon-btn"
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
+          >
+            −
+          </button>
+          <button
+            className="icon-btn"
+            title={t.hideToTrayOnlyTooltip}
+            onClick={onHideToTray}
           >
             ✕
           </button>
@@ -415,25 +418,8 @@ export function DashboardPage({
             </div>
           </div>
 
-          {/* SAĞ KOLON: ÇALIŞMA HİKAYESİ & MEŞGULİYET / SEKME ANALİZİ */}
+          {/* SAĞ KOLON: MEŞGULİYET / SEKME ANALİZİ */}
           <div className="dashboard-col">
-            <div className="dashboard-section-card">
-              <div className="dashboard-section-header">
-                <span className="dashboard-card-title">
-                  📸 {t.workStoryTitle} ({workStoryEntries.length})
-                </span>
-                <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
-                  {t.workStoryDesc}
-                </span>
-              </div>
-              <WorkStoryGrid
-                entries={workStoryEntries}
-                emptyMessage={t.workStoryEmpty}
-                emptyClassName="dashboard-empty-msg"
-                onSelectEntry={onOpenLightbox}
-              />
-            </div>
-
             <div className="dashboard-section-card">
               <div className="dashboard-section-header">
                 <span className="dashboard-card-title">

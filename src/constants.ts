@@ -22,10 +22,8 @@ export type NavPage = "menu" | "timer" | "summary" | "settings" | "dashboard";
 export const DISTRACT_CATEGORIES: DistractionCategory[] = [
   "impulsive_task",
   "idea",
-  "screenshot_note",
   "internal",
   "external",
-  "escape",
 ];
 
 export const EMPTY_PARKING: ParkingLotData = {
@@ -63,6 +61,7 @@ export const TIMER_PRESETS = [
 ];
 
 export const PENALTY_OPTIONS = [0, 1, 2, 3, 5];
+export const UI_SCALE_OPTIONS = [100, 125, 150] as const;
 
 export function formatClock(sec: number): string {
   const m = Math.floor(sec / 60)

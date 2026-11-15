@@ -34,12 +34,14 @@ export interface ThemeSettings {
   bgColor: string; // "#rrggbb"
   bgOpacity: number; // 30-100 (%)
   timerColor: string; // "#rrggbb"
+  uiScale: number; // 100 | 125 | 150
 }
 
 export const DEFAULT_THEME: ThemeSettings = {
   bgColor: "#1a1814",
   bgOpacity: 82,
   timerColor: "#ffffff",
+  uiScale: 100,
 };
 
 export interface AppState {
@@ -65,20 +67,21 @@ export interface DaySummary {
   is_active: number;
 }
 
-export type TagKind = "distraction" | "ending" | "work" | "break_overtime";
+export type TagKind =
+  | "distraction"
+  | "ending"
+  | "work"
+  | "break_overtime"
+  | `distraction_${DistractionCategory}`;
 export type DistractionTrigger = "internal" | "external";
 export type DistractionCategory =
   | "impulsive_task"
   | "idea"
-  | "screenshot_note"
   | "internal"
-  | "external"
-  | "escape";
+  | "external";
 
 export function doesCategoryAddPenalty(cat: DistractionCategory): boolean {
-  // 1: Dürtüsel görev, 2: Akla gelen fikir ve 3: SS Alma için ek süre eklenmez.
-  // 4: İçsel tetikleyici, 5: Dışsal tetikleyici ve 6: Zorluktan kaçış için süre eklenir.
-  return cat === "internal" || cat === "external" || cat === "escape";
+  return cat === "internal" || cat === "external";
 }
 
 function categoryToTrigger(cat: DistractionCategory): DistractionTrigger {
@@ -201,8 +204,8 @@ export interface GlobalShortcutSettings {
 }
 
 export const DEFAULT_SHORTCUTS: GlobalShortcutSettings = {
-  distractionShortcut: "Ctrl+Shift+D",
-  contextShortcut: "Ctrl+Alt+C",
+  distractionShortcut: "Ctrl+Alt+D",
+  contextShortcut: "",
 };
 
 export type FeedbackCategory = "bug" | "feature" | "ui" | "other";
@@ -850,13 +853,77 @@ export async function recordBreakSession(
   });
 }
 
+export interface DateRangeFilter {
+  startIso: string;
+  endIso: string;
+}
+
+export function toLocalDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function parseLocalDateStr(dateStr: string): Date {
+  const parts = dateStr.split("-").map((v) => Number(v));
+  if (
+    parts.length === 3 &&
+    Number.isFinite(parts[0]) &&
+    Number.isFinite(parts[1]) &&
+    Number.isFinite(parts[2])
+  ) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+  return new Date();
+}
+
+export function getDateBoundsIso(dateStr: string): DateRangeFilter {
+  const start = parseLocalDateStr(dateStr);
+  start.setHours(0, 0, 0, 0);
+  const end = parseLocalDateStr(dateStr);
+  end.setHours(23, 59, 59, 999);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
+}
+
+export function getWeekBoundsIso(anchorDateStr?: string): DateRangeFilter {
+  const anchor = anchorDateStr ? parseLocalDateStr(anchorDateStr) : new Date();
+  const mondayOffset = (anchor.getDay() + 6) % 7;
+  const monday = new Date(anchor);
+  monday.setDate(anchor.getDate() - mondayOffset);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  return { startIso: monday.toISOString(), endIso: sunday.toISOString() };
+}
+
+export async function getDayStatsForDate(
+  dateStr: string,
+): Promise<{ totalSec: number; sessionCount: number; avgSec: number }> {
+  const db = await getDb();
+  const { startIso, endIso } = getDateBoundsIso(dateStr);
+  const rows = await db.select<{ total: number | null; cnt: number }[]>(
+    `SELECT COALESCE(SUM(duration_sec), 0) AS total, COUNT(id) AS cnt
+     FROM sessions
+     WHERE mode = 'work' AND created_at >= $1 AND created_at <= $2`,
+    [startIso, endIso],
+  );
+  const totalSec = Number(rows[0]?.total ?? 0);
+  const sessionCount = Number(rows[0]?.cnt ?? 0);
+  return {
+    totalSec,
+    sessionCount,
+    avgSec: sessionCount > 0 ? Math.round(totalSec / sessionCount) : 0,
+  };
+}
+
 export async function getTimelineSessions(
   dayId?: number,
+  dateRange?: DateRangeFilter,
 ): Promise<TimelineSessionItem[]> {
   const db = await getDb();
-  const targetDayId = dayId || (await getOrCreateActiveDay(db)).id;
-
-  const rows = await db.select<{
+  let rows: {
     id: number;
     day_id: number;
     mode: string;
@@ -867,13 +934,26 @@ export async function getTimelineSessions(
     started_at: string | null;
     ended_at: string | null;
     overtime_sec: number | null;
-  }[]>(
-    `SELECT id, day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec
-     FROM sessions
-     WHERE day_id = $1
-     ORDER BY COALESCE(started_at, created_at) ASC`,
-    [targetDayId],
-  );
+  }[];
+
+  if (dateRange) {
+    rows = await db.select(
+      `SELECT id, day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec
+       FROM sessions
+       WHERE created_at >= $1 AND created_at <= $2
+       ORDER BY COALESCE(started_at, created_at) ASC`,
+      [dateRange.startIso, dateRange.endIso],
+    );
+  } else {
+    const targetDayId = dayId || (await getOrCreateActiveDay(db)).id;
+    rows = await db.select(
+      `SELECT id, day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec
+       FROM sessions
+       WHERE day_id = $1
+       ORDER BY COALESCE(started_at, created_at) ASC`,
+      [targetDayId],
+    );
+  }
 
   const pad = (n: number) => n.toString().padStart(2, "0");
 
@@ -1001,7 +1081,7 @@ export async function recordDistraction(
   }
 
   const trimmed = rawReason.trim();
-  const tag = (tagInput && tagInput.trim()) || "Diğer";
+  const tag = (tagInput && tagInput.trim()) || "Tag Yok";
   const normalized =
     trimmed.length > 0
       ? trimmed.charAt(0).toLocaleUpperCase("tr-TR") + trimmed.slice(1)
@@ -1048,14 +1128,18 @@ export async function recordDistraction(
 // Haftalık Özet
 // ---------------------------------------------------------------------------
 
-export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary> {
+export async function getWeeklySummary(
+  locale = "tr-TR",
+  anchorDateStr?: string,
+): Promise<WeeklySummary> {
   const db = await getDb();
 
   const now = new Date();
-  const mondayOffset = (now.getDay() + 6) % 7;
+  const anchor = anchorDateStr ? parseLocalDateStr(anchorDateStr) : now;
+  const mondayOffset = (anchor.getDay() + 6) % 7;
 
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - mondayOffset);
+  const monday = new Date(anchor);
+  monday.setDate(anchor.getDate() - mondayOffset);
   monday.setHours(0, 0, 0, 0);
 
   const sunday = new Date(monday);
@@ -1109,7 +1193,7 @@ export async function getWeeklySummary(locale = "tr-TR"): Promise<WeeklySummary>
       dayIndex: i,
       shortLabel: shortNames[i],
       dateLabel: d.toLocaleDateString(locale, { day: "2-digit", month: "short" }),
-      fullDateStr: d.toISOString().slice(0, 10),
+      fullDateStr: toLocalDateStr(d),
       total_sec: daySec,
       session_count: dayCount,
       is_today: isToday,
@@ -1251,7 +1335,7 @@ export async function updateTag(
   await db.execute("UPDATE tags SET name = $1 WHERE id = $2", [normalized, id]);
   if (!oldName) return;
 
-  if (kind === "distraction") {
+  if (kind.startsWith("distraction")) {
     await db.execute("UPDATE distractions SET tag = $1 WHERE tag = $2", [
       normalized,
       oldName,
@@ -1277,6 +1361,123 @@ export async function updateTag(
 export async function deleteTag(id: number): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM tags WHERE id = $1", [id]);
+}
+
+export async function getCategoryTagsByPopularity(
+  category: DistractionCategory,
+  defaultTags: string[],
+): Promise<TagItem[]> {
+  const db = await getDb();
+  const kind = `distraction_${category}` as TagKind;
+  let rows = await db.select<TagItem[]>(
+    "SELECT id, name, kind FROM tags WHERE kind = $1 ORDER BY id ASC",
+    [kind],
+  );
+  if (rows.length === 0) {
+    const nowIso = new Date().toISOString();
+    const seedNames = [...defaultTags];
+    if (category === "internal") {
+      const legacyRows = await db.select<{ name: string }[]>(
+        "SELECT name FROM tags WHERE kind = 'distraction' ORDER BY id ASC",
+      );
+      for (const lr of legacyRows) {
+        if (lr.name && !seedNames.includes(lr.name)) {
+          seedNames.push(lr.name);
+        }
+      }
+    }
+    for (const name of seedNames) {
+      try {
+        await db.execute(
+          "INSERT INTO tags (name, kind, created_at) VALUES ($1, $2, $3)",
+          [name, kind, nowIso],
+        );
+      } catch {
+        // ignore duplicates
+      }
+    }
+    rows = await db.select<TagItem[]>(
+      "SELECT id, name, kind FROM tags WHERE kind = $1 ORDER BY id ASC",
+      [kind],
+    );
+  }
+
+  const freqRows = await db.select<{
+    tag: string;
+    cat_cnt: number;
+    total_cnt: number;
+  }[]>(
+    `SELECT tag,
+            SUM(CASE WHEN category = $1 THEN 1 ELSE 0 END) AS cat_cnt,
+            COUNT(id) AS total_cnt
+     FROM distractions
+     WHERE tag IS NOT NULL AND tag != ''
+     GROUP BY tag`,
+    [category],
+  );
+  const freqMap = new Map(
+    freqRows.map((r) => [
+      r.tag,
+      { catCnt: Number(r.cat_cnt) || 0, totalCnt: Number(r.total_cnt) || 0 },
+    ]),
+  );
+
+  return [...rows].sort((a, b) => {
+    const fa = freqMap.get(a.name);
+    const fb = freqMap.get(b.name);
+    const catDiff = (fb?.catCnt || 0) - (fa?.catCnt || 0);
+    if (catDiff !== 0) return catDiff;
+    const totDiff = (fb?.totalCnt || 0) - (fa?.totalCnt || 0);
+    if (totDiff !== 0) return totDiff;
+    return a.id - b.id;
+  });
+}
+
+export async function addCategoryTag(
+  rawName: string,
+  category: DistractionCategory,
+): Promise<TagItem | null> {
+  return addTag(rawName, `distraction_${category}` as TagKind);
+}
+
+export async function getTopCategoryReasons(
+  category: DistractionCategory,
+  tag: string,
+  limit = 5,
+): Promise<string[]> {
+  const db = await getDb();
+  const trimmedTag = tag.trim();
+  const safeLimit = Math.max(1, Math.min(20, Math.round(limit)));
+  if (trimmedTag) {
+    const rows = await db.select<{ reason: string }[]>(
+      `SELECT reason, COUNT(id) AS cnt, MAX(id) AS last_id
+       FROM distractions
+       WHERE category = $1
+         AND tag = $2
+         AND reason IS NOT NULL
+         AND TRIM(reason) != ''
+         AND reason != $2
+       GROUP BY reason
+       ORDER BY cnt DESC, last_id DESC
+       LIMIT $3`,
+      [category, trimmedTag, safeLimit],
+    );
+    return rows.map((r) => r.reason);
+  }
+
+  const rows = await db.select<{ reason: string }[]>(
+    `SELECT reason, COUNT(id) AS cnt, MAX(id) AS last_id
+     FROM distractions
+     WHERE category = $1
+       AND reason IS NOT NULL
+       AND TRIM(reason) != ''
+       AND reason != COALESCE(tag, '')
+     GROUP BY reason
+     ORDER BY cnt DESC, last_id DESC
+     LIMIT $2`,
+    [category, safeLimit],
+  );
+  return rows.map((r) => r.reason);
 }
 
 export async function getPreviousReasons(
@@ -1331,17 +1532,47 @@ export async function getPreviousReasons(
   return rows.map((r) => r.reason);
 }
 
-export async function getSummaryReasonsData(
+/**
+ * Builds SQL filter clauses for work/break sessions and trigger distractions
+ * (excluding impulsive task/idea parking items from distraction analytics).
+ */
+async function buildAnalyticsFilterClauses(
+  db: Database,
   onlyToday: boolean,
-): Promise<SummaryReasonsData> {
-  const db = await getDb();
-  const params: number[] = [];
+  dateRange?: DateRangeFilter,
+): Promise<{
+  params: (number | string)[];
+  dayClause: string;
+  distWhere: string;
+}> {
+  const triggerFilter =
+    "COALESCE(category, 'internal') IN ('internal', 'external')";
+  const params: (number | string)[] = [];
   let dayClause = "";
-  if (onlyToday) {
+  let distWhere = `WHERE ${triggerFilter}`;
+  if (dateRange) {
+    dayClause = "AND created_at >= $1 AND created_at <= $2";
+    distWhere = `WHERE created_at >= $1 AND created_at <= $2 AND ${triggerFilter}`;
+    params.push(dateRange.startIso, dateRange.endIso);
+  } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     dayClause = "AND day_id = $1";
+    distWhere = `WHERE day_id = $1 AND ${triggerFilter}`;
     params.push(day.id);
   }
+  return { params, dayClause, distWhere };
+}
+
+export async function getSummaryReasonsData(
+  onlyToday: boolean,
+  dateRange?: DateRangeFilter,
+): Promise<SummaryReasonsData> {
+  const db = await getDb();
+  const { params, dayClause, distWhere } = await buildAnalyticsFilterClauses(
+    db,
+    onlyToday,
+    dateRange,
+  );
 
   const buildTagItems = (
     rows: { tag: string | null; reason: string | null }[],
@@ -1378,7 +1609,7 @@ export async function getSummaryReasonsData(
     params,
   );
   const distRows = await db.select<{ tag: string | null; reason: string }[]>(
-    `SELECT tag, reason FROM distractions ${onlyToday ? "WHERE day_id = $1" : ""}`,
+    `SELECT tag, reason FROM distractions ${distWhere}`,
     params,
   );
   const endingRows = await db.select<{ tag: string | null; reason: string | null }[]>(
@@ -1408,7 +1639,7 @@ export async function getSummaryReasonsData(
 }
 
 // ---------------------------------------------------------------------------
-// Dikkat Dağılması Ek Süre Ayarı, Dil, Tema & Her Zaman Üstte
+// Dikkat Dağılması Ek Süre Ayarı, Dil & Tema
 // ---------------------------------------------------------------------------
 
 export async function loadDistractPenalty(): Promise<number> {
@@ -1436,10 +1667,11 @@ export async function saveLanguagePreference(lang: LangCode): Promise<void> {
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
 export async function loadThemeSettings(): Promise<ThemeSettings> {
-  const map = await getSettingsMap(["bgColor", "bgOpacity", "timerColor"]);
+  const map = await getSettingsMap(["bgColor", "bgOpacity", "timerColor", "uiScale"]);
   const bgColor = map.get("bgColor") ?? "";
   const timerColor = map.get("timerColor") ?? "";
   const opacity = Number(map.get("bgOpacity"));
+  const rawScale = Number(map.get("uiScale"));
 
   return {
     bgColor: HEX_COLOR.test(bgColor) ? bgColor : DEFAULT_THEME.bgColor,
@@ -1448,6 +1680,7 @@ export async function loadThemeSettings(): Promise<ThemeSettings> {
       Number.isFinite(opacity) && opacity >= 30 && opacity <= 100
         ? Math.round(opacity)
         : DEFAULT_THEME.bgOpacity,
+    uiScale: rawScale === 125 || rawScale === 150 ? rawScale : DEFAULT_THEME.uiScale,
   };
 }
 
@@ -1456,16 +1689,8 @@ export async function saveThemeSettings(theme: ThemeSettings): Promise<void> {
     ["bgColor", theme.bgColor],
     ["bgOpacity", String(theme.bgOpacity)],
     ["timerColor", theme.timerColor],
+    ["uiScale", String(theme.uiScale)],
   ]);
-}
-
-export async function loadAlwaysOnTop(): Promise<boolean> {
-  const val = await getSetting("alwaysOnTop");
-  return val === null ? true : val === "1";
-}
-
-export async function saveAlwaysOnTop(on: boolean): Promise<void> {
-  await setSetting("alwaysOnTop", on ? "1" : "0");
 }
 
 export async function exportAllData(): Promise<string> {
@@ -1474,9 +1699,8 @@ export async function exportAllData(): Promise<string> {
     study_days,
     sessions,
     distractions,
-    parking_items,
+    rawParkingItems,
     context_logs,
-    work_story_entries,
     tags,
     feedbacks,
     settings,
@@ -1484,25 +1708,27 @@ export async function exportAllData(): Promise<string> {
     db.select("SELECT * FROM study_days ORDER BY id ASC"),
     db.select("SELECT * FROM sessions ORDER BY id ASC"),
     db.select("SELECT * FROM distractions ORDER BY id ASC"),
-    db.select("SELECT * FROM parking_items ORDER BY id ASC"),
+    db.select<Record<string, unknown>[]>(
+      "SELECT * FROM parking_items WHERE COALESCE(item_type, '') != 'screenshot' ORDER BY id ASC",
+    ),
     db.select("SELECT * FROM context_logs ORDER BY id ASC"),
-    db.select("SELECT * FROM work_story_entries ORDER BY id ASC"),
     db.select("SELECT * FROM tags ORDER BY id ASC"),
     db.select("SELECT * FROM feedbacks ORDER BY id DESC"),
     db.select("SELECT * FROM settings ORDER BY key ASC"),
   ]);
 
+  const parking_items = rawParkingItems.map(({ screenshot_data: _img, ...rest }) => rest);
+
   return JSON.stringify(
     {
       app: "pomodoro-widget",
-      version: "0.1.15",
+      version: "1.0.0",
       exported_at: new Date().toISOString(),
       study_days,
       sessions,
       distractions,
       parking_items,
       context_logs,
-      work_story_entries,
       tags,
       feedbacks,
       settings,
@@ -1563,8 +1789,8 @@ export async function deleteFeedback(id: number): Promise<void> {
 
 export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
   timer: { width: 284, height: 138 },
-  menu: { width: 315, height: 375 },
-  summary: { width: 390, height: 490 },
+  menu: { width: 315, height: 305 },
+  summary: { width: 420, height: 560 },
   settings: { width: 335, height: 495 },
   dashboard: { width: 690, height: 530 },
 };
@@ -1616,15 +1842,14 @@ export async function resetCustomWindowSizes(): Promise<void> {
 
 export async function getAdhdInsights(
   onlyToday: boolean,
+  dateRange?: DateRangeFilter,
 ): Promise<AdhdInsightsData> {
   const db = await getDb();
-  const params: number[] = [];
-  let dayClause = "";
-  if (onlyToday) {
-    const day = await getOrCreateActiveDay(db);
-    dayClause = "AND day_id = $1";
-    params.push(day.id);
-  }
+  const { params, dayClause, distWhere } = await buildAnalyticsFilterClauses(
+    db,
+    onlyToday,
+    dateRange,
+  );
 
   const [workSessions, breakSessions, distRows] = await Promise.all([
     db.select<{
@@ -1650,7 +1875,7 @@ export async function getAdhdInsights(
       trigger_type: string | null;
     }[]>(
       `SELECT tag, created_at, elapsed_work_sec, trigger_type
-       FROM distractions ${onlyToday ? "WHERE day_id = $1" : ""}`,
+       FROM distractions ${distWhere}`,
       params,
     ),
   ]);
@@ -1679,8 +1904,16 @@ export async function getAdhdInsights(
     } else {
       internalCount++;
     }
-    const tg = (d.tag && d.tag.trim()) || "Diğer";
-    tagFreq.set(tg, (tagFreq.get(tg) || 0) + 1);
+    const tg = d.tag?.trim() || "";
+    if (
+      tg &&
+      tg !== "Tag Yok" &&
+      tg !== "No Tag" &&
+      tg !== "Diğer" &&
+      tg !== "Other"
+    ) {
+      tagFreq.set(tg, (tagFreq.get(tg) || 0) + 1);
+    }
 
     const dt = new Date(d.created_at);
     if (!Number.isNaN(dt.getTime())) {
@@ -1948,11 +2181,15 @@ export async function addParkingItem(params: {
 
 export async function getParkingLotData(
   onlyToday = false,
+  dateRange?: DateRangeFilter,
 ): Promise<ParkingLotData> {
   const db = await getDb();
-  const params: number[] = [];
+  const params: (number | string)[] = [];
   let whereClause = "";
-  if (onlyToday) {
+  if (dateRange) {
+    whereClause = "WHERE created_at >= $1 AND created_at <= $2";
+    params.push(dateRange.startIso, dateRange.endIso);
+  } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     whereClause = "WHERE day_id = $1";
     params.push(day.id);
@@ -2167,11 +2404,15 @@ export async function getRecentContexts(limit = 6): Promise<string[]> {
 
 export async function getContextStatsSummary(
   onlyToday: boolean,
+  dateRange?: DateRangeFilter,
 ): Promise<ContextStatItem[]> {
   const db = await getDb();
-  const params: number[] = [];
+  const params: (number | string)[] = [];
   let whereClause = "";
-  if (onlyToday) {
+  if (dateRange) {
+    whereClause = "WHERE started_at >= $1 AND started_at <= $2";
+    params.push(dateRange.startIso, dateRange.endIso);
+  } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     whereClause = "WHERE day_id = $1";
     params.push(day.id);
@@ -2260,12 +2501,17 @@ export async function getContextStatsSummary(
 
 export async function getAppDistractionSummary(
   onlyToday: boolean,
+  dateRange?: DateRangeFilter,
 ): Promise<AppDistractionGroup[]> {
   const db = await getDb();
-  const params: number[] = [];
+  const params: (number | string)[] = [];
   let whereClause =
     "WHERE (active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != '')";
-  if (onlyToday) {
+  if (dateRange) {
+    whereClause =
+      "WHERE created_at >= $1 AND created_at <= $2 AND ((active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != ''))";
+    params.push(dateRange.startIso, dateRange.endIso);
+  } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     whereClause =
       "WHERE day_id = $1 AND ((active_app IS NOT NULL AND active_app != '') OR (active_window IS NOT NULL AND active_window != ''))";
@@ -2298,7 +2544,13 @@ export async function getAppDistractionSummary(
     const appName = (r.active_app && r.active_app.trim()) || "Uygulama";
     const winTitle = (r.active_window && r.active_window.trim()) || appName;
     const ctx = (r.context_text && r.context_text.trim()) || null;
-    const cat = (r.category as DistractionCategory) || "internal";
+    const rawCat = r.category;
+    const cat: DistractionCategory =
+      rawCat === "impulsive_task" || rawCat === "external"
+        ? rawCat
+        : rawCat === "idea" || rawCat === "screenshot_note"
+          ? "idea"
+          : "internal";
     const reason = (r.reason && r.reason.trim()) || "";
 
     if (!appMap.has(appName)) {
@@ -2342,13 +2594,14 @@ export async function getAppDistractionSummary(
 // ---------------------------------------------------------------------------
 
 export async function loadGlobalShortcuts(): Promise<GlobalShortcutSettings> {
-  const map = await getSettingsMap(["distractionShortcut", "contextShortcut"]);
+  const map = await getSettingsMap(["distractionShortcut"]);
+  const saved = map.get("distractionShortcut")?.trim();
   return {
     distractionShortcut:
-      map.get("distractionShortcut")?.trim() ||
-      DEFAULT_SHORTCUTS.distractionShortcut,
-    contextShortcut:
-      map.get("contextShortcut")?.trim() || DEFAULT_SHORTCUTS.contextShortcut,
+      !saved || saved === "Ctrl+Shift+D"
+        ? DEFAULT_SHORTCUTS.distractionShortcut
+        : saved,
+    contextShortcut: "",
   };
 }
 
@@ -2357,7 +2610,7 @@ export async function saveGlobalShortcuts(
 ): Promise<void> {
   await setSettings([
     ["distractionShortcut", shortcuts.distractionShortcut.trim()],
-    ["contextShortcut", shortcuts.contextShortcut.trim()],
+    ["contextShortcut", ""],
   ]);
 }
 
@@ -2414,13 +2667,17 @@ export async function addWorkStoryEntry(params: {
 
 export async function getWorkStoryEntries(
   onlyToday = false,
-  limit = 40,
+  limit = 80,
+  dateRange?: DateRangeFilter,
 ): Promise<WorkStoryEntry[]> {
   const db = await getDb();
   const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));
-  const params: number[] = [];
+  const params: (number | string)[] = [];
   let whereClause = "";
-  if (onlyToday) {
+  if (dateRange) {
+    whereClause = "WHERE created_at >= $1 AND created_at <= $2";
+    params.push(dateRange.startIso, dateRange.endIso);
+  } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
     whereClause = "WHERE day_id = $1";
     params.push(day.id);

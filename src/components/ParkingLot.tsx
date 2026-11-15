@@ -1,4 +1,10 @@
-import type { ParkingItem, ParkingLotData, WorkStoryEntry } from "../db";
+import { useEffect, useState } from "react";
+import type {
+  ParkingItem,
+  ParkingLotData,
+  TimelineSessionItem,
+  WorkStoryEntry,
+} from "../db";
 import type { Translations } from "../i18n";
 
 export function renderParkingItemTooltip(item: ParkingItem): string {
@@ -248,6 +254,14 @@ export interface ParkingLotPanelProps {
   onOpenLightbox: (entry: WorkStoryEntry) => void;
 }
 
+type ParkingSectionKey =
+  | "pending"
+  | "done"
+  | "unrated"
+  | "important"
+  | "unimportant"
+  | "screenshots";
+
 export function ParkingLotPanel({
   data,
   isBreakView,
@@ -260,35 +274,46 @@ export function ParkingLotPanel({
   onDeleteEntry,
   onOpenLightbox,
 }: ParkingLotPanelProps) {
+  const [openSections, setOpenSections] = useState<
+    Record<ParkingSectionKey, boolean>
+  >({
+    pending: true,
+    done: false,
+    unrated: true,
+    important: true,
+    unimportant: false,
+    screenshots: false,
+  });
+
+  const toggleSection = (key: ParkingSectionKey) => {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const totalAllCount =
     data.totalTasks + data.totalIdeas + data.totalScreenshots;
 
   return (
     <>
-      <div className="parking-header-bar">
-        {isBreakView ? (
+      {isBreakView && (
+        <div className="parking-header-bar">
           <div className="parking-banner-title">
             {t.parkingBreakBannerTitle}
           </div>
-        ) : (
-          <span className="section-subhead">
-            {t.parkingTab} ({totalAllCount})
-          </span>
-        )}
-        <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-          {docsStatusMsg && (
-            <span className="docs-status-pill">{docsStatusMsg}</span>
-          )}
-          <button
-            type="button"
-            className="docs-sync-btn"
-            onClick={onSyncAllToDocs}
-            title={t.docsSyncAllBtn}
-          >
-            📄 Docs
-          </button>
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            {docsStatusMsg && (
+              <span className="docs-status-pill">{docsStatusMsg}</span>
+            )}
+            <button
+              type="button"
+              className="docs-sync-btn"
+              onClick={onSyncAllToDocs}
+              title={t.docsSyncAllBtn}
+            >
+              📄 Docs
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {totalAllCount === 0 ? (
         <div
@@ -305,111 +330,147 @@ export function ParkingLotPanel({
         <>
           {data.pendingTasks.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingPendingTasks} ({data.pendingTasks.length})
-              </div>
-              {data.pendingTasks.map((it) => (
-                <ParkingTaskRow
-                  key={it.id}
-                  item={it}
-                  isDone={false}
-                  t={t}
-                  onToggleTask={onToggleTask}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("pending")}
+              >
+                <span>{t.parkingPendingTasks} ({data.pendingTasks.length})</span>
+                <span>{openSections.pending ? "▾" : "▸"}</span>
+              </button>
+              {openSections.pending &&
+                data.pendingTasks.map((it) => (
+                  <ParkingTaskRow
+                    key={it.id}
+                    item={it}
+                    isDone={false}
+                    t={t}
+                    onToggleTask={onToggleTask}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
 
           {data.doneTasks.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingDoneTasks} ({data.doneTasks.length})
-              </div>
-              {data.doneTasks.map((it) => (
-                <ParkingTaskRow
-                  key={it.id}
-                  item={it}
-                  isDone={true}
-                  t={t}
-                  onToggleTask={onToggleTask}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("done")}
+              >
+                <span>{t.parkingDoneTasks} ({data.doneTasks.length})</span>
+                <span>{openSections.done ? "▾" : "▸"}</span>
+              </button>
+              {openSections.done &&
+                data.doneTasks.map((it) => (
+                  <ParkingTaskRow
+                    key={it.id}
+                    item={it}
+                    isDone={true}
+                    t={t}
+                    onToggleTask={onToggleTask}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
 
           {data.unratedIdeas.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingUnratedIdeas} ({data.unratedIdeas.length})
-              </div>
-              {data.unratedIdeas.map((it) => (
-                <ParkingIdeaRow
-                  key={it.id}
-                  item={it}
-                  t={t}
-                  onRateIdea={onRateIdea}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("unrated")}
+              >
+                <span>{t.parkingUnratedIdeas} ({data.unratedIdeas.length})</span>
+                <span>{openSections.unrated ? "▾" : "▸"}</span>
+              </button>
+              {openSections.unrated &&
+                data.unratedIdeas.map((it) => (
+                  <ParkingIdeaRow
+                    key={it.id}
+                    item={it}
+                    t={t}
+                    onRateIdea={onRateIdea}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
 
           {data.importantIdeas.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingImportantIdeas} ({data.importantIdeas.length})
-              </div>
-              {data.importantIdeas.map((it) => (
-                <ParkingIdeaRow
-                  key={it.id}
-                  item={it}
-                  t={t}
-                  onRateIdea={onRateIdea}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("important")}
+              >
+                <span>{t.parkingImportantIdeas} ({data.importantIdeas.length})</span>
+                <span>{openSections.important ? "▾" : "▸"}</span>
+              </button>
+              {openSections.important &&
+                data.importantIdeas.map((it) => (
+                  <ParkingIdeaRow
+                    key={it.id}
+                    item={it}
+                    t={t}
+                    onRateIdea={onRateIdea}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
 
           {data.unimportantIdeas.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingUnimportantIdeas} ({data.unimportantIdeas.length})
-              </div>
-              {data.unimportantIdeas.map((it) => (
-                <ParkingIdeaRow
-                  key={it.id}
-                  item={it}
-                  t={t}
-                  onRateIdea={onRateIdea}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("unimportant")}
+              >
+                <span>{t.parkingUnimportantIdeas} ({data.unimportantIdeas.length})</span>
+                <span>{openSections.unimportant ? "▾" : "▸"}</span>
+              </button>
+              {openSections.unimportant &&
+                data.unimportantIdeas.map((it) => (
+                  <ParkingIdeaRow
+                    key={it.id}
+                    item={it}
+                    t={t}
+                    onRateIdea={onRateIdea}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
 
           {data.screenshotNotes.length > 0 && (
             <>
-              <div className="parking-section-title">
-                {t.parkingScreenshotNotes} ({data.screenshotNotes.length})
-              </div>
-              {data.screenshotNotes.map((it) => (
-                <ParkingScreenshotRow
-                  key={it.id}
-                  item={it}
-                  t={t}
-                  onOpenLightbox={onOpenLightbox}
-                  onSyncSingleToDocs={onSyncSingleToDocs}
-                  onDeleteEntry={onDeleteEntry}
-                />
-              ))}
+              <button
+                type="button"
+                className="parking-section-title"
+                onClick={() => toggleSection("screenshots")}
+              >
+                <span>{t.parkingScreenshotNotes} ({data.screenshotNotes.length})</span>
+                <span>{openSections.screenshots ? "▾" : "▸"}</span>
+              </button>
+              {openSections.screenshots &&
+                data.screenshotNotes.map((it) => (
+                  <ParkingScreenshotRow
+                    key={it.id}
+                    item={it}
+                    t={t}
+                    onOpenLightbox={onOpenLightbox}
+                    onSyncSingleToDocs={onSyncSingleToDocs}
+                    onDeleteEntry={onDeleteEntry}
+                  />
+                ))}
             </>
           )}
         </>
@@ -418,76 +479,250 @@ export function ParkingLotPanel({
   );
 }
 
-export interface WorkStoryGridProps {
-  entries: WorkStoryEntry[];
-  emptyMessage: string;
-  emptyClassName?: string;
-  onSelectEntry: (entry: WorkStoryEntry) => void;
+function formatEntryClock(iso: string): string {
+  const dt = new Date(iso);
+  if (!Number.isNaN(dt.getTime())) {
+    const h = String(dt.getHours()).padStart(2, "0");
+    const m = String(dt.getMinutes()).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+  return iso.slice(11, 16) || "--:--";
 }
 
-export function WorkStoryGrid({
-  entries,
+function uniqueJoined(
+  values: (string | null | undefined)[],
+  limit = 3,
+): string {
+  const seen: string[] = [];
+  for (const raw of values) {
+    const val = (raw || "").trim();
+    if (!val || seen.includes(val)) continue;
+    seen.push(val);
+    if (seen.length >= limit) break;
+  }
+  return seen.length > 0 ? seen.join(", ") : "—";
+}
+
+function parseEntryLocalHour(iso: string): number | null {
+  const dt = new Date(iso);
+  if (!Number.isNaN(dt.getTime())) {
+    return dt.getHours() + dt.getMinutes() / 60 + dt.getSeconds() / 3600;
+  }
+  const hh = Number(iso.slice(11, 13));
+  const mm = Number(iso.slice(14, 16));
+  if (Number.isFinite(hh) && Number.isFinite(mm)) {
+    return hh + mm / 60;
+  }
+  return null;
+}
+
+export function matchSessionStoryEntries(
+  entries: WorkStoryEntry[],
+  session: TimelineSessionItem,
+): WorkStoryEntry[] {
+  if (session.mode !== "work" || entries.length === 0) return [];
+  const matched = entries.filter((e) => {
+    const hour = parseEntryLocalHour(e.created_at);
+    if (hour === null) return false;
+    return hour >= session.startHour - 0.02 && hour <= session.endHour + 0.02;
+  });
+  return matched.sort(
+    (a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id,
+  );
+}
+
+export function buildSessionStoryTooltip(
+  session: TimelineSessionItem,
+  frames: WorkStoryEntry[],
+  t: Translations,
+  durationLabel: string,
+): string {
+  const label = session.tag || (session.mode === "work" ? t.work : t.break);
+  const title = `${label} (${session.timeRangeLabel} • ${durationLabel})`;
+  if (frames.length === 0) {
+    const reasonLine = session.reason ? `\n🎯 ${session.reason}` : "";
+    return `${title}${reasonLine}\n📸 ${t.workStoryEmpty}`;
+  }
+  const topicsSummary = uniqueJoined([
+    session.tag,
+    ...frames.map((f) => f.work_tag),
+  ]);
+  const contextsSummary = uniqueJoined([
+    session.reason,
+    ...frames.map((f) => f.context_text),
+  ]);
+  const appsSummary = uniqueJoined(frames.map((f) => f.note || f.active_app));
+  return t.storyHoverTooltip(
+    title,
+    topicsSummary,
+    contextsSummary,
+    appsSummary,
+    frames.length,
+  );
+}
+
+export interface SessionStorySlideshowProps {
+  sessionId: number;
+  title: string;
+  frames: WorkStoryEntry[];
+  t: Translations;
+  emptyMessage: string;
+  onOpenFullscreen: (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+  ) => void;
+  onClose: () => void;
+}
+
+export function SessionStorySlideshow({
+  sessionId,
+  title,
+  frames,
+  t,
   emptyMessage,
-  emptyClassName,
-  onSelectEntry,
-}: WorkStoryGridProps) {
-  if (entries.length === 0) {
-    return emptyClassName ? (
-      <div className={emptyClassName}>{emptyMessage}</div>
-    ) : (
-      <div
-        style={{
-          fontSize: "10px",
-          color: "#a1a1aa",
-          textAlign: "center",
-          padding: "12px",
-        }}
-      >
-        {emptyMessage}
+  onOpenFullscreen,
+  onClose,
+}: SessionStorySlideshowProps) {
+  const [frameIdx, setFrameIdx] = useState<number>(0);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+
+  useEffect(() => {
+    setFrameIdx(0);
+    setIsPlaying(false);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isPlaying || frames.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setFrameIdx((prev) => (prev + 1) % frames.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, frames.length]);
+
+  if (frames.length === 0) {
+    return (
+      <div className="story-slideshow-box">
+        <div className="story-slideshow-top">
+          <span className="story-slideshow-title">🎬 {title}</span>
+          <button type="button" className="tag-icon-btn" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div
+          style={{
+            fontSize: "9.5px",
+            color: "#a1a1aa",
+            textAlign: "center",
+            padding: "8px",
+          }}
+        >
+          {emptyMessage}
+        </div>
       </div>
     );
   }
 
+  const safeIdx = Math.min(frameIdx, frames.length - 1);
+  const currentFrame = frames[safeIdx];
+
   return (
-    <div className="work-story-grid">
-      {entries.map((entry) => (
-        <div
-          key={entry.id}
-          className="work-story-card"
-          onClick={() => onSelectEntry(entry)}
-        >
-          <img
-            src={entry.screenshot_data || ""}
-            alt="screenshot"
-            className="work-story-thumb"
-            loading="lazy"
-          />
-          <div className="work-story-meta">
-            <span className="work-story-time">
-              {entry.created_at.slice(11, 16)} •{" "}
-              {entry.entry_type === "periodic" ? "⏱ 5dk" : "📸 SS"}
-            </span>
-            {entry.active_app && (
-              <span
-                className="work-story-app"
-                title={entry.active_window || entry.active_app}
-              >
-                🌐 {entry.active_app}
-              </span>
-            )}
-            {entry.context_text && (
-              <span className="work-story-ctx" title={entry.context_text}>
-                🎯 {entry.context_text}
-              </span>
-            )}
-            {entry.note && (
-              <span className="work-story-note" title={entry.note}>
-                {entry.note}
-              </span>
-            )}
-          </div>
+    <div className="story-slideshow-box">
+      <div className="story-slideshow-top">
+        <span className="story-slideshow-title">
+          🎬 {title} ({t.storyFramesCount(frames.length)})
+        </span>
+        <div className="story-slideshow-controls">
+          {frames.length > 1 && (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => setIsPlaying((p) => !p)}
+            >
+              {isPlaying ? t.storyPauseBtn : t.storyPlayBtn}
+            </button>
+          )}
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => onOpenFullscreen(currentFrame, frames)}
+          >
+            {t.storyFullscreenBtn}
+          </button>
+          <button type="button" className="tag-icon-btn" onClick={onClose}>
+            ✕
+          </button>
         </div>
-      ))}
+      </div>
+
+      <div className="story-slideshow-stage">
+        {frames.length > 1 && (
+          <button
+            type="button"
+            className="story-slide-nav prev"
+            onClick={() => {
+              setIsPlaying(false);
+              setFrameIdx((safeIdx - 1 + frames.length) % frames.length);
+            }}
+          >
+            ◀
+          </button>
+        )}
+        <img
+          src={currentFrame.screenshot_data || ""}
+          alt="pomodoro frame"
+          className="story-slide-img"
+          onClick={() => onOpenFullscreen(currentFrame, frames)}
+        />
+        {frames.length > 1 && (
+          <button
+            type="button"
+            className="story-slide-nav next"
+            onClick={() => {
+              setIsPlaying(false);
+              setFrameIdx((safeIdx + 1) % frames.length);
+            }}
+          >
+            ▶
+          </button>
+        )}
+        <span className="story-slide-counter">
+          {safeIdx + 1}/{frames.length} •{" "}
+          {formatEntryClock(currentFrame.created_at)}
+        </span>
+      </div>
+
+      <div className="story-step-strip">
+        {frames.map((fr, idx) => (
+          <button
+            key={fr.id}
+            type="button"
+            className={`story-step-pill ${idx === safeIdx ? "active" : ""}`}
+            onClick={() => {
+              setIsPlaying(false);
+              setFrameIdx(idx);
+            }}
+            title={`${formatEntryClock(fr.created_at)} • ${fr.context_text || fr.active_app || ""}`}
+          >
+            {idx * 5 + 5}dk ({formatEntryClock(fr.created_at)})
+          </button>
+        ))}
+      </div>
+
+      <div className="story-slide-meta">
+        {currentFrame.work_tag && <span>💼 {currentFrame.work_tag}</span>}
+        {currentFrame.context_text && (
+          <span>🎯 {currentFrame.context_text}</span>
+        )}
+        {(currentFrame.active_app || currentFrame.active_window) && (
+          <span>
+            🌐 {currentFrame.active_app || ""}
+            {currentFrame.active_window
+              ? ` — ${currentFrame.active_window}`
+              : ""}
+          </span>
+        )}
+        {currentFrame.note && <span>📝 {currentFrame.note}</span>}
+      </div>
     </div>
   );
 }

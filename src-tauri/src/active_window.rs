@@ -91,6 +91,10 @@ pub fn restore_hwnd(hwnd: isize) {
     platform::restore_hwnd(hwnd)
 }
 
+pub fn get_system_idle_secs() -> u64 {
+    platform::get_system_idle_secs()
+}
+
 pub fn spawn_foreground_watcher(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     {
@@ -123,6 +127,12 @@ mod platform {
 
     const PROCESS_QUERY_LIMITED_INFORMATION: DWORD = 0x1000;
 
+    #[repr(C)]
+    struct LASTINPUTINFO {
+        cb_size: u32,
+        dw_time: DWORD,
+    }
+
     #[link(name = "user32")]
     unsafe extern "system" {
         fn GetForegroundWindow() -> HWND;
@@ -130,6 +140,7 @@ mod platform {
         fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut DWORD) -> DWORD;
         fn SetForegroundWindow(hWnd: HWND) -> BOOL;
         fn IsWindow(hWnd: HWND) -> BOOL;
+        fn GetLastInputInfo(plii: *mut LASTINPUTINFO) -> BOOL;
     }
 
     #[link(name = "kernel32")]
@@ -146,6 +157,7 @@ mod platform {
             lpdwSize: *mut DWORD,
         ) -> BOOL;
         fn CloseHandle(hObject: HANDLE) -> BOOL;
+        fn GetTickCount() -> DWORD;
     }
 
     fn wide_to_string(slice: &[u16]) -> String {
@@ -214,6 +226,21 @@ mod platform {
             }
         }
     }
+
+    pub fn get_system_idle_secs() -> u64 {
+        unsafe {
+            let mut lii = LASTINPUTINFO {
+                cb_size: std::mem::size_of::<LASTINPUTINFO>() as u32,
+                dw_time: 0,
+            };
+            if GetLastInputInfo(&mut lii) != 0 {
+                let now = GetTickCount();
+                let elapsed_ms = now.wrapping_sub(lii.dw_time);
+                return (elapsed_ms / 1000) as u64;
+            }
+        }
+        0
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -246,6 +273,10 @@ mod platform {
     }
 
     pub fn restore_hwnd(_hwnd: isize) {}
+
+    pub fn get_system_idle_secs() -> u64 {
+        0
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -269,4 +300,8 @@ mod platform {
     }
 
     pub fn restore_hwnd(_hwnd: isize) {}
+
+    pub fn get_system_idle_secs() -> u64 {
+        0
+    }
 }

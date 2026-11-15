@@ -1,6 +1,5 @@
 import type {
   BreakKind,
-  GlobalShortcutSettings,
   ParkingItem,
   ParkingLotData,
   StudyPlan,
@@ -18,20 +17,16 @@ export interface TimerPageProps {
   breakKind: BreakKind;
   currentPlan: StudyPlan;
   planDisplayName: string;
-  currentWorkTag: string;
   fullTopicLabel: string;
   currentContext: string;
-  shortcuts: GlobalShortcutSettings;
   currentCycleIndex: number;
   sessionShortBreakCount: number;
-  currentSessionDistractions: number;
   currentBreakShortName: string;
   currentBreakFullTooltip: string;
   breakParkingTotalCount: number;
   hasBreakParkingView: boolean;
   breakParkingData: ParkingLotData;
   docsStatusMsg: string | null;
-  alwaysOnTop: boolean;
   updateAvailable: boolean;
   isBreakAlarm: boolean;
   breakOverdueSec: number;
@@ -41,11 +36,11 @@ export interface TimerPageProps {
   distractPenaltyMins: number;
   reminderBanner: { kind?: "context" | "short_break"; text: string } | null;
   onOpenWorkTopicBox: () => void;
-  onOpenQuickCapture: (mode: "distraction" | "context") => void;
+  onOpenContextBox: () => void;
   onToggleBreakParking: () => void;
-  onToggleAlwaysOnTop: () => void;
   onOpenMenu: () => void;
   onEnterMiniDock: () => void;
+  onHideToTray: () => void;
   onDismissReminderBanner: () => void;
   onSyncParkingToDocs: () => void;
   onSyncSingleItemToDocs: (item: ParkingItem) => void;
@@ -57,7 +52,6 @@ export interface TimerPageProps {
   onDeleteParkingEntry: (id: number) => void;
   onOpenLightbox: (entry: WorkStoryEntry) => void;
   onStartWorkFromBreak: () => void;
-  onExtendBreak5m: () => void;
   onStopSession: () => void;
   onTakeShortBreak: () => void;
   onDistractedClick: () => void;
@@ -70,20 +64,16 @@ export function TimerPage({
   breakKind,
   currentPlan,
   planDisplayName,
-  currentWorkTag,
   fullTopicLabel,
   currentContext,
-  shortcuts,
   currentCycleIndex,
   sessionShortBreakCount,
-  currentSessionDistractions,
   currentBreakShortName,
   currentBreakFullTooltip,
   breakParkingTotalCount,
   hasBreakParkingView,
   breakParkingData,
   docsStatusMsg,
-  alwaysOnTop,
   updateAvailable,
   isBreakAlarm,
   breakOverdueSec,
@@ -93,11 +83,11 @@ export function TimerPage({
   distractPenaltyMins,
   reminderBanner,
   onOpenWorkTopicBox,
-  onOpenQuickCapture,
+  onOpenContextBox,
   onToggleBreakParking,
-  onToggleAlwaysOnTop,
   onOpenMenu,
   onEnterMiniDock,
+  onHideToTray,
   onDismissReminderBanner,
   onSyncParkingToDocs,
   onSyncSingleItemToDocs,
@@ -106,7 +96,6 @@ export function TimerPage({
   onDeleteParkingEntry,
   onOpenLightbox,
   onStartWorkFromBreak,
-  onExtendBreak5m,
   onStopSession,
   onTakeShortBreak,
   onDistractedClick,
@@ -123,25 +112,6 @@ export function TimerPage({
               >
                 💼
               </span>
-
-              <button
-                className="work-topic-badge"
-                onClick={onOpenWorkTopicBox}
-                title={`${t.changeWorkTopic} — ${fullTopicLabel}`}
-              >
-                🏷️ {currentWorkTag || t.selectWorkTopic}
-              </button>
-
-              <button
-                type="button"
-                className="context-badge"
-                onClick={() => onOpenQuickCapture("context")}
-                title={`${t.qcContextHeader} (${shortcuts.contextShortcut}) — ${
-                  currentContext || t.qcContextNone
-                }`}
-              >
-                🎯 {currentContext || t.setContextBadgePlaceholder}
-              </button>
 
               <span
                 className="cycle-badge"
@@ -164,15 +134,6 @@ export function TimerPage({
                   title={t.shortBreaksCountBadge(sessionShortBreakCount)}
                 >
                   ☕ {sessionShortBreakCount}
-                </span>
-              )}
-
-              {currentSessionDistractions > 0 && (
-                <span
-                  className="distract-chip"
-                  title={t.distractionsCountTooltip(currentSessionDistractions)}
-                >
-                  ⚡ {currentSessionDistractions}
                 </span>
               )}
             </>
@@ -203,7 +164,7 @@ export function TimerPage({
               {breakParkingTotalCount > 0 && (
                 <button
                   type="button"
-                  className="context-badge"
+                  className="parking-toggle-badge"
                   onClick={onToggleBreakParking}
                   title={t.parkingBreakBannerTitle}
                 >
@@ -215,13 +176,6 @@ export function TimerPage({
         </div>
 
         <div className="top-bar-right">
-          <button
-            className={`icon-btn pin-btn ${alwaysOnTop ? "pinned" : ""}`}
-            title={t.alwaysOnTopTooltip(alwaysOnTop)}
-            onClick={onToggleAlwaysOnTop}
-          >
-            📌
-          </button>
           <button
             className="icon-btn"
             onClick={onOpenMenu}
@@ -239,6 +193,13 @@ export function TimerPage({
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
           >
+            −
+          </button>
+          <button
+            className="icon-btn"
+            title={t.hideToTrayOnlyTooltip}
+            onClick={onHideToTray}
+          >
             ✕
           </button>
         </div>
@@ -251,6 +212,29 @@ export function TimerPage({
           </div>
         ) : (
           <div className="timer-display">{formatClock(activeSeconds)}</div>
+        )}
+
+        {timerMode === "work" && (
+          <div className="timer-meta-row">
+            <button
+              type="button"
+              className="timer-meta-item topic-pill"
+              onClick={onOpenWorkTopicBox}
+              title={`${t.topicShortLabel}: ${fullTopicLabel}`}
+            >
+              <span className="timer-meta-value">{fullTopicLabel}</span>
+            </button>
+            <button
+              type="button"
+              className="timer-meta-item context-pill"
+              onClick={onOpenContextBox}
+              title={`${t.contextShortLabel}: ${currentContext || t.qcContextNone}`}
+            >
+              <span className="timer-meta-value">
+                {currentContext || t.qcContextNone}
+              </span>
+            </button>
+          </div>
         )}
 
         {hasPausedProgress && (
@@ -310,12 +294,6 @@ export function TimerPage({
             {breakKind === "short"
               ? t.returnToWorkCompact
               : t.startWorkCompact}
-          </button>
-          <button onClick={onExtendBreak5m} title={t.extendBreakTooltip}>
-            {t.extendBreakCompact}
-          </button>
-          <button onClick={onStopSession} title={t.stopBtnTooltip}>
-            {t.stop}
           </button>
         </div>
       ) : (

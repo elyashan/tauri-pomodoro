@@ -13,7 +13,6 @@ import {
   RuntimeState,
   AppState,
   ActiveDayStats,
-  DaySummary,
   ThemeSettings,
   LangCode,
   TagKind,
@@ -56,8 +55,6 @@ import {
   getTimelineSessions,
   TimelineSessionItem,
   exportAllData,
-  loadAlwaysOnTop,
-  saveAlwaysOnTop,
   StudyPlan,
   DEFAULT_STUDY_PLANS,
   loadStudyPlans,
@@ -67,7 +64,6 @@ import {
   loadSessionCycleStats,
   saveSessionCycleStats,
   recordDistraction,
-  getDaysSummary,
   getWeeklySummary,
   clearAllData,
   getTags,
@@ -106,13 +102,13 @@ import {
   saveCloudAuthState,
   markParkingItemsKeepSynced,
   getPendingSyncCount,
+  toLocalDateStr,
+  parseLocalDateStr,
+  getDateBoundsIso,
+  getWeekBoundsIso,
+  getDayStatsForDate,
 } from "./db";
-import {
-  CropRegionPct,
-  captureScreenCompressed,
-  captureScreenSnapshotRaw,
-  compressAndCropDataUrl,
-} from "./screenshot";
+import { captureScreenCompressed } from "./screenshot";
 import {
   signInWithGoogleAccount,
   signOutGoogleAccount,
@@ -120,7 +116,7 @@ import {
   syncParkingToGoogleDocs,
 } from "./cloudSync";
 import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
-import { translations, resolveLanguage } from "./i18n";
+import { type ActiveLang, translations, resolveLanguage } from "./i18n";
 import { ConfettiCanvas } from "./Confetti";
 import type { CaptureSubmittedEvent } from "./QuickCapture";
 import {
@@ -142,6 +138,7 @@ import { MiniDock } from "./components/MiniDock";
 import {
   BreakOverdueModal,
   DistractModal,
+  DistractSubmissionPayload,
   EarlyStopModal,
   LightboxModal,
   ShortBreakPromptModal,
@@ -167,6 +164,59 @@ function persistSnapshots(appState: AppState, runtimeState: RuntimeState) {
   );
 }
 
+let latestWindowResizeSeq = 0;
+
+/**
+ * Scales the main window by uiScale, clamps it to fit cleanly on the current
+ * monitor (at most 85% width and 80% height), and nudges it onscreen if needed.
+ */
+async function applyMonitorClampedWindowSize(
+  baseW: number,
+  baseH: number,
+  scaleMult: number,
+) {
+  const seq = ++latestWindowResizeSeq;
+  const win = getCurrentWindow();
+  let targetW = Math.round(baseW * scaleMult);
+  let targetH = Math.round(baseH * scaleMult);
+  try {
+    const [mon, factor] = await Promise.all([
+      currentMonitor(),
+      win.scaleFactor(),
+    ]);
+    if (seq !== latestWindowResizeSeq) return;
+    if (mon) {
+      const monLogW = mon.size.width / factor;
+      const monLogH = mon.size.height / factor;
+      const maxW = Math.max(280, Math.floor(monLogW * 0.85));
+      const maxH = Math.max(180, Math.floor(monLogH * 0.8));
+      targetW = Math.min(targetW, maxW);
+      targetH = Math.min(targetH, maxH);
+      await win.setSize(new LogicalSize(targetW, targetH));
+      if (seq !== latestWindowResizeSeq) return;
+      const pos = await win.outerPosition();
+      if (seq !== latestWindowResizeSeq) return;
+      const physW = Math.round(targetW * factor);
+      const physH = Math.round(targetH * factor);
+      const minX = mon.position.x;
+      const minY = mon.position.y;
+      const maxX = Math.max(minX, mon.position.x + mon.size.width - physW);
+      const maxY = Math.max(minY, mon.position.y + mon.size.height - physH);
+      const clampedX = Math.min(Math.max(pos.x, minX), maxX);
+      const clampedY = Math.min(Math.max(pos.y, minY), maxY);
+      if (clampedX !== pos.x || clampedY !== pos.y) {
+        await win.setPosition(new PhysicalPosition(clampedX, clampedY));
+      }
+      return;
+    }
+    await win.setSize(new LogicalSize(targetW, targetH));
+  } catch {
+    if (seq === latestWindowResizeSeq) {
+      win.setSize(new LogicalSize(targetW, targetH)).catch(() => {});
+    }
+  }
+}
+
 export default function App() {
   const [loaded, setLoaded] = useState(false);
 
@@ -179,9 +229,6 @@ export default function App() {
   // Özel Plan Dropdown durumu
   const [planDropdownOpen, setPlanDropdownOpen] = useState(false);
   const planDropdownRef = useRef<HTMLDivElement | null>(null);
-
-  // Her zaman üstte kalma (Always on Top)
-  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
 
   // Dil durumu
   const [langPref, setLangPref] = useState<LangCode>("auto");
@@ -249,22 +296,12 @@ export default function App() {
   const [currentSessionDistractions, setCurrentSessionDistractions] =
     useState(0);
 
-  // Dikkatim Dağıldı Kutusu (6 Kategori + Açık Sekme Yakalama)
+  // Dikkatim Dağıldı Kutusu & Açık Sekme Yakalama
   const [showDistractBox, setShowDistractBox] = useState(false);
-  const [distractTags, setDistractTags] = useState<TagItem[]>([]);
-  const [selectedDistractTag, setSelectedDistractTag] =
-    useState<string>("Diğer");
-  const [distractPreviousReasons, setDistractPreviousReasons] = useState<
-    string[]
-  >([]);
-  const [distractReasonText, setDistractReasonText] = useState("");
-  const [distractCategory, setDistractCategory] =
-    useState<DistractionCategory>("internal");
   const [detectedActiveApp, setDetectedActiveApp] = useState<{
     appName: string;
     windowTitle: string;
   }>({ appName: "", windowTitle: "" });
-  const [isEditingDistractTags, setIsEditingDistractTags] = useState(false);
 
   // Aktif Meşguliyet (Context), Kısa Mola Notu, Otopark & Global Kısayollar
   const [currentContext, setCurrentContext] = useState<string>("");
@@ -281,6 +318,7 @@ export default function App() {
 
   const [showShortBreakPrompt, setShowShortBreakPrompt] =
     useState<boolean>(false);
+  const [showContextEditBox, setShowContextEditBox] = useState<boolean>(false);
   const [shortBreakDraft, setShortBreakDraft] = useState<string>("");
 
   const [reminderBanner, setReminderBanner] = useState<{
@@ -300,7 +338,7 @@ export default function App() {
     null,
   );
   const [recordingShortcutFor, setRecordingShortcutFor] = useState<
-    "distraction" | "context" | null
+    "distraction" | null
   >(null);
 
   // Satır-İçi Tag Ekle / Düzenle / Sil Formu (window.prompt / window.confirm yerine)
@@ -329,19 +367,23 @@ export default function App() {
   });
   const [sizeSavedFlash, setSizeSavedFlash] = useState(false);
 
-  // Distracted İçi (3·S) Mini Screenshot Önizleme & Bölge Kırpıcı + 5dk Çalışma Hikayesi + Bulut & Google Docs
-  const [distractRawShot, setDistractRawShot] = useState<string>("");
-  const [distractPreviewShot, setDistractPreviewShot] = useState<string>("");
-  const [distractCropBox, setDistractCropBox] = useState<CropRegionPct | null>(
-    null,
-  );
-
+  // 5dk Çalışma Hikayesi + Bulut & Google Docs
   const [workStoryEntries, setWorkStoryEntries] = useState<WorkStoryEntry[]>(
     [],
   );
   const [lightboxEntry, setLightboxEntry] = useState<WorkStoryEntry | null>(
     null,
   );
+  const [lightboxGroupEntries, setLightboxGroupEntries] = useState<
+    WorkStoryEntry[]
+  >([]);
+  const openLightbox = (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+  ) => {
+    setLightboxEntry(entry);
+    setLightboxGroupEntries(groupFrames || []);
+  };
   const lastPeriodicShotSecRef = useRef<number>(0);
 
   const [cloudAuth, setCloudAuth] =
@@ -392,13 +434,22 @@ export default function App() {
     sessionCount: 0,
     avgSec: 0,
   });
-  const [summaryDays, setSummaryDays] = useState<DaySummary[]>([]);
   const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(
     null,
   );
   const [summaryTab, setSummaryTab] = useState<SummaryTabType>("timeline");
+  const [selectedSummaryDate, setSelectedSummaryDate] = useState<string>(() =>
+    toLocalDateStr(),
+  );
+  const [selectedDayStats, setSelectedDayStats] = useState<{
+    totalSec: number;
+    sessionCount: number;
+    avgSec: number;
+  }>({ totalSec: 0, sessionCount: 0, avgSec: 0 });
+  const [exportDirPath, setExportDirPath] = useState<string>("");
+  const [exportSavedMsg, setExportSavedMsg] = useState<string | null>(null);
   const [summaryReasonsTab, setSummaryReasonsTab] =
-    useState<SummaryReasonsTabType>("work");
+    useState<SummaryReasonsTabType>("distractions");
   const [summaryReasonsData, setSummaryReasonsData] =
     useState<SummaryReasonsData | null>(null);
   const [timelineSessions, setTimelineSessions] = useState<
@@ -407,12 +458,11 @@ export default function App() {
   const [hoveredTimelineItem, setHoveredTimelineItem] =
     useState<TimelineSessionItem | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
-  const [hoveredDay, setHoveredDay] = useState<DaySummary | null>(null);
   const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(
     null,
   );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [freqOnlyToday, setFreqOnlyToday] = useState(false);
+  const [freqOnlyToday, setFreqOnlyToday] = useState(true);
 
   // Arka planda gizliyken bile sürenin şaşmaması için zaman referansı
   const lastTickRef = useRef<number>(Date.now());
@@ -497,30 +547,23 @@ export default function App() {
 
         const locale = active === "tr" ? "tr-TR" : "en-US";
         const stats = await getActiveDayStats(locale);
-        const days = await getDaysSummary();
         const weekly = await getWeeklySummary(locale);
         const penalty = await loadDistractPenalty();
         const savedTheme = await loadThemeSettings();
 
         setLangPref(savedLang);
         setDayStats(stats);
-        setSummaryDays(days);
         setWeeklySummary(weekly);
         setDistractPenaltyMins(penalty);
         setTheme(savedTheme);
 
         // Tag listelerini yükle
-        const dTags = await getTags(
-          "distraction",
-          currentT.defaultDistractionTags,
-        );
         const eTags = await getTags("ending", currentT.defaultEndingTags);
         const wTags = await getTags("work", currentT.defaultWorkTags);
         const boTags = await getTags(
           "break_overtime",
           currentT.defaultBreakOvertimeTags,
         );
-        setDistractTags(dTags);
         setEndingTags(eTags);
         setWorkTags(wTags);
         setBreakOverdueTags(boTags);
@@ -531,11 +574,7 @@ export default function App() {
         setSelectedWorkTopicTag(defaultWorkTag);
         if (boTags.length > 0) setSelectedBreakOverdueTag(boTags[0].name);
 
-        const savedAlwaysOnTop = await loadAlwaysOnTop();
-        setAlwaysOnTop(savedAlwaysOnTop);
-        await getCurrentWindow()
-          .setAlwaysOnTop(savedAlwaysOnTop)
-          .catch(() => {});
+        await getCurrentWindow().setAlwaysOnTop(true).catch(() => {});
 
         const loadedPlans = await loadStudyPlans();
         const loadedPlanId = await loadActivePlanId();
@@ -583,7 +622,8 @@ export default function App() {
             );
             setWorkElapsedSec(saved.work_elapsed_sec);
             setBreakSecondsLeft(saved.break_seconds_left);
-            setIsRunning(true);
+            // PC yeniden başlatıldı / uyandıysa kullanıcı devam ettirene kadar duraklatılmış başla
+            setIsRunning(false);
             const normalizedPage: NavPage =
               saved.page === "timer" ||
               saved.page === "work" ||
@@ -605,12 +645,12 @@ export default function App() {
             );
           }
         } else {
-          // v0.1.9 veya öncesinden yükseltme: yarım kalmış bir çalışma/mola varsa koru
+          // v0.1.9 veya öncesinden yükseltme: yarım kalmış bir çalışma/mola varsa duraklatılmış koru
           const hadInProgressSession =
             saved.work_elapsed_sec > 0 || saved.page === "break";
           if (hadInProgressSession) {
             setSessionActive(true);
-            setIsRunning(true);
+            setIsRunning(false);
             setTimerMode(saved.page === "break" ? "break" : "work");
             setWorkSecondsLeft(saved.work_seconds_left);
             setWorkElapsedSec(saved.work_elapsed_sec);
@@ -657,7 +697,10 @@ export default function App() {
 
         setBreakParkingData(await getParkingLotData(false));
         setRecentContexts(await getRecentContexts(6));
-        setWorkStoryEntries(await getWorkStoryEntries(false, 40));
+        setWorkStoryEntries(await getWorkStoryEntries(false, 80));
+        invoke<string>("get_backup_export_dir")
+          .then(setExportDirPath)
+          .catch(() => {});
 
         const loadedAuth = await loadCloudAuthState();
         setCloudAuth(loadedAuth);
@@ -741,6 +784,16 @@ export default function App() {
     };
   }, [loaded]);
 
+  // Çalışma sayacı aktifken Windows Focus Moduna (Rahatsız Etmeyin / Bildirimleri Gizle) gir, mola veya duraklatmada geri aç
+  useEffect(() => {
+    if (!loaded) return;
+    const shouldSuppress =
+      sessionActive && isRunning && timerMode === "work";
+    invoke("set_windows_focus_mode", { enabled: shouldSuppress }).catch(
+      () => {},
+    );
+  }, [loaded, sessionActive, isRunning, timerMode]);
+
   // Sağ alt sistem tepsisi (System Tray) simgesi üzerine gelindiğinde Son Meşguliyet (Context) ve sayacı göster
   useEffect(() => {
     if (!loaded) return;
@@ -811,7 +864,7 @@ export default function App() {
             elapsedWorkSec: workElapsedSec,
           });
           setWorkStoryEntries(
-            await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+            await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
           );
           triggerBackgroundCloudSync();
         } catch (err) {
@@ -855,6 +908,7 @@ export default function App() {
         lang: activeLang,
         bgColor: theme.bgColor,
         recentContexts,
+        uiScale: theme.uiScale,
       },
     }).catch(() => {});
   }, [
@@ -867,6 +921,7 @@ export default function App() {
     distractPenaltyMins,
     activeLang,
     theme.bgColor,
+    theme.uiScale,
     recentContexts,
   ]);
 
@@ -915,15 +970,18 @@ export default function App() {
     showDistractBox ||
     showBreakOverdueBox ||
     showWorkTopicBox ||
-    showShortBreakPrompt;
+    showShortBreakPrompt ||
+    showContextEditBox;
 
   // Sağ alt mini sayaç widget'ını konumlandırma ve kısa süreli Son Meşguliyet (Last Context) gösterimi
   const positionMiniDockWindow = async (withToast: boolean) => {
     try {
+      latestWindowResizeSeq++;
       const win = getCurrentWindow();
       const scale = await win.scaleFactor();
-      const miniW = withToast ? 236 : 152;
-      const miniH = withToast ? 66 : 44;
+      const uiMult = Math.max(1, (theme.uiScale || 100) / 100);
+      const miniW = Math.round((withToast ? 236 : 152) * uiMult);
+      const miniH = Math.round((withToast ? 66 : 44) * uiMult);
       await win.setSize(new LogicalSize(miniW, miniH));
       const mon = await currentMonitor();
       if (mon) {
@@ -1026,9 +1084,10 @@ export default function App() {
         try {
           const factor = await win.scaleFactor();
           const size = await win.innerSize();
+          const mult = Math.max(1, (theme.uiScale || 100) / 100);
           setCurrentWinSize({
-            w: Math.round(size.width / factor),
-            h: Math.round(size.height / factor),
+            w: Math.round(size.width / factor / mult),
+            h: Math.round(size.height / factor / mult),
           });
         } catch {
           // ignore
@@ -1041,19 +1100,45 @@ export default function App() {
       if (unlistenRestore) unlistenRestore();
       if (unlistenResize) unlistenResize();
     };
-  }, [loaded, isMiniDock]);
+  }, [loaded, isMiniDock, theme.uiScale]);
+
+  useEffect(() => {
+    document.documentElement.style.zoom = "";
+    if (!loaded) return;
+    const scaleMult = Math.max(1, (theme.uiScale || 100) / 100);
+    invoke("set_window_zoom", { zoom: scaleMult }).catch(() => {});
+  }, [theme.uiScale, loaded]);
 
   // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
   useEffect(() => {
     if (!loaded || isMiniDock) return;
-    const win = getCurrentWindow();
+    const scaleMult = Math.max(1, (theme.uiScale || 100) / 100);
+    const applyScaledSize = (baseW: number, baseH: number) => {
+      void applyMonitorClampedWindowSize(baseW, baseH, scaleMult);
+      setCurrentWinSize({ w: baseW, h: baseH });
+    };
+
     if (anyModalOpen) {
-      const isSsModal =
-        showDistractBox && distractCategory === "screenshot_note";
-      const modalW = isSsModal ? 390 : 325;
-      const modalH = isSsModal ? 455 : 365;
-      win.setSize(new LogicalSize(modalW, modalH));
-      setCurrentWinSize({ w: modalW, h: modalH });
+      let modalW = 325;
+      let modalH = 340;
+      if (showDistractBox) {
+        modalW = 350;
+        modalH = 420;
+      } else if (showShortBreakPrompt || showContextEditBox) {
+        const hasChips = Boolean(currentContext || recentContexts.length > 0);
+        modalW = 325;
+        modalH = showContextEditBox
+          ? hasChips
+            ? 205
+            : 165
+          : hasChips
+            ? 230
+            : 190;
+      } else if (showWorkTopicBox) {
+        modalW = 325;
+        modalH = tagForm ? 300 : workPrevReasons.length > 0 ? 270 : 235;
+      }
+      applyScaledSize(modalW, modalH);
       return;
     }
     const targetPage = page as SizeTargetPage;
@@ -1070,69 +1155,46 @@ export default function App() {
     if (custom) {
       const w = hasBreakParking ? Math.max(custom.width, 345) : custom.width;
       const h = hasBreakParking ? Math.max(custom.height, 365) : custom.height;
-      win.setSize(new LogicalSize(w, h));
-      setCurrentWinSize({ w, h });
+      applyScaledSize(w, h);
       return;
     }
     if (page === "menu") {
       const hasBanner =
         updateStatus.kind === "available" ||
         updateStatus.kind === "downloading";
-      const h = hasBanner ? 395 : DEFAULT_WINDOW_SIZES.menu.height;
-      win.setSize(new LogicalSize(DEFAULT_WINDOW_SIZES.menu.width, h));
-      setCurrentWinSize({ w: DEFAULT_WINDOW_SIZES.menu.width, h });
+      const h = hasBanner ? 340 : DEFAULT_WINDOW_SIZES.menu.height;
+      applyScaledSize(DEFAULT_WINDOW_SIZES.menu.width, h);
     } else if (page === "dashboard") {
-      win.setSize(
-        new LogicalSize(
-          DEFAULT_WINDOW_SIZES.dashboard.width,
-          DEFAULT_WINDOW_SIZES.dashboard.height,
-        ),
+      applyScaledSize(
+        DEFAULT_WINDOW_SIZES.dashboard.width,
+        DEFAULT_WINDOW_SIZES.dashboard.height,
       );
-      setCurrentWinSize({
-        w: DEFAULT_WINDOW_SIZES.dashboard.width,
-        h: DEFAULT_WINDOW_SIZES.dashboard.height,
-      });
     } else if (page === "summary") {
-      win.setSize(
-        new LogicalSize(
-          DEFAULT_WINDOW_SIZES.summary.width,
-          DEFAULT_WINDOW_SIZES.summary.height,
-        ),
+      applyScaledSize(
+        DEFAULT_WINDOW_SIZES.summary.width,
+        DEFAULT_WINDOW_SIZES.summary.height,
       );
-      setCurrentWinSize({
-        w: DEFAULT_WINDOW_SIZES.summary.width,
-        h: DEFAULT_WINDOW_SIZES.summary.height,
-      });
     } else if (page === "settings") {
-      win.setSize(
-        new LogicalSize(
-          DEFAULT_WINDOW_SIZES.settings.width,
-          DEFAULT_WINDOW_SIZES.settings.height,
-        ),
+      applyScaledSize(
+        DEFAULT_WINDOW_SIZES.settings.width,
+        DEFAULT_WINDOW_SIZES.settings.height,
       );
-      setCurrentWinSize({
-        w: DEFAULT_WINDOW_SIZES.settings.width,
-        h: DEFAULT_WINDOW_SIZES.settings.height,
-      });
     } else {
-      const hasBreakParking =
-        sessionActive &&
-        timerMode === "break" &&
-        showBreakParking &&
-        breakParkingData.totalTasks +
-          breakParkingData.totalIdeas +
-          breakParkingData.totalScreenshots >
-          0;
       const w = hasBreakParking ? 345 : DEFAULT_WINDOW_SIZES.timer.width;
       const h = hasBreakParking ? 365 : DEFAULT_WINDOW_SIZES.timer.height;
-      win.setSize(new LogicalSize(w, h));
-      setCurrentWinSize({ w, h });
+      applyScaledSize(w, h);
     }
   }, [
     page,
     anyModalOpen,
     showDistractBox,
-    distractCategory,
+    showShortBreakPrompt,
+    showContextEditBox,
+    showWorkTopicBox,
+    tagForm,
+    workPrevReasons.length,
+    currentContext,
+    recentContexts.length,
     loaded,
     updateStatus.kind,
     isMiniDock,
@@ -1143,6 +1205,7 @@ export default function App() {
     breakParkingData.totalTasks,
     breakParkingData.totalIdeas,
     breakParkingData.totalScreenshots,
+    theme.uiScale,
   ]);
 
   // Renk ayarları değişince kaydet
@@ -1216,6 +1279,12 @@ export default function App() {
       const now = Date.now();
       const delta = Math.floor((now - lastTickRef.current) / 1000);
       if (delta < 1) return;
+      // Uyku / hazırda bekletme sonrası büyük zaman atlamasını loglama — otomatik duraklat
+      if (delta > 15) {
+        lastTickRef.current = now;
+        setIsRunning(false);
+        return;
+      }
       lastTickRef.current += delta * 1000;
 
       const rt = runtimeStateRef.current;
@@ -1256,6 +1325,27 @@ export default function App() {
     }, 500);
 
     return () => clearInterval(timer);
+  }, [isRunning, sessionActive]);
+
+  // Ekran kapalı / PC başından uzun süre ayrılma durumunda otomatik duraklatma
+  useEffect(() => {
+    if (!isRunning || !sessionActive) return;
+    const pollIdle = setInterval(async () => {
+      const idleSecs = await invoke<number>("get_system_idle_secs").catch(
+        () => 0,
+      );
+      const rt = runtimeStateRef.current;
+      if (rt.mode === "work" && idleSecs >= 1800) {
+        setIsRunning(false);
+      } else if (
+        rt.mode === "break" &&
+        rt.breakOverdueSec > 0 &&
+        idleSecs >= 600
+      ) {
+        setIsRunning(false);
+      }
+    }, 10000);
+    return () => clearInterval(pollIdle);
   }, [isRunning, sessionActive]);
 
   // Çalışma süresi 0'a ulaştığında otomatik kaydet ve molaya geç
@@ -1376,8 +1466,9 @@ export default function App() {
     const win = getCurrentWindow();
     const factor = await win.scaleFactor();
     const size = await win.innerSize();
-    const w = Math.max(220, Math.round(size.width / factor));
-    const h = Math.max(110, Math.round(size.height / factor));
+    const mult = Math.max(1, (theme.uiScale || 100) / 100);
+    const w = Math.max(220, Math.round(size.width / factor / mult));
+    const h = Math.max(110, Math.round(size.height / factor / mult));
     const targetPage = page as SizeTargetPage;
     const updated: CustomWindowSizes = {
       ...customSizes,
@@ -1393,10 +1484,10 @@ export default function App() {
   const handleResetStandardSizes = async () => {
     setCustomSizes({});
     await resetCustomWindowSizes();
-    const win = getCurrentWindow();
     const targetPage = page as SizeTargetPage;
     const std = DEFAULT_WINDOW_SIZES[targetPage] || DEFAULT_WINDOW_SIZES.menu;
-    await win.setSize(new LogicalSize(std.width, std.height));
+    const mult = Math.max(1, (theme.uiScale || 100) / 100);
+    await applyMonitorClampedWindowSize(std.width, std.height, mult);
     setCurrentWinSize({ w: std.width, h: std.height });
   };
 
@@ -1457,14 +1548,10 @@ export default function App() {
         return trObj.catImpulsiveTask;
       case "idea":
         return trObj.catIdea;
-      case "screenshot_note":
-        return trObj.catScreenshotNote;
       case "internal":
         return trObj.catInternal;
       case "external":
         return trObj.catExternal;
-      case "escape":
-        return trObj.catEscape;
     }
   };
 
@@ -1501,14 +1588,13 @@ export default function App() {
     setRecentContexts(await getRecentContexts(6));
   };
 
-  // Hem Global Spotlight Hem Widget İçi Ortak Dikkat / Görev / Fikir / SS Notu İşleyici
+  // Hem Global Spotlight Hem Widget İçi Ortak Dikkat / Görev / Fikir İşleyici
   const processDistractionSubmission = async (params: {
     category: DistractionCategory;
     reasonText: string;
     tag?: string;
     activeApp: string;
     activeWindow: string;
-    screenshotData?: string;
   }) => {
     const rt = runtimeStateRef.current;
     const appSt = appStateRef.current;
@@ -1536,57 +1622,33 @@ export default function App() {
       setWorkSecondsLeft((prev) => prev + appliedPenaltySec);
     }
 
-    if (rt.sessionActive) {
+    if (addsPenalty && rt.sessionActive) {
       setCurrentSessionDistractions((prev) => prev + 1);
     }
 
-    if (rt.activeContextLogId) {
+    if (addsPenalty && rt.activeContextLogId) {
       await incrementContextDistraction(rt.activeContextLogId);
     }
 
-    // 1: Dürtüsel Görev, 2: Akla Gelen Fikir, 3: SS Notu -> Mola Otoparkına ekleme sırasına göre kaydedilir (süre eklenmez!)
+    // 1: Dürtüsel Görev, 2: Akla Gelen Fikir -> Mola Otoparkına ekleme sırasına göre kaydedilir (süre eklenmez!)
     if (
       params.category === "impulsive_task" ||
-      params.category === "idea" ||
-      params.category === "screenshot_note"
+      params.category === "idea"
     ) {
       await addParkingItem({
-        itemType:
-          params.category === "screenshot_note"
-            ? "screenshot"
-            : params.category === "impulsive_task"
-              ? "task"
-              : "idea",
+        itemType: params.category === "impulsive_task" ? "task" : "idea",
         content: cleanText,
         activeApp: params.activeApp,
         activeWindow: params.activeWindow,
         contextText: effectiveCtx,
-        screenshotData: params.screenshotData,
       });
       setBreakParkingData(await getParkingLotData(false));
       setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
     }
 
-    // SS Notu veya Ekran Görüntüsü varsa Çalışma Hikayesi galerisine de ekle
-    if (params.category === "screenshot_note" || params.screenshotData) {
-      await addWorkStoryEntry({
-        entryType: "screenshot_note",
-        screenshotData: params.screenshotData,
-        activeApp: params.activeApp,
-        activeWindow: params.activeWindow,
-        contextText: effectiveCtx,
-        workTag: rt.workTag,
-        note: cleanText,
-        elapsedWorkSec: rt.sessionActive ? appSt.work_elapsed_sec : 0,
-      });
-      setWorkStoryEntries(
-        await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
-      );
-    }
-
     await recordDistraction({
       reason: cleanText,
-      tag: params.tag?.trim() || catLabel,
+      tag: params.tag?.trim() || "Tag Yok",
       elapsedWorkSec: rt.sessionActive ? appSt.work_elapsed_sec : 0,
       category: params.category,
       activeApp: params.activeApp,
@@ -1613,13 +1675,18 @@ export default function App() {
         console.error("Meşguliyet kaydedilemedi:", err),
       );
     } else {
-      processDistractionSubmission({
-        category: ev.category || "internal",
-        reasonText: ev.text,
-        activeApp: ev.activeApp,
-        activeWindow: ev.activeWindow,
-        screenshotData: ev.screenshotData,
-      }).catch((err) => console.error("Hızlı yakalama kaydedilemedi:", err));
+      (async () => {
+        await processDistractionSubmission({
+          category: ev.category || "internal",
+          reasonText: ev.text,
+          tag: ev.tag,
+          activeApp: ev.activeApp,
+          activeWindow: ev.activeWindow,
+        });
+        if (ev.newContext?.trim()) {
+          await applyNewContext(ev.newContext, ev.activeApp, ev.activeWindow);
+        }
+      })().catch((err) => console.error("Hızlı yakalama kaydedilemedi:", err));
     }
   };
 
@@ -1696,6 +1763,7 @@ export default function App() {
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
     setShowShortBreakPrompt(false);
+    setShowContextEditBox(false);
 
     const nowIso = new Date().toISOString();
 
@@ -1791,7 +1859,7 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // DİKKAT DAĞILMASI İŞLEMLERİ (6 KATEGORİ: 3. ŞIK SS NOTU + AÇIK SEKME + CONTEXT)
+  // DİKKAT DAĞILMASI İŞLEMLERİ (WİDGET İÇİ 4 ADIMLI ETKİLEŞİMLİ KART)
   // ---------------------------------------------------------------------------
   const handleDistractedClick = async () => {
     if (!sessionActive) return;
@@ -1800,88 +1868,26 @@ export default function App() {
       "get_last_active_window",
     ).catch(() => ({ appName: "", windowTitle: "" }));
     setDetectedActiveApp(fg);
-
-    captureScreenSnapshotRaw(false)
-      .then((raw) => {
-        if (raw?.dataUrl) {
-          setDistractRawShot(raw.dataUrl);
-          setDistractPreviewShot(raw.dataUrl);
-        }
-      })
-      .catch(() => {});
-    setDistractCropBox(null);
-
-    const loadedTags = await getTags("distraction", t.defaultDistractionTags);
-    setDistractTags(loadedTags);
-    const initialTag = loadedTags[0]?.name || t.other;
-    setSelectedDistractTag(initialTag);
-
-    const prevReasons = await getPreviousReasons("distraction", initialTag);
-    setDistractPreviousReasons(prevReasons);
-    setDistractReasonText("");
-    setDistractCategory("internal");
     setTagForm(null);
     setShowDistractBox(true);
   };
 
-  const handleSelectDistractTag = async (tagName: string) => {
-    setSelectedDistractTag(tagName);
-    const prevReasons = await getPreviousReasons("distraction", tagName);
-    setDistractPreviousReasons(prevReasons);
-  };
-
-  const handleRetakeDistractScreenshot = async () => {
-    const raw = await captureScreenSnapshotRaw(false);
-    if (raw?.dataUrl) {
-      setDistractRawShot(raw.dataUrl);
-      setDistractPreviewShot(raw.dataUrl);
-      setDistractCropBox(null);
-    }
-  };
-
-  const submitDistraction = async () => {
-    const fallbackLabel =
-      distractCategory === "impulsive_task" ||
-      distractCategory === "idea" ||
-      distractCategory === "screenshot_note"
-        ? getCategoryDisplayName(distractCategory)
-        : selectedDistractTag;
-    const reason = distractReasonText.trim() || fallbackLabel;
-
-    let finalShot: string | undefined = undefined;
-    if (distractCategory === "screenshot_note") {
-      if (distractRawShot) {
-        finalShot = await compressAndCropDataUrl(
-          distractRawShot,
-          distractCropBox,
-          760,
-          0.72,
-        );
-      } else {
-        const compressed = await captureScreenCompressed(
-          false,
-          distractCropBox,
-          760,
-          0.72,
-        );
-        finalShot = compressed.dataUrl || undefined;
-      }
-    }
-
+  const submitDistraction = async (payload: DistractSubmissionPayload) => {
     await processDistractionSubmission({
-      category: distractCategory,
-      reasonText: reason,
-      tag: selectedDistractTag,
+      category: payload.category,
+      reasonText: payload.text,
+      tag: payload.tag,
       activeApp: detectedActiveApp.appName,
       activeWindow: detectedActiveApp.windowTitle,
-      screenshotData: finalShot,
     });
+    if (payload.newContext?.trim()) {
+      await applyNewContext(
+        payload.newContext,
+        detectedActiveApp.appName,
+        detectedActiveApp.windowTitle,
+      );
+    }
     setShowDistractBox(false);
-    setDistractReasonText("");
-    setDistractRawShot("");
-    setDistractPreviewShot("");
-    setDistractCropBox(null);
-    setIsEditingDistractTags(false);
     setTagForm(null);
   };
 
@@ -1979,13 +1985,31 @@ export default function App() {
   };
 
   // ---------------------------------------------------------------------------
-  // MOLA, KISA MOLA, KONU SEÇİMİ, ALWAYS ON TOP & EXPORT
+  // MOLA, KISA MOLA, KONU SEÇİMİ & EXPORT
   // ---------------------------------------------------------------------------
-  const toggleAlwaysOnTop = async () => {
-    const next = !alwaysOnTop;
-    setAlwaysOnTop(next);
-    await saveAlwaysOnTop(next);
-    await getCurrentWindow().setAlwaysOnTop(next).catch(() => {});
+  const handleOpenContextBox = () => {
+    setShortBreakDraft(currentContext || "");
+    setShowContextEditBox(true);
+  };
+
+  const confirmContextEdit = async () => {
+    const nextCtx = shortBreakDraft.trim();
+    setShowContextEditBox(false);
+    if (nextCtx) {
+      if (nextCtx !== currentContext.trim()) {
+        await applyNewContext(nextCtx);
+      }
+    } else {
+      if (activeContextLogId && timerMode === "work") {
+        await finalizeContextLog(
+          activeContextLogId,
+          Math.max(0, workElapsedSec - contextStartedAtElapsedSec),
+        );
+      }
+      setActiveContextLogId(null);
+      setContextStartedAtElapsedSec(0);
+      setCurrentContext("");
+    }
   };
 
   const handleTakeShortBreak = () => {
@@ -2029,19 +2053,6 @@ export default function App() {
     setIsRunning(true);
     playBreakChime();
     breakStartedAtRef.current = new Date().toISOString();
-  };
-
-  const handleExtendBreak5m = () => {
-    if (breakOverdueSec > 0) {
-      setBreakOvertimeAccumSec((prev) => prev + breakOverdueSec);
-      setBreakOverdueSec(0);
-      setBreakSecondsLeft(5 * 60);
-      setBreakTotalSec((prev) => prev + 5 * 60);
-      setIsRunning(true);
-    } else {
-      setBreakSecondsLeft((prev) => prev + 5 * 60);
-      setBreakTotalSec((prev) => prev + 5 * 60);
-    }
   };
 
   const handleSelectPlan = async (planId: string) => {
@@ -2102,6 +2113,7 @@ export default function App() {
     const prev = await getPreviousReasons("break_overtime", initial);
     setBreakOverduePrevReasons(prev);
     setBreakOverdueReasonText("");
+    setTagForm(null);
     setShowBreakOverdueBox(true);
   };
 
@@ -2125,9 +2137,9 @@ export default function App() {
           : t.breakModeStdLabel;
 
     if (actualBreakSec >= 10) {
-      const hasOvertimeReason = totalOvertime >= 10 && !skipReason;
-      const tag = hasOvertimeReason ? selectedBreakOverdueTag : defaultTag;
-      const reason = hasOvertimeReason
+      const hasModalOvertimeReason = totalOvertime >= 10 && !skipReason;
+      const tag = hasModalOvertimeReason ? selectedBreakOverdueTag : defaultTag;
+      const reason = hasModalOvertimeReason
         ? breakOverdueReasonText.trim() || selectedBreakOverdueTag
         : undefined;
       const endIso = new Date().toISOString();
@@ -2147,6 +2159,8 @@ export default function App() {
     }
 
     setShowBreakOverdueBox(false);
+    setIsEditingBreakOverdueTags(false);
+    setTagForm(null);
     setBreakElapsedSec(0);
     setBreakOverdueSec(0);
     setBreakOvertimeAccumSec(0);
@@ -2227,16 +2241,29 @@ export default function App() {
   const handleExportData = async () => {
     try {
       const jsonStr = await exportAllData();
+      const filename = "pomodoro-backup.json";
+      try {
+        const savedPath = await invoke<string>("save_backup_json", {
+          filename,
+          content: jsonStr,
+        });
+        setExportSavedMsg(t.exportSavedMsg(savedPath));
+        setTimeout(() => setExportSavedMsg(null), 4500);
+        return;
+      } catch {
+        // Tarayıcı geliştirme modu fallback
+      }
       const blob = new Blob([jsonStr], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const d = new Date().toISOString().slice(0, 10);
-      a.download = `pomodoro-backup-${d}.json`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setExportSavedMsg(t.exportSavedMsg(filename));
+      setTimeout(() => setExportSavedMsg(null), 4500);
     } catch (err) {
       console.error("Dışa aktarma hatası:", err);
     }
@@ -2282,10 +2309,7 @@ export default function App() {
       if (!trimmed) return;
       const added = await addTag(trimmed, kind);
       const pickedName = added?.name || trimmed;
-      if (kind === "distraction") {
-        setDistractTags(await getTags("distraction", t.defaultDistractionTags));
-        setSelectedDistractTag(pickedName);
-      } else if (kind === "ending") {
+      if (kind === "ending") {
         setEndingTags(await getTags("ending", t.defaultEndingTags));
         setSelectedEndingTag(pickedName);
       } else if (kind === "work") {
@@ -2300,14 +2324,7 @@ export default function App() {
     } else if (mode === "edit" && tagId !== undefined && currentName) {
       if (trimmed && trimmed !== currentName) {
         await updateTag(tagId, trimmed, kind);
-        if (kind === "distraction") {
-          setDistractTags(
-            await getTags("distraction", t.defaultDistractionTags),
-          );
-          if (selectedDistractTag === currentName) {
-            setSelectedDistractTag(trimmed);
-          }
-        } else if (kind === "ending") {
+        if (kind === "ending") {
           setEndingTags(await getTags("ending", t.defaultEndingTags));
           if (selectedEndingTag === currentName) setSelectedEndingTag(trimmed);
         } else if (kind === "work") {
@@ -2327,9 +2344,7 @@ export default function App() {
       }
     } else if (mode === "delete" && tagId !== undefined) {
       await deleteTag(tagId);
-      if (kind === "distraction") {
-        setDistractTags(await getTags("distraction", t.defaultDistractionTags));
-      } else if (kind === "ending") {
+      if (kind === "ending") {
         setEndingTags(await getTags("ending", t.defaultEndingTags));
       } else if (kind === "work") {
         setWorkTags(await getTags("work", t.defaultWorkTags));
@@ -2446,7 +2461,7 @@ export default function App() {
       setSummaryParkingData(pData);
       setBreakParkingData(await getParkingLotData(false));
       setWorkStoryEntries(
-        await getWorkStoryEntries(freqOnlyTodayRef.current, 40),
+        await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
       );
     } catch (err) {
       setSyncStatusMsg(String(err));
@@ -2460,7 +2475,6 @@ export default function App() {
     setIsCelebrating(false);
     setPlanDropdownOpen(false);
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
-    const days = await getDaysSummary();
     const weekly = await getWeeklySummary(locale);
     const reasonsData = await getSummaryReasonsData(freqOnlyToday);
     const timeline = await getTimelineSessions();
@@ -2468,9 +2482,8 @@ export default function App() {
     const pData = await getParkingLotData(freqOnlyToday);
     const cStats = await getContextStatsSummary(freqOnlyToday);
     const aStats = await getAppDistractionSummary(freqOnlyToday);
-    const wStory = await getWorkStoryEntries(freqOnlyToday, 40);
+    const wStory = await getWorkStoryEntries(freqOnlyToday, 80);
 
-    setSummaryDays(days);
     setWeeklySummary(weekly);
     setSummaryReasonsData(reasonsData);
     setTimelineSessions(timeline);
@@ -2494,6 +2507,7 @@ export default function App() {
     setShowBreakOverdueBox(false);
     setShowWorkTopicBox(false);
     setShowShortBreakPrompt(false);
+    setShowContextEditBox(false);
     setTagForm(null);
     if (sessionActive) {
       setIsRunning(true);
@@ -2504,20 +2518,37 @@ export default function App() {
     setPage("menu");
   };
 
-  const openSummary = async () => {
-    setIsCelebrating(false);
-    setPlanDropdownOpen(false);
-    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
-    const days = await getDaysSummary();
-    const weekly = await getWeeklySummary(locale);
-    const reasonsData = await getSummaryReasonsData(freqOnlyToday);
-    const timeline = await getTimelineSessions();
-    const insights = await getAdhdInsights(freqOnlyToday);
-    const pData = await getParkingLotData(freqOnlyToday);
-    const cStats = await getContextStatsSummary(freqOnlyToday);
-    const aStats = await getAppDistractionSummary(freqOnlyToday);
+  const loadSummaryForScope = async (
+    tab: SummaryTabType,
+    dateStr: string,
+    lang: ActiveLang = activeLang,
+  ) => {
+    const locale = lang === "tr" ? "tr-TR" : "en-US";
+    const dateRange =
+      tab === "weekly" ? getWeekBoundsIso(dateStr) : getDateBoundsIso(dateStr);
+    const [
+      dayStat,
+      weekly,
+      reasonsData,
+      timeline,
+      insights,
+      pData,
+      cStats,
+      aStats,
+      wStory,
+    ] = await Promise.all([
+      getDayStatsForDate(dateStr),
+      getWeeklySummary(locale, dateStr),
+      getSummaryReasonsData(false, dateRange),
+      getTimelineSessions(undefined, getDateBoundsIso(dateStr)),
+      getAdhdInsights(false, dateRange),
+      getParkingLotData(false, dateRange),
+      getContextStatsSummary(false, dateRange),
+      getAppDistractionSummary(false, dateRange),
+      getWorkStoryEntries(false, 200, dateRange),
+    ]);
 
-    setSummaryDays(days);
+    setSelectedDayStats(dayStat);
     setWeeklySummary(weekly);
     setSummaryReasonsData(reasonsData);
     setTimelineSessions(timeline);
@@ -2525,14 +2556,47 @@ export default function App() {
     setSummaryParkingData(pData);
     setContextStats(cStats);
     setAppDistractions(aStats);
-    setHoveredDay(days[days.length - 1] ?? null);
-    const todayWeekDay =
+    setWorkStoryEntries(wStory);
+    const selectedOrToday =
+      weekly.days.find((d) => d.fullDateStr === dateStr) ??
       weekly.days.find((d) => d.is_today) ??
       weekly.days[weekly.days.length - 1] ??
       null;
-    setHoveredWeekDay(todayWeekDay);
+    setHoveredWeekDay(selectedOrToday);
+    setHoveredTimelineItem(null);
+  };
+
+  const openSummary = async () => {
+    setIsCelebrating(false);
+    setPlanDropdownOpen(false);
+    const initialTab: SummaryTabType =
+      summaryTab === "weekly" ? "weekly" : "timeline";
+    setSummaryTab(initialTab);
+    setFreqOnlyToday(initialTab === "timeline");
+    const todayStr = toLocalDateStr();
+    setSelectedSummaryDate(todayStr);
+    await loadSummaryForScope(initialTab, todayStr, activeLang);
     setShowResetConfirm(false);
     setPage("summary");
+  };
+
+  const handleChangeSummaryTab = async (tab: SummaryTabType) => {
+    setSummaryTab(tab);
+    setFreqOnlyToday(tab === "timeline");
+    await loadSummaryForScope(tab, selectedSummaryDate, activeLang);
+  };
+
+  const handleSelectSummaryDate = async (dateStr: string) => {
+    setSelectedSummaryDate(dateStr);
+    await loadSummaryForScope(summaryTab, dateStr, activeLang);
+  };
+
+  const handleShiftSummaryDate = async (deltaDays: number) => {
+    const d = parseLocalDateStr(selectedSummaryDate);
+    d.setDate(d.getDate() + deltaDays);
+    const nextStr = toLocalDateStr(d);
+    setSelectedSummaryDate(nextStr);
+    await loadSummaryForScope(summaryTab, nextStr, activeLang);
   };
 
   const openSettings = () => {
@@ -2549,12 +2613,21 @@ export default function App() {
     setSummaryParkingData(await getParkingLotData(nextVal));
     setContextStats(await getContextStatsSummary(nextVal));
     setAppDistractions(await getAppDistractionSummary(nextVal));
+    setWorkStoryEntries(await getWorkStoryEntries(nextVal, 80));
   };
 
   // Mola Otoparkı & Özet Otoparkı Etkileşimleri (Veritabanına Ekleme Sırasıyla Kaydedilir)
   const refreshParkingViews = async () => {
     setBreakParkingData(await getParkingLotData(false));
-    setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+    if (page === "summary") {
+      const scopeRange =
+        summaryTab === "weekly"
+          ? getWeekBoundsIso(selectedSummaryDate)
+          : getDateBoundsIso(selectedSummaryDate);
+      setSummaryParkingData(await getParkingLotData(false, scopeRange));
+    } else {
+      setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+    }
   };
 
   const handleToggleParkingTask = async (id: number, done: boolean) => {
@@ -2577,8 +2650,15 @@ export default function App() {
 
   const handleDeleteWorkStoryItem = async (id: number) => {
     await deleteWorkStoryEntry(id);
+    setLightboxGroupEntries((prev) => prev.filter((item) => item.id !== id));
     setLightboxEntry(null);
-    setWorkStoryEntries(await getWorkStoryEntries(freqOnlyTodayRef.current, 40));
+    if (page === "summary") {
+      await loadSummaryForScope(summaryTab, selectedSummaryDate, activeLang);
+    } else {
+      setWorkStoryEntries(
+        await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
+      );
+    }
   };
 
   // Global Kısayol Kaydetme & Sıfırlama
@@ -2610,9 +2690,8 @@ export default function App() {
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     await clearAllData(locale);
     const freshStats = await getActiveDayStats(locale);
-    const freshDays = await getDaysSummary();
     const freshWeekly = await getWeeklySummary(locale);
-    const freshReasons = await getSummaryReasonsData(false);
+    const freshReasons = await getSummaryReasonsData(freqOnlyToday);
     const freshTimeline = await getTimelineSessions(freshStats.dayId);
 
     setSessionActive(false);
@@ -2640,11 +2719,13 @@ export default function App() {
     breakStartedAtRef.current = null;
 
     setDayStats(freshStats);
-    setSummaryDays(freshDays);
+    setSelectedSummaryDate(toLocalDateStr());
+    setSelectedDayStats({ totalSec: 0, sessionCount: 0, avgSec: 0 });
+    setWorkStoryEntries([]);
     setWeeklySummary(freshWeekly);
     setSummaryReasonsData(freshReasons);
     setTimelineSessions(freshTimeline);
-    setHoveredDay(null);
+    setAdhdInsights(null);
     setHoveredWeekDay(null);
     setHoveredTimelineItem(null);
     setShowResetConfirm(false);
@@ -2660,7 +2741,6 @@ export default function App() {
     await saveLanguagePreference(newPref);
     const newActive = resolveLanguage(newPref);
     const newT = translations[newActive];
-    setDistractTags(await getTags("distraction", newT.defaultDistractionTags));
     setEndingTags(await getTags("ending", newT.defaultEndingTags));
     setWorkTags(await getTags("work", newT.defaultWorkTags));
     setBreakOverdueTags(
@@ -2772,19 +2852,19 @@ export default function App() {
     currentWorkReason ? `: ${currentWorkReason}` : ""
   }`;
 
-  const maxRecentHours = Math.max(
-    1,
-    ...summaryDays.map((d) => d.total_sec / 3600),
-  );
   const maxWeeklyHours = Math.max(
     1,
     ...(weeklySummary?.days.map((d) => d.total_sec / 3600) ?? [1]),
   );
 
   const updateAvailable = updateStatus.kind === "available";
+
   const shellStyle = {
     "--shell-bg": hexToRgba(theme.bgColor, theme.bgOpacity / 100),
-    "--shell-bg-solid": hexToRgba(theme.bgColor, theme.bgOpacity / 100 + 0.11),
+    "--shell-bg-solid": hexToRgba(
+      theme.bgColor,
+      Math.max(0.97, Math.min(1, theme.bgOpacity / 100 + 0.2)),
+    ),
     "--timer-color": theme.timerColor,
   } as React.CSSProperties;
 
@@ -2888,15 +2968,21 @@ export default function App() {
       {/* =====================================================================
           ORTAK TAG & AÇIKLAMA DİYALOGLARI (Kısa Mola Notu, Konu, Dağılma, Erken Bitirme, Gecikme)
          ===================================================================== */}
-      {showShortBreakPrompt ? (
+      {showShortBreakPrompt || showContextEditBox ? (
         <ShortBreakPromptModal
           t={t}
           currentContext={currentContext}
           recentContexts={recentContexts}
           shortBreakDraft={shortBreakDraft}
+          isDirectContextEdit={showContextEditBox}
           onChangeDraft={setShortBreakDraft}
-          onConfirm={confirmStartShortBreak}
-          onCancel={() => setShowShortBreakPrompt(false)}
+          onConfirm={
+            showContextEditBox ? confirmContextEdit : confirmStartShortBreak
+          }
+          onCancel={() => {
+            setShowShortBreakPrompt(false);
+            setShowContextEditBox(false);
+          }}
         />
       ) : showWorkTopicBox ? (
         <WorkTopicModal
@@ -2921,30 +3007,13 @@ export default function App() {
         />
       ) : showDistractBox ? (
         <DistractModal
-          {...tagHandlers}
           t={t}
           currentContext={currentContext}
+          recentContexts={recentContexts}
           fullTopicLabel={fullTopicLabel}
           detectedActiveApp={detectedActiveApp}
-          distractCategory={distractCategory}
           distractPenaltyMins={distractPenaltyMins}
-          distractPreviewShot={distractPreviewShot}
-          distractCropBox={distractCropBox}
-          distractTags={distractTags}
-          selectedDistractTag={selectedDistractTag}
-          distractPreviousReasons={distractPreviousReasons}
-          distractReasonText={distractReasonText}
-          isEditingDistractTags={isEditingDistractTags}
           getCategoryDisplayName={(cat) => getCategoryDisplayName(cat)}
-          onChangeCategory={setDistractCategory}
-          onChangeCropBox={setDistractCropBox}
-          onRetakeScreenshot={handleRetakeDistractScreenshot}
-          onToggleEditTags={() => {
-            setIsEditingDistractTags(!isEditingDistractTags);
-            setTagForm(null);
-          }}
-          onSelectTag={handleSelectDistractTag}
-          onChangeReasonText={setDistractReasonText}
           onSubmit={submitDistraction}
           onCancel={() => {
             setShowDistractBox(false);
@@ -2998,20 +3067,16 @@ export default function App() {
               breakKind={breakKind}
               currentPlan={currentPlan}
               planDisplayName={getPlanDisplayName(currentPlan)}
-              currentWorkTag={currentWorkTag}
               fullTopicLabel={fullTopicLabel}
               currentContext={currentContext}
-              shortcuts={shortcuts}
               currentCycleIndex={currentCycleIndex}
               sessionShortBreakCount={sessionShortBreakCount}
-              currentSessionDistractions={currentSessionDistractions}
               currentBreakShortName={currentBreakShortName}
               currentBreakFullTooltip={currentBreakFullTooltip}
               breakParkingTotalCount={breakParkingTotalCount}
               hasBreakParkingView={hasBreakParkingView}
               breakParkingData={breakParkingData}
               docsStatusMsg={docsStatusMsg}
-              alwaysOnTop={alwaysOnTop}
               updateAvailable={updateAvailable}
               isBreakAlarm={isBreakAlarm}
               breakOverdueSec={breakOverdueSec}
@@ -3021,20 +3086,19 @@ export default function App() {
               distractPenaltyMins={distractPenaltyMins}
               reminderBanner={reminderBanner}
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
-              onOpenQuickCapture={openQuickCaptureFromUi}
+              onOpenContextBox={handleOpenContextBox}
               onToggleBreakParking={() => setShowBreakParking((p) => !p)}
-              onToggleAlwaysOnTop={toggleAlwaysOnTop}
               onOpenMenu={openMenu}
               onEnterMiniDock={enterMiniDock}
+              onHideToTray={hideToTray}
               onDismissReminderBanner={() => setReminderBanner(null)}
               onSyncParkingToDocs={handleSyncParkingToDocs}
               onSyncSingleItemToDocs={handleSyncSingleItemToDocs}
               onToggleParkingTask={handleToggleParkingTask}
               onRateParkingIdea={handleRateParkingIdea}
               onDeleteParkingEntry={handleDeleteParkingEntry}
-              onOpenLightbox={setLightboxEntry}
+              onOpenLightbox={openLightbox}
               onStartWorkFromBreak={handleStartWorkFromBreak}
-              onExtendBreak5m={handleExtendBreak5m}
               onStopSession={handleStopSession}
               onTakeShortBreak={handleTakeShortBreak}
               onDistractedClick={handleDistractedClick}
@@ -3046,7 +3110,6 @@ export default function App() {
               t={t}
               activeLang={activeLang}
               dayStats={dayStats}
-              alwaysOnTop={alwaysOnTop}
               updateAvailable={updateAvailable}
               updateStatus={updateStatus}
               sessionActive={sessionActive}
@@ -3063,19 +3126,16 @@ export default function App() {
               planDropdownOpen={planDropdownOpen}
               planDropdownRef={planDropdownRef}
               liveClockStr={liveClockStr}
-              currentContext={currentContext}
-              shortcuts={shortcuts}
               getPlanDisplayName={getPlanDisplayName}
-              onToggleAlwaysOnTop={toggleAlwaysOnTop}
               onOpenDashboard={openDashboard}
               onOpenSummary={openSummary}
               onOpenSettings={openSettings}
               onEnterMiniDock={enterMiniDock}
+              onHideToTray={hideToTray}
               onInstallUpdate={handleInstallUpdate}
               onTogglePlanDropdown={() => setPlanDropdownOpen((prev) => !prev)}
               onSelectPlan={handleSelectPlan}
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
-              onOpenQuickCapture={openQuickCaptureFromUi}
               onReturnToTimer={() => {
                 setIsCelebrating(false);
                 setPage("timer");
@@ -3091,7 +3151,6 @@ export default function App() {
               activeLang={activeLang}
               langPref={langPref}
               distractPenaltyMins={distractPenaltyMins}
-              alwaysOnTop={alwaysOnTop}
               shortcuts={shortcuts}
               shortcutStatus={shortcutStatus}
               recordingShortcutFor={recordingShortcutFor}
@@ -3111,7 +3170,6 @@ export default function App() {
               onOpenMenu={openMenu}
               onLanguageChange={handleLanguageChange}
               onPenaltyChange={handlePenaltyChange}
-              onToggleAlwaysOnTop={toggleAlwaysOnTop}
               onResetShortcuts={handleResetShortcuts}
               onSetRecordingShortcutFor={setRecordingShortcutFor}
               onApplyShortcuts={handleApplyShortcuts}
@@ -3140,6 +3198,8 @@ export default function App() {
               activeLang={activeLang}
               summaryTab={summaryTab}
               summaryReasonsTab={summaryReasonsTab}
+              selectedDateStr={selectedSummaryDate}
+              selectedDayStats={selectedDayStats}
               summaryParkingData={summaryParkingData}
               workStoryEntries={workStoryEntries}
               showResetConfirm={showResetConfirm}
@@ -3149,31 +3209,27 @@ export default function App() {
               summaryReasonsData={summaryReasonsData}
               hoveredWeekDay={hoveredWeekDay}
               maxWeeklyHours={maxWeeklyHours}
-              hoveredDay={hoveredDay}
-              summaryDays={summaryDays}
-              maxRecentHours={maxRecentHours}
               adhdInsights={adhdInsights}
-              freqOnlyToday={freqOnlyToday}
               docsStatusMsg={docsStatusMsg}
-              contextStats={contextStats}
-              appDistractions={appDistractions}
+              exportDirPath={exportDirPath}
+              exportSavedMsg={exportSavedMsg}
               expandedTags={expandedTags}
-              onSetSummaryTab={setSummaryTab}
+              onSetSummaryTab={handleChangeSummaryTab}
               onSetSummaryReasonsTab={setSummaryReasonsTab}
+              onSelectDate={handleSelectSummaryDate}
+              onShiftDate={handleShiftSummaryDate}
               onOpenDashboard={openDashboard}
               onOpenMenu={openMenu}
               onSetShowResetConfirm={setShowResetConfirm}
               onResetAllData={handleResetAllData}
               onSetHoveredTimelineItem={setHoveredTimelineItem}
               onSetHoveredWeekDay={setHoveredWeekDay}
-              onSetHoveredDay={setHoveredDay}
-              onToggleFreqFilter={toggleFreqFilter}
               onSyncParkingToDocs={handleSyncParkingToDocs}
               onSyncSingleItemToDocs={handleSyncSingleItemToDocs}
               onToggleParkingTask={handleToggleParkingTask}
               onRateParkingIdea={handleRateParkingIdea}
               onDeleteParkingEntry={handleDeleteParkingEntry}
-              onOpenLightbox={setLightboxEntry}
+              onOpenLightbox={openLightbox}
               onToggleAccordionTag={toggleAccordionTag}
               onExportData={handleExportData}
             />
@@ -3194,13 +3250,13 @@ export default function App() {
               cloudServerInput={cloudServerInput}
               dayStats={dayStats}
               summaryParkingData={summaryParkingData}
-              workStoryEntries={workStoryEntries}
               contextStats={contextStats}
               appDistractions={appDistractions}
               onToggleFreqFilter={toggleFreqFilter}
               onOpenSummary={openSummary}
               onOpenMenu={openMenu}
               onEnterMiniDock={enterMiniDock}
+              onHideToTray={hideToTray}
               onManualCloudSync={handleManualCloudSync}
               onGoogleSignOut={handleGoogleSignOut}
               onGoogleSignIn={handleGoogleSignIn}
@@ -3214,15 +3270,19 @@ export default function App() {
               onToggleParkingTask={handleToggleParkingTask}
               onRateParkingIdea={handleRateParkingIdea}
               onDeleteParkingEntry={handleDeleteParkingEntry}
-              onOpenLightbox={setLightboxEntry}
             />
           )}
 
           {lightboxEntry && (
             <LightboxModal
               entry={lightboxEntry}
+              entries={lightboxGroupEntries}
               t={t}
-              onClose={() => setLightboxEntry(null)}
+              onSelectEntry={setLightboxEntry}
+              onClose={() => {
+                setLightboxEntry(null);
+                setLightboxGroupEntries([]);
+              }}
               onDelete={handleDeleteWorkStoryItem}
             />
           )}

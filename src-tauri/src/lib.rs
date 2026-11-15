@@ -1,5 +1,6 @@
 mod active_window;
 mod capture;
+mod focus_mode;
 mod shortcuts;
 mod tray;
 
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, State, WebviewWindow, Window, WindowEvent};
+use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::Shortcut;
 
@@ -20,11 +21,15 @@ use shortcuts::{
 use tray::{set_tray_tooltip, setup_tray};
 
 pub(crate) const CAPTURE_DEFAULT_WIDTH: f64 = 540.0;
-pub(crate) const CAPTURE_DEFAULT_HEIGHT: f64 = 205.0;
+pub(crate) const CAPTURE_DEFAULT_HEIGHT: f64 = 290.0;
 
 // ============================================================================
 // Paylaşılan Yakalama Durumu (Main <-> Capture Penceresi Köprüsü)
 // ============================================================================
+
+fn default_ui_scale() -> u32 {
+    100
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +43,8 @@ pub struct FrontendContextSnapshot {
     pub lang: String,
     pub bg_color: String,
     pub recent_contexts: Vec<String>,
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: u32,
 }
 
 impl Default for FrontendContextSnapshot {
@@ -52,6 +59,7 @@ impl Default for FrontendContextSnapshot {
             lang: "tr".to_string(),
             bg_color: "#1a1814".to_string(),
             recent_contexts: Vec::new(),
+            ui_scale: 100,
         }
     }
 }
@@ -87,6 +95,7 @@ pub(crate) struct SharedCaptureState {
     pub distraction_shortcut: String,
     pub context_shortcut: String,
     pub parsed_distraction: Option<Shortcut>,
+    pub parsed_distraction_alt: Option<Shortcut>,
     pub parsed_context: Option<Shortcut>,
     pub snapshot: FrontendContextSnapshot,
     pub active_payload: CaptureOpenPayload,
@@ -103,6 +112,7 @@ impl Default for SharedCaptureState {
             capture_opened_at_ms: 0,
             open_seq: 0,
             parsed_distraction: Shortcut::from_str(&d_str).ok(),
+            parsed_distraction_alt: Shortcut::from_str("Ctrl+Shift+D").ok(),
             parsed_context: Shortcut::from_str(&c_str).ok(),
             distraction_shortcut: d_str,
             context_shortcut: c_str,
@@ -166,6 +176,20 @@ fn sync_capture_snapshot(
 }
 
 #[tauri::command]
+fn set_window_zoom(caller: WebviewWindow, app: AppHandle, zoom: f64) {
+    let safe_zoom = zoom.clamp(0.5, 2.5);
+    if caller.label() == "main" {
+        for label in ["main", "capture"] {
+            if let Some(win) = app.get_webview_window(label) {
+                let _ = win.set_zoom(safe_zoom);
+            }
+        }
+    } else {
+        let _ = caller.set_zoom(safe_zoom);
+    }
+}
+
+#[tauri::command]
 fn get_capture_open_payload(state: State<'_, Mutex<SharedCaptureState>>) -> CaptureOpenPayload {
     lock_state(&state).active_payload.clone()
 }
@@ -182,14 +206,20 @@ fn open_quick_capture_manual(app: AppHandle, mode: String) {
 
 #[tauri::command]
 fn close_capture_and_restore_focus(app: AppHandle, state: State<'_, Mutex<SharedCaptureState>>) {
+    let (prev_hwnd, scale) = {
+        let guard = lock_state(&state);
+        (
+            guard.last_external_hwnd,
+            (guard.snapshot.ui_scale.max(100) as f64) / 100.0,
+        )
+    };
     if let Some(cap_win) = app.get_webview_window("capture") {
         let _ = cap_win.hide();
         let _ = cap_win.set_size(Size::Logical(LogicalSize::new(
-            CAPTURE_DEFAULT_WIDTH,
-            CAPTURE_DEFAULT_HEIGHT,
+            (CAPTURE_DEFAULT_WIDTH * scale).round(),
+            (CAPTURE_DEFAULT_HEIGHT * scale).round(),
         )));
     }
-    let prev_hwnd = lock_state(&state).last_external_hwnd;
     restore_hwnd(prev_hwnd);
 }
 
@@ -213,7 +243,7 @@ fn capture_screen_snapshot(
 #[tauri::command]
 fn set_capture_window_size(app: AppHandle, width: f64, height: f64) {
     if let Some(cap_win) = app.get_webview_window("capture") {
-        resize_and_center(&cap_win, width, height);
+        let _ = cap_win.set_size(Size::Logical(LogicalSize::new(width, height)));
     }
 }
 
@@ -222,30 +252,61 @@ fn update_tray_tooltip(app: AppHandle, tooltip: String) {
     set_tray_tooltip(&app, tooltip);
 }
 
+#[tauri::command]
+fn set_windows_focus_mode(enabled: bool) {
+    focus_mode::set_focus_mode(enabled);
+}
+
+#[tauri::command]
+fn get_system_idle_secs() -> u64 {
+    active_window::get_system_idle_secs()
+}
+
+fn resolve_backup_dir(app: &AppHandle) -> std::path::PathBuf {
+    if let Ok(dir) = app.path().download_dir() {
+        return dir;
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let dl = std::path::PathBuf::from(profile).join("Downloads");
+        if dl.exists() {
+            return dl;
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+#[tauri::command]
+fn get_backup_export_dir(app: AppHandle) -> String {
+    resolve_backup_dir(&app).to_string_lossy().to_string()
+}
+
+#[tauri::command]
+fn save_backup_json(app: AppHandle, filename: String, content: String) -> Result<String, String> {
+    let dir = resolve_backup_dir(&app);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let safe_name = std::path::Path::new(&filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("pomodoro-backup.json");
+    let full_path = dir.join(safe_name);
+    std::fs::write(&full_path, content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(full_path.to_string_lossy().to_string())
+}
+
 fn handle_window_event(window: &Window, event: &WindowEvent) {
     if window.label() == "capture" {
-        match event {
-            WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-            WindowEvent::Focused(false) => {
-                let state = window.app_handle().state::<Mutex<SharedCaptureState>>();
-                let elapsed = now_ms().saturating_sub(lock_state(&state).capture_opened_at_ms);
-                if elapsed > 350 {
-                    let _ = window.hide();
-                }
-            }
-            _ => {}
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window.hide();
         }
         return;
     }
 
-    // Ana pencere: Çarpıya veya Alt+F4'e basıldığında uygulamayı kapatma; sağ alt mini sayaç moduna geçir
+    // Ana pencere: Çarpıya veya Alt+F4'e basıldığında uygulamayı kapatma; sistem tepsisine (tray) gizle
     if let WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
-        let _ = window.show();
-        let _ = window.emit("request-mini-dock", ());
+        let _ = window.hide();
     }
 }
 
@@ -269,6 +330,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_last_active_window,
             sync_capture_snapshot,
+            set_window_zoom,
             get_capture_open_payload,
             open_quick_capture_manual,
             close_capture_and_restore_focus,
@@ -276,6 +338,10 @@ pub fn run() {
             capture_screen_snapshot,
             set_capture_window_size,
             update_tray_tooltip,
+            set_windows_focus_mode,
+            get_system_idle_secs,
+            get_backup_export_dir,
+            save_backup_json,
         ])
         .setup(|app| {
             // Varsayılan kısayolları başlat (React açılınca kullanıcının kayıtlı kısayollarıyla günceller)

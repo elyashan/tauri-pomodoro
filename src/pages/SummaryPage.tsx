@@ -1,8 +1,6 @@
+import { useState } from "react";
 import type {
   AdhdInsightsData,
-  AppDistractionGroup,
-  ContextStatItem,
-  DaySummary,
   ParkingItem,
   ParkingLotData,
   SummaryReasonsData,
@@ -11,16 +9,16 @@ import type {
   WeeklySummary,
   WorkStoryEntry,
 } from "../db";
+import { toLocalDateStr, parseLocalDateStr } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
-import { ParkingLotPanel, WorkStoryGrid } from "../components/ParkingLot";
+import {
+  buildSessionStoryTooltip,
+  matchSessionStoryEntries,
+  ParkingLotPanel,
+  SessionStorySlideshow,
+} from "../components/ParkingLot";
 
-export type SummaryTabType =
-  | "timeline"
-  | "weekly"
-  | "recent"
-  | "parking"
-  | "story"
-  | "adhd";
+export type SummaryTabType = "timeline" | "weekly";
 
 export type SummaryReasonsTabType =
   | "work"
@@ -35,6 +33,8 @@ export interface SummaryPageProps {
   activeLang: ActiveLang;
   summaryTab: SummaryTabType;
   summaryReasonsTab: SummaryReasonsTabType;
+  selectedDateStr: string;
+  selectedDayStats: { totalSec: number; sessionCount: number; avgSec: number };
   summaryParkingData: ParkingLotData;
   workStoryEntries: WorkStoryEntry[];
   showResetConfirm: boolean;
@@ -44,25 +44,21 @@ export interface SummaryPageProps {
   summaryReasonsData: SummaryReasonsData | null;
   hoveredWeekDay: WeekDayStat | null;
   maxWeeklyHours: number;
-  hoveredDay: DaySummary | null;
-  summaryDays: DaySummary[];
-  maxRecentHours: number;
   adhdInsights: AdhdInsightsData | null;
-  freqOnlyToday: boolean;
   docsStatusMsg: string | null;
-  contextStats: ContextStatItem[];
-  appDistractions: AppDistractionGroup[];
+  exportDirPath: string;
+  exportSavedMsg: string | null;
   expandedTags: Record<string, boolean>;
   onSetSummaryTab: (tab: SummaryTabType) => void;
   onSetSummaryReasonsTab: (tab: SummaryReasonsTabType) => void;
+  onSelectDate: (dateStr: string) => void;
+  onShiftDate: (deltaDays: number) => void;
   onOpenDashboard: () => void;
   onOpenMenu: () => void;
   onSetShowResetConfirm: (show: boolean) => void;
   onResetAllData: () => void;
   onSetHoveredTimelineItem: (item: TimelineSessionItem | null) => void;
   onSetHoveredWeekDay: (day: WeekDayStat | null) => void;
-  onSetHoveredDay: (day: DaySummary | null) => void;
-  onToggleFreqFilter: () => void;
   onSyncParkingToDocs: () => void;
   onSyncSingleItemToDocs: (item: ParkingItem) => void;
   onToggleParkingTask: (id: number, done: boolean) => void;
@@ -71,7 +67,10 @@ export interface SummaryPageProps {
     rating: "important" | "unimportant" | "unrated",
   ) => void;
   onDeleteParkingEntry: (id: number) => void;
-  onOpenLightbox: (entry: WorkStoryEntry) => void;
+  onOpenLightbox: (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+  ) => void;
   onToggleAccordionTag: (key: string) => void;
   onExportData: () => void;
 }
@@ -81,6 +80,8 @@ export function SummaryPage({
   activeLang,
   summaryTab,
   summaryReasonsTab,
+  selectedDateStr,
+  selectedDayStats,
   summaryParkingData,
   workStoryEntries,
   showResetConfirm,
@@ -90,25 +91,21 @@ export function SummaryPage({
   summaryReasonsData,
   hoveredWeekDay,
   maxWeeklyHours,
-  hoveredDay,
-  summaryDays,
-  maxRecentHours,
   adhdInsights,
-  freqOnlyToday,
   docsStatusMsg,
-  contextStats,
-  appDistractions,
+  exportDirPath,
+  exportSavedMsg,
   expandedTags,
   onSetSummaryTab,
   onSetSummaryReasonsTab,
+  onSelectDate,
+  onShiftDate,
   onOpenDashboard,
   onOpenMenu,
   onSetShowResetConfirm,
   onResetAllData,
   onSetHoveredTimelineItem,
   onSetHoveredWeekDay,
-  onSetHoveredDay,
-  onToggleFreqFilter,
   onSyncParkingToDocs,
   onSyncSingleItemToDocs,
   onToggleParkingTask,
@@ -118,6 +115,33 @@ export function SummaryPage({
   onToggleAccordionTag,
   onExportData,
 }: SummaryPageProps) {
+  const [activeStorySessionId, setActiveStorySessionId] = useState<
+    number | null
+  >(null);
+  const activeStorySession =
+    summaryTab === "timeline"
+      ? (timelineSessions.find(
+          (s) => s.id === activeStorySessionId && s.mode === "work",
+        ) ?? null)
+      : null;
+  const activeStoryFrames = activeStorySession
+    ? matchSessionStoryEntries(workStoryEntries, activeStorySession)
+    : [];
+
+  const todayStr = toLocalDateStr();
+  const parsedSelectedDate = parseLocalDateStr(selectedDateStr);
+  const dateDisplayLabel =
+    summaryTab === "weekly" && weeklySummary?.days?.length === 7
+      ? `${weeklySummary.days[0].dateLabel} – ${weeklySummary.days[6].dateLabel}`
+      : parsedSelectedDate.toLocaleDateString(
+          activeLang === "tr" ? "tr-TR" : "en-US",
+          { weekday: "short", day: "numeric", month: "short", year: "numeric" },
+        );
+  const totalParkingCount =
+    summaryParkingData.totalTasks +
+    summaryParkingData.totalIdeas +
+    summaryParkingData.totalScreenshots;
+
   return (
     <>
       <div className="top-bar">
@@ -128,43 +152,13 @@ export function SummaryPage({
               className={`tab-btn ${summaryTab === "timeline" ? "active" : ""}`}
               onClick={() => onSetSummaryTab("timeline")}
             >
-              {t.timelineTab}
+              📅 {t.summaryDailyTab}
             </button>
             <button
               className={`tab-btn ${summaryTab === "weekly" ? "active" : ""}`}
               onClick={() => onSetSummaryTab("weekly")}
             >
-              {t.viewWeekly}
-            </button>
-            <button
-              className={`tab-btn ${summaryTab === "recent" ? "active" : ""}`}
-              onClick={() => onSetSummaryTab("recent")}
-            >
-              {t.viewRecentDays}
-            </button>
-            <button
-              className={`tab-btn ${summaryTab === "parking" ? "active" : ""}`}
-              onClick={() => onSetSummaryTab("parking")}
-              title={`${t.parkingTab} (${
-                summaryParkingData.totalTasks +
-                summaryParkingData.totalIdeas +
-                summaryParkingData.totalScreenshots
-              })`}
-            >
-              {t.parkingTab}
-            </button>
-            <button
-              className={`tab-btn ${summaryTab === "story" ? "active" : ""}`}
-              onClick={() => onSetSummaryTab("story")}
-              title={`${t.workStoryTitle} (${workStoryEntries.length})`}
-            >
-              📸 {t.workStoryTab}
-            </button>
-            <button
-              className={`tab-btn ${summaryTab === "adhd" ? "active" : ""}`}
-              onClick={() => onSetSummaryTab("adhd")}
-            >
-              {t.adhdTab}
+              📆 {t.summaryWeeklyTab}
             </button>
           </div>
         </div>
@@ -196,302 +190,580 @@ export function SummaryPage({
           </div>
         </div>
       ) : (
-        <>
-          {/* 24 SAATLİK ÇİZELGE GÖRÜNÜMÜ */}
-          {summaryTab === "timeline" && (
-            <>
-              <div className="tooltip-banner">
-                {hoveredTimelineItem ? (
-                  <>
-                    <span>
-                      <b>
-                        {hoveredTimelineItem.mode === "work" ? t.work : t.break}
-                      </b>
-                      :{" "}
-                      {hoveredTimelineItem.tag ||
-                        (hoveredTimelineItem.mode === "work"
-                          ? t.work
-                          : t.break)}
-                      {hoveredTimelineItem.reason
-                        ? ` (${hoveredTimelineItem.reason})`
-                        : ""}
-                    </span>
-                    <span>
-                      {hoveredTimelineItem.timeRangeLabel} •{" "}
-                      {t.formatDuration(hoveredTimelineItem.durationSec)}
-                      {hoveredTimelineItem.overtimeSec > 0
-                        ? ` (+${Math.max(1, Math.round(hoveredTimelineItem.overtimeSec / 60))} ${activeLang === "tr" ? "dk" : "m"})`
-                        : ""}
-                    </span>
-                  </>
-                ) : (
-                  <span>{t.summaryHoverHint}</span>
-                )}
+        <div className="summary-scroll-stack no-drag">
+          {/* TAKVİM & HAFTA SEÇİCİ */}
+          <div className="summary-date-bar">
+            <div className="summary-date-top">
+              <div className="summary-date-nav">
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => onShiftDate(summaryTab === "weekly" ? -7 : -1)}
+                >
+                  ◀
+                </button>
+                <span className="summary-date-label">{dateDisplayLabel}</span>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => onShiftDate(summaryTab === "weekly" ? 7 : 1)}
+                >
+                  ▶
+                </button>
               </div>
+              <div className="summary-date-actions">
+                {selectedDateStr !== todayStr && (
+                  <button
+                    type="button"
+                    className="summary-today-btn"
+                    onClick={() => onSelectDate(todayStr)}
+                  >
+                    {t.todayBtn}
+                  </button>
+                )}
+                <input
+                  type="date"
+                  className="summary-date-input"
+                  value={selectedDateStr}
+                  title={t.calendarPickerTooltip}
+                  onChange={(e) => {
+                    if (e.target.value) onSelectDate(e.target.value);
+                  }}
+                />
+              </div>
+            </div>
 
-              <div className="timeline-container">
-                <div className="timeline-24h-wrapper">
-                  <div className="timeline-24h-track">
-                    {timelineSessions.map((s) => {
-                      const leftPct = (s.startHour / 24) * 100;
-                      const widthPct = Math.max(
-                        1.0,
-                        ((s.endHour - s.startHour) / 24) * 100,
-                      );
-                      const blockClass =
-                        s.mode === "work"
+            {weeklySummary && weeklySummary.days.length > 0 && (
+              <div className="summary-week-strip">
+                {weeklySummary.days.map((d) => {
+                  const isSelected = d.fullDateStr === selectedDateStr;
+                  const hasWork = d.total_sec > 0;
+                  return (
+                    <button
+                      key={d.dayIndex}
+                      type="button"
+                      className={`summary-day-pill ${isSelected ? "active" : ""} ${hasWork ? "has-work" : ""}`}
+                      onClick={() => {
+                        onSelectDate(d.fullDateStr);
+                        if (summaryTab === "weekly") {
+                          onSetSummaryTab("timeline");
+                        }
+                      }}
+                      title={`${d.shortLabel} (${d.dateLabel}): ${t.formatDuration(d.total_sec)}`}
+                    >
+                      <span>{d.shortLabel}</span>
+                      <span className="summary-day-pill-num">
+                        {Number(d.fullDateStr.split("-")[2]) || d.dateLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* KART 1: GÜNLÜK 24S ÇİZELGE VEYA HAFTALIK GRAFİK */}
+          <div className="summary-section-card">
+            {summaryTab === "timeline" ? (
+              <>
+                <div className="weekly-stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {t.formatDuration(selectedDayStats.totalSec)}
+                    </div>
+                    <div className="stat-lbl">{t.totalWork}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {selectedDayStats.sessionCount}
+                    </div>
+                    <div className="stat-lbl">{t.sessions}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {t.formatDuration(selectedDayStats.avgSec)}
+                    </div>
+                    <div className="stat-lbl">{t.average}</div>
+                  </div>
+                </div>
+
+                <div className="tooltip-banner">
+                  {hoveredTimelineItem ? (
+                    <>
+                      <span>
+                        <b>
+                          {hoveredTimelineItem.mode === "work"
+                            ? t.work
+                            : t.break}
+                        </b>
+                        :{" "}
+                        {hoveredTimelineItem.tag ||
+                          (hoveredTimelineItem.mode === "work"
+                            ? t.work
+                            : t.break)}
+                        {hoveredTimelineItem.reason
+                          ? ` (${hoveredTimelineItem.reason})`
+                          : ""}
+                      </span>
+                      <span>
+                        {hoveredTimelineItem.timeRangeLabel} •{" "}
+                        {t.formatDuration(hoveredTimelineItem.durationSec)}
+                        {hoveredTimelineItem.overtimeSec > 0
+                          ? ` (+${Math.max(1, Math.round(hoveredTimelineItem.overtimeSec / 60))} ${activeLang === "tr" ? "dk" : "m"})`
+                          : ""}
+                      </span>
+                    </>
+                  ) : (
+                    <span>{t.summaryHoverHint}</span>
+                  )}
+                </div>
+
+                <div className="timeline-container">
+                  <div className="timeline-24h-wrapper">
+                    <div className="timeline-24h-track">
+                      {timelineSessions.map((s) => {
+                        const leftPct = (s.startHour / 24) * 100;
+                        const widthPct = Math.max(
+                          1.0,
+                          ((s.endHour - s.startHour) / 24) * 100,
+                        );
+                        const isWork = s.mode === "work";
+                        const sessionFrames = isWork
+                          ? matchSessionStoryEntries(workStoryEntries, s)
+                          : [];
+                        const isStoryOpen =
+                          isWork && activeStorySessionId === s.id;
+                        const blockClass = isWork
                           ? "work-block"
                           : s.overtimeSec > 0
                             ? "overtime-block"
                             : "break-block";
-                      return (
-                        <div
-                          key={s.id}
-                          className={`timeline-block ${blockClass}`}
-                          style={{
-                            left: `${leftPct}%`,
-                            width: `${widthPct}%`,
-                          }}
-                          onMouseEnter={() => onSetHoveredTimelineItem(s)}
-                          title={`${s.mode === "work" ? t.work : t.break}: ${s.timeRangeLabel} (${t.formatDuration(s.durationSec)})`}
-                        />
-                      );
-                    })}
+                        return (
+                          <div
+                            key={s.id}
+                            className={`timeline-block ${blockClass} ${isWork ? "story-clickable" : ""} ${isStoryOpen ? "active-story-block" : ""}`}
+                            style={{
+                              left: `${leftPct}%`,
+                              width: `${widthPct}%`,
+                            }}
+                            onMouseEnter={() => onSetHoveredTimelineItem(s)}
+                            onClick={
+                              isWork
+                                ? () =>
+                                    setActiveStorySessionId((prev) =>
+                                      prev === s.id ? null : s.id,
+                                    )
+                                : undefined
+                            }
+                            title={
+                              isWork
+                                ? buildSessionStoryTooltip(
+                                    s,
+                                    sessionFrames,
+                                    t,
+                                    t.formatDuration(s.durationSec),
+                                  )
+                                : `${t.break}: ${s.timeRangeLabel} (${t.formatDuration(s.durationSec)})`
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                    <div className="timeline-hours-axis">
+                      <span>00:00</span>
+                      <span>04:00</span>
+                      <span>08:00</span>
+                      <span>12:00</span>
+                      <span>16:00</span>
+                      <span>20:00</span>
+                      <span>24:00</span>
+                    </div>
                   </div>
-                  <div className="timeline-hours-axis">
-                    <span>00:00</span>
-                    <span>04:00</span>
-                    <span>08:00</span>
-                    <span>12:00</span>
-                    <span>16:00</span>
-                    <span>20:00</span>
-                    <span>24:00</span>
+
+                  <div className="timeline-session-list">
+                    {timelineSessions.length > 0 ? (
+                      timelineSessions.map((s) => {
+                        const isWork = s.mode === "work";
+                        const sessionFrames = isWork
+                          ? matchSessionStoryEntries(workStoryEntries, s)
+                          : [];
+                        const isStoryOpen =
+                          isWork && activeStorySessionId === s.id;
+                        return (
+                          <div
+                            key={s.id}
+                            className={`timeline-session-row ${
+                              hoveredTimelineItem?.id === s.id ? "active-row" : ""
+                            } ${isWork ? "story-clickable" : ""} ${
+                              isStoryOpen ? "active-story-row" : ""
+                            }`}
+                            onMouseEnter={() => onSetHoveredTimelineItem(s)}
+                            onClick={
+                              isWork
+                                ? () =>
+                                    setActiveStorySessionId((prev) =>
+                                      prev === s.id ? null : s.id,
+                                    )
+                                : undefined
+                            }
+                            title={
+                              isWork
+                                ? buildSessionStoryTooltip(
+                                    s,
+                                    sessionFrames,
+                                    t,
+                                    t.formatDuration(s.durationSec),
+                                  )
+                                : undefined
+                            }
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                minWidth: 0,
+                                overflow: "hidden",
+                              }}
+                            >
+                              <span className="timeline-row-time">
+                                {s.timeRangeLabel}
+                              </span>
+                              <span className="timeline-row-tag">
+                                {isWork ? "💼" : "☕"}{" "}
+                                {s.tag || (isWork ? t.work : t.break)}
+                              </span>
+                              {s.reason && (
+                                <span
+                                  style={{
+                                    color: "#a1a1aa",
+                                    fontSize: "9px",
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                  }}
+                                >
+                                  ({s.reason})
+                                </span>
+                              )}
+                              {s.overtimeSec > 0 ? (
+                                <span className="overtime-badge">
+                                  +{Math.max(1, Math.round(s.overtimeSec / 60))}
+                                  {activeLang === "tr" ? "dk" : "m"}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {isWork && sessionFrames.length > 0 && (
+                                <span className="story-count-badge">
+                                  📸 {sessionFrames.length}
+                                </span>
+                              )}
+                              <span className="timeline-row-dur">
+                                {t.formatDuration(s.durationSec)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: "10px",
+                          color: "#a1a1aa",
+                          padding: "8px",
+                          textAlign: "center",
+                        }}
+                      >
+                        {t.noTimelineSessions}
+                      </div>
+                    )}
+                  </div>
+
+                  {activeStorySession && (
+                    <SessionStorySlideshow
+                      sessionId={activeStorySession.id}
+                      title={`${activeStorySession.tag || t.work} • ${activeStorySession.timeRangeLabel}`}
+                      frames={activeStoryFrames}
+                      t={t}
+                      emptyMessage={t.workStoryEmpty}
+                      onOpenFullscreen={onOpenLightbox}
+                      onClose={() => setActiveStorySessionId(null)}
+                    />
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="weekly-stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {t.formatDuration(weeklySummary?.totalSec ?? 0)}
+                    </div>
+                    <div className="stat-lbl">{t.weeklyTotal}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {t.formatDuration(weeklySummary?.dailyAvgSec ?? 0)}
+                    </div>
+                    <div className="stat-lbl">{t.weeklyDailyAvg}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-val">
+                      {summaryReasonsData?.avgDistractionsPerSession ?? 0}
+                    </div>
+                    <div className="stat-lbl">
+                      {t.avgDistractionsPerSession}
+                    </div>
                   </div>
                 </div>
 
-                <div className="timeline-session-list">
-                  {timelineSessions.length > 0 ? (
-                    timelineSessions.map((s) => (
+                <div className="tooltip-banner">
+                  {hoveredWeekDay ? (
+                    <>
+                      <span>
+                        <b>{hoveredWeekDay.shortLabel}</b> (
+                        {hoveredWeekDay.dateLabel}):{" "}
+                        {(hoveredWeekDay.total_sec / 3600).toFixed(1)}{" "}
+                        {activeLang === "tr" ? "sa" : "h"}
+                      </span>
+                      <span>
+                        {hoveredWeekDay.session_count}{" "}
+                        {t.sessions.toLowerCase()} •{" "}
+                        {t.formatDuration(hoveredWeekDay.total_sec)}
+                      </span>
+                    </>
+                  ) : (
+                    <span>{t.summaryHoverHint}</span>
+                  )}
+                </div>
+
+                <div className="chart-area">
+                  {weeklySummary?.days.map((d) => {
+                    const hours = d.total_sec / 3600;
+                    const heightPct = Math.max(
+                      6,
+                      (hours / maxWeeklyHours) * 85,
+                    );
+                    const isHovered = hoveredWeekDay?.dayIndex === d.dayIndex;
+                    const isSelected = d.fullDateStr === selectedDateStr;
+                    return (
                       <div
-                        key={s.id}
-                        className={`timeline-session-row ${
-                          hoveredTimelineItem?.id === s.id ? "active-row" : ""
-                        }`}
-                        onMouseEnter={() => onSetHoveredTimelineItem(s)}
+                        key={d.dayIndex}
+                        className="bar-col"
+                        onMouseEnter={() => onSetHoveredWeekDay(d)}
+                        onClick={() => {
+                          onSelectDate(d.fullDateStr);
+                          onSetSummaryTab("timeline");
+                        }}
+                        style={{ cursor: "pointer" }}
+                        title={`${d.shortLabel} (${d.dateLabel})`}
                       >
+                        <span className="bar-hours">
+                          {hours.toFixed(1)}
+                          {activeLang === "tr" ? "s" : "h"}
+                        </span>
                         <div
+                          className={`bar-fill ${isHovered || isSelected ? "active-bar" : ""}`}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            minWidth: 0,
-                            overflow: "hidden",
+                            height: `${heightPct}%`,
+                            borderColor: d.is_today ? "#fbbf24" : undefined,
+                            borderWidth: d.is_today ? "1px" : "0",
+                            borderStyle: "solid",
+                          }}
+                        />
+                        <span
+                          className="bar-label"
+                          style={{
+                            color: d.is_today ? "#fbbf24" : undefined,
+                            fontWeight: d.is_today ? 700 : undefined,
                           }}
                         >
-                          <span className="timeline-row-time">
-                            {s.timeRangeLabel}
-                          </span>
-                          <span className="timeline-row-tag">
-                            {s.mode === "work" ? "💼" : "☕"}{" "}
-                            {s.tag || (s.mode === "work" ? t.work : t.break)}
-                          </span>
-                          {s.reason && (
-                            <span
-                              style={{
-                                color: "#a1a1aa",
-                                fontSize: "9px",
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                              }}
-                            >
-                              ({s.reason})
-                            </span>
-                          )}
-                          {s.overtimeSec > 0 ? (
-                            <span className="overtime-badge">
-                              +{Math.max(1, Math.round(s.overtimeSec / 60))}
-                              {activeLang === "tr" ? "dk" : "m"}
-                            </span>
-                          ) : null}
-                        </div>
-                        <span className="timeline-row-dur">
-                          {t.formatDuration(s.durationSec)}
+                          {d.shortLabel}
+                          {d.is_today ? "•" : ""}
                         </span>
                       </div>
-                    ))
-                  ) : (
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* KART 3: MOLA & FİKİR OTOPARKI */}
+          <div className="summary-section-card">
+            <div className="summary-section-head">
+              <span>{t.parkingTab}</span>
+              <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                {docsStatusMsg && (
+                  <span className="docs-status-pill">{docsStatusMsg}</span>
+                )}
+                <button
+                  type="button"
+                  className="docs-sync-btn"
+                  onClick={onSyncParkingToDocs}
+                  title={t.docsSyncAllBtn}
+                >
+                  📄 Docs
+                </button>
+                <span className="summary-section-count">{totalParkingCount}</span>
+              </div>
+            </div>
+            <div className="parking-panel summary-parking no-drag">
+              <ParkingLotPanel
+                data={summaryParkingData}
+                isBreakView={false}
+                t={t}
+                docsStatusMsg={docsStatusMsg}
+                onSyncAllToDocs={onSyncParkingToDocs}
+                onSyncSingleToDocs={onSyncSingleItemToDocs}
+                onToggleTask={onToggleParkingTask}
+                onRateIdea={onRateParkingIdea}
+                onDeleteEntry={onDeleteParkingEntry}
+                onOpenLightbox={(e) => onOpenLightbox(e)}
+              />
+            </div>
+          </div>
+
+          {/* KART 4: DAĞILMA, GECİKME & ERKEN BİTİRME KIRILIMI */}
+          {summaryTab === "timeline" && (() => {
+            const effectiveTab =
+              summaryReasonsTab === "overtime" ||
+              summaryReasonsTab === "endings"
+                ? summaryReasonsTab
+                : "distractions";
+            const activeList =
+              effectiveTab === "overtime"
+                ? summaryReasonsData?.breakOvertimeTags ?? []
+                : effectiveTab === "endings"
+                  ? summaryReasonsData?.endingTags ?? []
+                  : summaryReasonsData?.distractionTags ?? [];
+            const totalCount =
+              effectiveTab === "overtime"
+                ? summaryReasonsData?.totalBreakOvertimes ?? 0
+                : effectiveTab === "endings"
+                  ? summaryReasonsData?.totalEndings ?? 0
+                  : summaryReasonsData?.totalDistractions ?? 0;
+            const emptyMsg =
+              effectiveTab === "overtime"
+                ? activeLang === "tr"
+                  ? "Henüz mola gecikmesi kaydedilmedi."
+                  : "No break overtime recorded yet."
+                : effectiveTab === "endings"
+                  ? t.noEndingReasons
+                  : t.noDistractions;
+
+            return (
+              <div className="summary-section-card">
+                <div className="summary-section-head">
+                  <span>📊 {t.breakdownTitle}</span>
+                </div>
+
+                {/* KOMPAKT KATEGORİ KIRILIMI */}
+                <div className="summary-subtabs">
+                  <button
+                    className={`subtab-btn ${effectiveTab === "distractions" ? "active" : ""}`}
+                    onClick={() => onSetSummaryReasonsTab("distractions")}
+                    title={t.distractionReasonsTab}
+                  >
+                    ⚡ {t.distractionShortTab} (
+                    {summaryReasonsData?.totalDistractions ?? 0})
+                  </button>
+                  <button
+                    className={`subtab-btn ${effectiveTab === "overtime" ? "active" : ""}`}
+                    onClick={() => onSetSummaryReasonsTab("overtime")}
+                    title={t.breakOvertimeTab}
+                  >
+                    ⏰ {t.breakOvertimeShortTab} (
+                    {summaryReasonsData?.totalBreakOvertimes ?? 0})
+                  </button>
+                  <button
+                    className={`subtab-btn ${effectiveTab === "endings" ? "active" : ""}`}
+                    onClick={() => onSetSummaryReasonsTab("endings")}
+                    title={t.endingReasonsTab}
+                  >
+                    ⏹ {t.endingShortTab} ({summaryReasonsData?.totalEndings ?? 0})
+                  </button>
+                </div>
+
+                <div className="accordion-list">
+                  {activeList.length === 0 ? (
                     <div
                       style={{
                         fontSize: "10px",
                         color: "#a1a1aa",
-                        padding: "8px",
-                        textAlign: "center",
+                        padding: "6px",
                       }}
                     >
-                      {t.noTimelineSessions}
+                      {emptyMsg}
                     </div>
+                  ) : (
+                    activeList.map((item) => {
+                      const expandKey = `${effectiveTab}:${item.tag}`;
+                      const isExpanded = !!expandedTags[expandKey];
+                      const pct =
+                        totalCount > 0
+                          ? Math.round((item.count / totalCount) * 100)
+                          : 0;
+                      const displayTag =
+                        item.tag === "Tag Yok" || item.tag === "No Tag"
+                          ? t.noTagLabel
+                          : item.tag === "Diğer" || item.tag === "Other"
+                            ? activeLang === "tr"
+                              ? "Diğer"
+                              : "Other"
+                            : item.tag;
+                      return (
+                        <div key={item.tag} className="accordion-card">
+                          <div
+                            className="accordion-header"
+                            onClick={() => onToggleAccordionTag(expandKey)}
+                          >
+                            <div className="accordion-title">
+                              <span className="accordion-arrow">
+                                {isExpanded ? "▼" : "▶"}
+                              </span>
+                              <span>{displayTag}</span>
+                            </div>
+                            <span className="accordion-count">
+                              {t.timesCount(item.count, pct)}
+                            </span>
+                          </div>
+                          {isExpanded && (
+                            <div className="accordion-body">
+                              {item.explanations.map((exp, idx) => (
+                                <div key={idx} className="explanation-row">
+                                  <span className="explanation-text">
+                                    <span className="explanation-bullet">•</span>
+                                    {exp.reason}
+                                  </span>
+                                  <span className="explanation-badge">
+                                    {exp.count}x
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
-            </>
-          )}
+            );
+          })()}
 
-          {/* HAFTALIK ÖZET GÖRÜNÜMÜ */}
-          {summaryTab === "weekly" && (
-            <>
-              <div className="weekly-stats-grid">
-                <div className="stat-card">
-                  <div className="stat-val">
-                    {t.formatDuration(weeklySummary?.totalSec ?? 0)}
-                  </div>
-                  <div className="stat-lbl">{t.weeklyTotal}</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-val">
-                    {t.formatDuration(weeklySummary?.dailyAvgSec ?? 0)}
-                  </div>
-                  <div className="stat-lbl">{t.weeklyDailyAvg}</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-val">
-                    {summaryReasonsData?.avgDistractionsPerSession ?? 0}
-                  </div>
-                  <div className="stat-lbl">{t.avgDistractionsPerSession}</div>
-                </div>
-              </div>
-
-              <div className="tooltip-banner">
-                {hoveredWeekDay ? (
-                  <>
-                    <span>
-                      <b>{hoveredWeekDay.shortLabel}</b> (
-                      {hoveredWeekDay.dateLabel}):{" "}
-                      {(hoveredWeekDay.total_sec / 3600).toFixed(1)}{" "}
-                      {activeLang === "tr" ? "sa" : "h"}
-                    </span>
-                    <span>
-                      {hoveredWeekDay.session_count}{" "}
-                      {t.sessions.toLowerCase()} •{" "}
-                      {t.formatDuration(hoveredWeekDay.total_sec)}
-                    </span>
-                  </>
-                ) : (
-                  <span>{t.summaryHoverHint}</span>
-                )}
-              </div>
-
-              <div className="chart-area">
-                {weeklySummary?.days.map((d) => {
-                  const hours = d.total_sec / 3600;
-                  const heightPct = Math.max(
-                    6,
-                    (hours / maxWeeklyHours) * 85,
-                  );
-                  const isHovered = hoveredWeekDay?.dayIndex === d.dayIndex;
-                  return (
-                    <div
-                      key={d.dayIndex}
-                      className="bar-col"
-                      onMouseEnter={() => onSetHoveredWeekDay(d)}
-                    >
-                      <span className="bar-hours">
-                        {hours.toFixed(1)}
-                        {activeLang === "tr" ? "s" : "h"}
-                      </span>
-                      <div
-                        className={`bar-fill ${isHovered ? "active-bar" : ""}`}
-                        style={{
-                          height: `${heightPct}%`,
-                          borderColor: d.is_today ? "#fbbf24" : undefined,
-                          borderWidth: d.is_today ? "1px" : "0",
-                          borderStyle: "solid",
-                        }}
-                      />
-                      <span
-                        className="bar-label"
-                        style={{
-                          color: d.is_today ? "#fbbf24" : undefined,
-                          fontWeight: d.is_today ? 700 : undefined,
-                        }}
-                      >
-                        {d.shortLabel}
-                        {d.is_today ? "•" : ""}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {/* SON GÜNLER GÖRÜNÜMÜ */}
-          {summaryTab === "recent" && (
-            <>
-              <div className="tooltip-banner" style={{ marginTop: "6px" }}>
-                {hoveredDay ? (
-                  (() => {
-                    const hours = (hoveredDay.total_sec / 3600).toFixed(1);
-                    const avgMins =
-                      hoveredDay.session_count > 0
-                        ? Math.round(
-                            hoveredDay.total_sec /
-                              hoveredDay.session_count /
-                              60,
-                          )
-                        : 0;
-                    const details = t.summaryBarDetails(
-                      hoveredDay.label,
-                      hours,
-                      hoveredDay.session_count,
-                      avgMins,
-                    );
-                    return (
-                      <>
-                        <span>
-                          <b>{details.main}</b>
-                        </span>
-                        <span>{details.sub}</span>
-                      </>
-                    );
-                  })()
-                ) : (
-                  <span>{t.summaryHoverHint}</span>
-                )}
-              </div>
-
-              <div className="chart-area">
-                {summaryDays.map((d) => {
-                  const hours = d.total_sec / 3600;
-                  const heightPct = Math.max(
-                    6,
-                    (hours / maxRecentHours) * 85,
-                  );
-                  return (
-                    <div
-                      key={d.id}
-                      className="bar-col"
-                      onMouseEnter={() => onSetHoveredDay(d)}
-                    >
-                      <span className="bar-hours">
-                        {hours.toFixed(1)}
-                        {activeLang === "tr" ? "s" : "h"}
-                      </span>
-                      <div
-                        className={`bar-fill ${hoveredDay?.id === d.id ? "active-bar" : ""}`}
-                        style={{ height: `${heightPct}%` }}
-                      />
-                      <span className="bar-label">
-                        {d.is_active ? `${d.label}*` : d.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          {/* ADHD ÖZ-FARKINDALIK (SELF-REALIZATION) GÖRÜNÜMÜ */}
-          {summaryTab === "adhd" && (
+          {/* KART 5: ADHD ÖZ-FARKINDALIK */}
+          <div className="summary-section-card">
+            <div className="summary-section-head">
+              <span>{t.adhdTab}</span>
+            </div>
             <div className="adhd-insights-wrap">
               <div className="adhd-cards-grid">
                 <div className="adhd-card">
@@ -562,369 +834,6 @@ export function SummaryPage({
                 )}
               </div>
             </div>
-          )}
-
-          {/* MOLA & FİKİR OTOPARKI GÖRÜNÜMÜ */}
-          {summaryTab === "parking" && (
-            <div className="parking-panel summary-parking no-drag">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span className="parking-banner-title">
-                  {t.parkingTab} (
-                  {summaryParkingData.totalTasks +
-                    summaryParkingData.totalIdeas +
-                    summaryParkingData.totalScreenshots}
-                  )
-                </span>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={onToggleFreqFilter}
-                  title={freqOnlyToday ? t.filterToday : t.filterAll}
-                >
-                  {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                </button>
-              </div>
-              <ParkingLotPanel
-                data={summaryParkingData}
-                isBreakView={false}
-                t={t}
-                docsStatusMsg={docsStatusMsg}
-                onSyncAllToDocs={onSyncParkingToDocs}
-                onSyncSingleToDocs={onSyncSingleItemToDocs}
-                onToggleTask={onToggleParkingTask}
-                onRateIdea={onRateParkingIdea}
-                onDeleteEntry={onDeleteParkingEntry}
-                onOpenLightbox={onOpenLightbox}
-              />
-            </div>
-          )}
-
-          {/* ÇALIŞMA HİKAYESİ GÖRÜNÜMÜ */}
-          {summaryTab === "story" && (
-            <div className="parking-panel summary-parking no-drag">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "6px",
-                }}
-              >
-                <span className="parking-banner-title">
-                  📸 {t.workStoryTitle} ({workStoryEntries.length})
-                </span>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={onToggleFreqFilter}
-                  title={freqOnlyToday ? t.filterToday : t.filterAll}
-                >
-                  {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-                </button>
-              </div>
-              <WorkStoryGrid
-                entries={workStoryEntries}
-                emptyMessage={t.workStoryEmpty}
-                onSelectEntry={onOpenLightbox}
-              />
-            </div>
-          )}
-
-          {/* KOMPAKT KATEGORİ KIRILIMI */}
-          <div className="summary-subtabs">
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "work" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("work")}
-              title={t.workTagsTab}
-            >
-              💼 {t.workTagsShortTab} (
-              {summaryReasonsData?.totalWorkSubjects ?? 0})
-            </button>
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "contexts" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("contexts")}
-              title={t.contextFullTab}
-            >
-              🎯 {t.contextShortTab} ({contextStats.length})
-            </button>
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "apps" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("apps")}
-              title={t.appsFullTab}
-            >
-              🌐 {t.appsShortTab} (
-              {appDistractions.reduce((acc, g) => acc + g.totalCount, 0)})
-            </button>
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "distractions" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("distractions")}
-              title={t.distractionReasonsTab}
-            >
-              ⚡ {t.distractionShortTab} (
-              {summaryReasonsData?.totalDistractions ?? 0})
-            </button>
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "overtime" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("overtime")}
-              title={t.breakOvertimeTab}
-            >
-              ⏰ {t.breakOvertimeShortTab} (
-              {summaryReasonsData?.totalBreakOvertimes ?? 0})
-            </button>
-            <button
-              className={`subtab-btn ${summaryReasonsTab === "endings" ? "active" : ""}`}
-              onClick={() => onSetSummaryReasonsTab("endings")}
-              title={t.endingReasonsTab}
-            >
-              ⏹ {t.endingShortTab} ({summaryReasonsData?.totalEndings ?? 0})
-            </button>
-            <button
-              className="ghost-btn"
-              onClick={onToggleFreqFilter}
-              title={freqOnlyToday ? t.filterToday : t.filterAll}
-            >
-              {freqOnlyToday ? t.filterTodayShort : t.filterAllShort}
-            </button>
-          </div>
-
-          <div className="accordion-list">
-            {(() => {
-              if (summaryReasonsTab === "contexts") {
-                if (contextStats.length === 0) {
-                  return (
-                    <div
-                      style={{
-                        fontSize: "10px",
-                        color: "#a1a1aa",
-                        padding: "6px",
-                      }}
-                    >
-                      {t.noContextStats}
-                    </div>
-                  );
-                }
-                return contextStats.map((ctx) => {
-                  const expandKey = `ctx:${ctx.contextText}`;
-                  const isExpanded = !!expandedTags[expandKey];
-                  return (
-                    <div key={ctx.contextText} className="accordion-card">
-                      <div
-                        className="accordion-header"
-                        onClick={() => onToggleAccordionTag(expandKey)}
-                      >
-                        <div
-                          className="accordion-title"
-                          style={{ minWidth: 0, overflow: "hidden" }}
-                        >
-                          <span className="accordion-arrow">
-                            {isExpanded ? "▼" : "▶"}
-                          </span>
-                          <span
-                            style={{
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                          >
-                            🎯 {ctx.contextText}
-                          </span>
-                        </div>
-                        <span
-                          className="accordion-count"
-                          style={{ flexShrink: 0 }}
-                        >
-                          {t.formatDuration(ctx.totalDurationSec)} • ⚡
-                          {ctx.distractionCount}
-                        </span>
-                      </div>
-                      {isExpanded && (
-                        <div className="accordion-body">
-                          {ctx.lastWorkTag && (
-                            <div className="explanation-row">
-                              <span className="explanation-text">
-                                💼 {ctx.lastWorkTag}
-                              </span>
-                              <span className="explanation-badge">
-                                {ctx.entryCount}x
-                              </span>
-                            </div>
-                          )}
-                          {ctx.topApp && (
-                            <div className="explanation-row">
-                              <span className="explanation-text">
-                                🌐 {ctx.topApp}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                });
-              }
-
-              if (summaryReasonsTab === "apps") {
-                const totalAppDist = appDistractions.reduce(
-                  (acc, g) => acc + g.totalCount,
-                  0,
-                );
-                if (appDistractions.length === 0) {
-                  return (
-                    <div
-                      style={{
-                        fontSize: "10px",
-                        color: "#a1a1aa",
-                        padding: "6px",
-                      }}
-                    >
-                      {t.noAppDistractions}
-                    </div>
-                  );
-                }
-                return appDistractions.map((grp) => {
-                  const expandKey = `app:${grp.appName}`;
-                  const isExpanded = !!expandedTags[expandKey];
-                  const pct =
-                    totalAppDist > 0
-                      ? Math.round((grp.totalCount / totalAppDist) * 100)
-                      : 0;
-                  return (
-                    <div key={grp.appName} className="accordion-card">
-                      <div
-                        className="accordion-header"
-                        onClick={() => onToggleAccordionTag(expandKey)}
-                      >
-                        <div className="accordion-title">
-                          <span className="accordion-arrow">
-                            {isExpanded ? "▼" : "▶"}
-                          </span>
-                          <span>🌐 {grp.appName}</span>
-                        </div>
-                        <span className="accordion-count">
-                          {t.timesCount(grp.totalCount, pct)}
-                        </span>
-                      </div>
-                      {isExpanded && (
-                        <div className="accordion-body">
-                          {grp.details.map((d, idx) => (
-                            <div key={idx} className="explanation-row">
-                              <span className="explanation-text">
-                                <span className="explanation-bullet">•</span>
-                                {d.windowTitle && (
-                                  <>
-                                    <b>{d.windowTitle}</b>
-                                    {" — "}
-                                  </>
-                                )}
-                                <span style={{ color: "#fbbf24" }}>
-                                  [{t.catKeyHints[d.category]}]
-                                </span>{" "}
-                                {d.reason}
-                                {d.contextText ? ` (🎯 ${d.contextText})` : ""}
-                              </span>
-                              <span className="explanation-badge">
-                                {d.count}x
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                });
-              }
-
-              const activeList =
-                summaryReasonsTab === "work"
-                  ? summaryReasonsData?.workTags ?? []
-                  : summaryReasonsTab === "overtime"
-                    ? summaryReasonsData?.breakOvertimeTags ?? []
-                    : summaryReasonsTab === "distractions"
-                      ? summaryReasonsData?.distractionTags ?? []
-                      : summaryReasonsData?.endingTags ?? [];
-              const totalCount =
-                summaryReasonsTab === "work"
-                  ? summaryReasonsData?.totalWorkSubjects ?? 0
-                  : summaryReasonsTab === "overtime"
-                    ? summaryReasonsData?.totalBreakOvertimes ?? 0
-                    : summaryReasonsTab === "distractions"
-                      ? summaryReasonsData?.totalDistractions ?? 0
-                      : summaryReasonsData?.totalEndings ?? 0;
-              const emptyMsg =
-                summaryReasonsTab === "work"
-                  ? activeLang === "tr"
-                    ? "Henüz çalışma konusu kaydedilmedi."
-                    : "No work topics recorded yet."
-                  : summaryReasonsTab === "overtime"
-                    ? activeLang === "tr"
-                      ? "Henüz mola gecikmesi kaydedilmedi."
-                      : "No break overtime recorded yet."
-                    : summaryReasonsTab === "distractions"
-                      ? t.noDistractions
-                      : t.noEndingReasons;
-
-              if (activeList.length === 0) {
-                return (
-                  <div
-                    style={{
-                      fontSize: "10px",
-                      color: "#a1a1aa",
-                      padding: "6px",
-                    }}
-                  >
-                    {emptyMsg}
-                  </div>
-                );
-              }
-
-              return activeList.map((item) => {
-                const expandKey = `${summaryReasonsTab}:${item.tag}`;
-                const isExpanded = !!expandedTags[expandKey];
-                const pct =
-                  totalCount > 0
-                    ? Math.round((item.count / totalCount) * 100)
-                    : 0;
-                return (
-                  <div key={item.tag} className="accordion-card">
-                    <div
-                      className="accordion-header"
-                      onClick={() => onToggleAccordionTag(expandKey)}
-                    >
-                      <div className="accordion-title">
-                        <span className="accordion-arrow">
-                          {isExpanded ? "▼" : "▶"}
-                        </span>
-                        <span>{item.tag}</span>
-                      </div>
-                      <span className="accordion-count">
-                        {t.timesCount(item.count, pct)}
-                      </span>
-                    </div>
-                    {isExpanded && (
-                      <div className="accordion-body">
-                        {item.explanations.map((exp, idx) => (
-                          <div key={idx} className="explanation-row">
-                            <span className="explanation-text">
-                              <span className="explanation-bullet">•</span>
-                              {exp.reason}
-                            </span>
-                            <span className="explanation-badge">
-                              {exp.count}x
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              });
-            })()}
           </div>
 
           {/* VERİLERİ SIFIRLAMA & DIŞA AKTARMA BUTONLARI */}
@@ -932,13 +841,20 @@ export function SummaryPage({
             className="summary-bottom-row"
             style={{ justifyContent: "space-between" }}
           >
-            <button
-              className="ghost-btn"
-              onClick={onExportData}
-              title={t.exportDataBtn}
-            >
-              {t.exportDataBtn}
-            </button>
+            <div className="summary-export-wrap">
+              <button
+                className="ghost-btn"
+                onClick={onExportData}
+                title={t.exportDataTooltip(exportDirPath || "Downloads")}
+              >
+                {t.exportDataBtn}
+              </button>
+              {exportSavedMsg && (
+                <span className="summary-export-saved" title={exportSavedMsg}>
+                  {exportSavedMsg}
+                </span>
+              )}
+            </div>
             <button
               className="ghost-btn reset-data-btn"
               onClick={() => onSetShowResetConfirm(true)}
@@ -946,7 +862,7 @@ export function SummaryPage({
               🗑 {t.resetAllData}
             </button>
           </div>
-        </>
+        </div>
       )}
     </>
   );

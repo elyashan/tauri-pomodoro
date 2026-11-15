@@ -1,11 +1,14 @@
+import { useEffect, useRef, useState } from "react";
 import {
+  addCategoryTag,
   DistractionCategory,
+  getCategoryTagsByPopularity,
+  getTopCategoryReasons,
   TagItem,
   TagKind,
   WorkStoryEntry,
   doesCategoryAddPenalty,
 } from "../db";
-import type { CropRegionPct } from "../screenshot";
 import type { Translations } from "../i18n";
 import { DISTRACT_CATEGORIES, TagFormState, formatClock } from "../constants";
 import {
@@ -13,7 +16,6 @@ import {
   PreviousReasonsChips,
   TagChipsSelector,
 } from "./InlineTagForm";
-import { ScreenshotCropper } from "./ScreenshotCropper";
 
 export interface TagManagementHandlers {
   tagForm: TagFormState | null;
@@ -29,6 +31,7 @@ export interface ShortBreakPromptModalProps {
   currentContext: string;
   recentContexts: string[];
   shortBreakDraft: string;
+  isDirectContextEdit?: boolean;
   onChangeDraft: (val: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -39,71 +42,76 @@ export function ShortBreakPromptModal({
   currentContext,
   recentContexts,
   shortBreakDraft,
+  isDirectContextEdit = false,
   onChangeDraft,
   onConfirm,
   onCancel,
 }: ShortBreakPromptModalProps) {
   return (
     <div className="stop-box">
-      <div className="stop-box-header">
-        <span className="stop-box-title">{t.shortBreakPromptTitle}</span>
-      </div>
-      <div className="stop-box-hint">{t.shortBreakPromptHint}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <div className="stop-box-header">
+          <span className="stop-box-title">{t.shortBreakPromptTitle}</span>
+        </div>
+        {!isDirectContextEdit && (
+          <div className="stop-box-hint">{t.shortBreakPromptHint}</div>
+        )}
 
-      {(currentContext || recentContexts.length > 0) && (
-        <div className="previous-reasons-box">
-          <div className="previous-reasons-chips">
-            {currentContext && (
-              <button
-                type="button"
-                className={`reason-suggestion-chip ${
-                  shortBreakDraft === currentContext ? "selected" : ""
-                }`}
-                onClick={() => onChangeDraft(currentContext)}
-              >
-                🎯 {currentContext}
-              </button>
-            )}
-            {recentContexts
-              .filter((rc) => rc !== currentContext)
-              .slice(0, 4)
-              .map((rc) => (
+        {(currentContext || recentContexts.length > 0) && (
+          <div className="previous-reasons-box">
+            <div className="previous-reasons-chips">
+              {currentContext && (
                 <button
-                  key={rc}
                   type="button"
                   className={`reason-suggestion-chip ${
-                    shortBreakDraft === rc ? "selected" : ""
+                    shortBreakDraft === currentContext ? "selected" : ""
                   }`}
-                  onClick={() => onChangeDraft(rc)}
+                  onClick={() => onChangeDraft(currentContext)}
                 >
-                  {rc}
+                  🎯 {currentContext}
                 </button>
-              ))}
+              )}
+              {recentContexts
+                .filter((rc) => rc !== currentContext)
+                .slice(0, 4)
+                .map((rc) => (
+                  <button
+                    key={rc}
+                    type="button"
+                    className={`reason-suggestion-chip ${
+                      shortBreakDraft === rc ? "selected" : ""
+                    }`}
+                    onClick={() => onChangeDraft(rc)}
+                  >
+                    {rc}
+                  </button>
+                ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <div className="new-reason-row">
-        <textarea
-          className="distract-textarea"
-          rows={2}
-          placeholder={t.shortBreakPromptPlaceholder}
-          value={shortBreakDraft}
-          autoFocus
-          onChange={(e) => onChangeDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onConfirm();
-            }
-            if (e.key === "Escape") onCancel();
-          }}
-        />
+        <div className="new-reason-row">
+          <textarea
+            className="distract-textarea"
+            rows={2}
+            placeholder={t.shortBreakPromptPlaceholder}
+            value={shortBreakDraft}
+            autoFocus
+            onChange={(e) => onChangeDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onConfirm();
+              }
+              if (e.key === "Escape") onCancel();
+            }}
+          />
+        </div>
       </div>
 
-      <div className="stop-box-actions">
+      <div className="stop-box-actions" style={{ justifyContent: "flex-end" }}>
         <button className="primary-btn" onClick={onConfirm}>
-          {t.shortBreakStartBtn}
+          {isDirectContextEdit ? t.doneEditing : t.shortBreakStartBtn}
         </button>
         <button onClick={onCancel}>{t.cancel}</button>
       </div>
@@ -146,158 +154,402 @@ export function WorkTopicModal({
 }: WorkTopicModalProps) {
   return (
     <div className="stop-box">
-      <div className="stop-box-header">
-        <span className="stop-box-title">{t.whatAreYouWorkingOn}</span>
-        <div style={{ display: "flex", gap: "3px" }}>
-          <button
-            className="ghost-btn"
-            onClick={() => onAddNewTag("work")}
-            title={t.newTagPrompt}
-          >
-            + Tag
-          </button>
-          <button className="ghost-btn" onClick={onToggleEditTags}>
-            {isEditingWorkTags ? t.doneEditing : t.editTags}
-          </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+        <div className="stop-box-header">
+          <span className="stop-box-title">{t.whatAreYouWorkingOn}</span>
+          <div style={{ display: "flex", gap: "3px" }}>
+            <button
+              className="ghost-btn"
+              onClick={() => onAddNewTag("work")}
+              title={t.newTagPrompt}
+            >
+              + Tag
+            </button>
+            <button className="ghost-btn" onClick={onToggleEditTags}>
+              {isEditingWorkTags ? t.doneEditing : t.editTags}
+            </button>
+          </div>
+        </div>
+
+        <InlineTagForm
+          kind="work"
+          tagForm={tagForm}
+          t={t}
+          onChangeTagForm={onChangeTagForm}
+          onSubmitTagForm={onSubmitTagForm}
+        />
+
+        <div className="section-subhead">{t.selectTagHint}</div>
+        <TagChipsSelector
+          tags={workTags}
+          selectedTag={selectedWorkTopicTag}
+          isEditing={isEditingWorkTags}
+          kind="work"
+          onSelectTag={onSelectTag}
+          onEditTag={onEditTagItem}
+          onDeleteTag={onDeleteTagItem}
+        />
+
+        <PreviousReasonsChips
+          reasons={workPrevReasons}
+          label={t.previousReasons}
+          onSelectReason={onChangeReasonText}
+        />
+
+        <div className="new-reason-row">
+          <textarea
+            className="distract-textarea"
+            rows={2}
+            placeholder={t.workTopicPlaceholder}
+            value={workTopicReasonText}
+            autoFocus
+            onChange={(e) => onChangeReasonText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              }
+              if (e.key === "Escape") onCancel();
+            }}
+          />
         </div>
       </div>
 
-      <InlineTagForm
-        kind="work"
-        tagForm={tagForm}
-        t={t}
-        onChangeTagForm={onChangeTagForm}
-        onSubmitTagForm={onSubmitTagForm}
-      />
-
-      <div className="section-subhead">{t.selectTagHint}</div>
-      <TagChipsSelector
-        tags={workTags}
-        selectedTag={selectedWorkTopicTag}
-        isEditing={isEditingWorkTags}
-        kind="work"
-        onSelectTag={onSelectTag}
-        onEditTag={onEditTagItem}
-        onDeleteTag={onDeleteTagItem}
-      />
-
-      <PreviousReasonsChips
-        reasons={workPrevReasons}
-        label={t.previousReasons}
-        onSelectReason={onChangeReasonText}
-      />
-
-      <div className="new-reason-row">
-        <textarea
-          className="distract-textarea"
-          rows={2}
-          placeholder={t.workTopicPlaceholder}
-          value={workTopicReasonText}
-          autoFocus
-          onChange={(e) => onChangeReasonText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onSubmit();
-            }
-            if (e.key === "Escape") onCancel();
-          }}
-        />
-        <button className="primary-btn" onClick={onSubmit}>
-          {t.doneEditing}
-        </button>
-      </div>
-
-      <div className="stop-box-actions">
+      <div className="stop-box-actions" style={{ alignItems: "center" }}>
         <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
           Tag: <b>{selectedWorkTopicTag}</b>
         </span>
-        <button onClick={onCancel}>{t.cancel}</button>
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button className="primary-btn" onClick={onSubmit}>
+            {t.doneEditing}
+          </button>
+          <button onClick={onCancel}>{t.cancel}</button>
+        </div>
       </div>
     </div>
   );
 }
 
-export interface DistractModalProps extends TagManagementHandlers {
+export interface DistractSubmissionPayload {
+  category: DistractionCategory;
+  tag: string;
+  text: string;
+  newContext?: string;
+}
+
+export interface DistractModalProps {
   t: Translations;
   currentContext: string;
+  recentContexts: string[];
   fullTopicLabel: string;
   detectedActiveApp: { appName: string; windowTitle: string };
-  distractCategory: DistractionCategory;
   distractPenaltyMins: number;
-  distractPreviewShot: string;
-  distractCropBox: CropRegionPct | null;
-  distractTags: TagItem[];
-  selectedDistractTag: string;
-  distractPreviousReasons: string[];
-  distractReasonText: string;
-  isEditingDistractTags: boolean;
   getCategoryDisplayName: (cat: DistractionCategory) => string;
-  onChangeCategory: (cat: DistractionCategory) => void;
-  onChangeCropBox: (box: CropRegionPct | null) => void;
-  onRetakeScreenshot: () => void;
-  onToggleEditTags: () => void;
-  onSelectTag: (tagName: string) => void;
-  onChangeReasonText: (val: string) => void;
-  onSubmit: () => void;
+  onSubmit: (data: DistractSubmissionPayload) => void;
   onCancel: () => void;
 }
+
+type DistractStage = "category" | "tag" | "input" | "context";
 
 export function DistractModal({
   t,
   currentContext,
+  recentContexts,
   fullTopicLabel,
   detectedActiveApp,
-  distractCategory,
   distractPenaltyMins,
-  distractPreviewShot,
-  distractCropBox,
-  distractTags,
-  selectedDistractTag,
-  distractPreviousReasons,
-  distractReasonText,
-  isEditingDistractTags,
-  tagForm,
   getCategoryDisplayName,
-  onChangeTagForm,
-  onSubmitTagForm,
-  onAddNewTag,
-  onEditTagItem,
-  onDeleteTagItem,
-  onChangeCategory,
-  onChangeCropBox,
-  onRetakeScreenshot,
-  onToggleEditTags,
-  onSelectTag,
-  onChangeReasonText,
   onSubmit,
   onCancel,
 }: DistractModalProps) {
-  return (
-    <div className="stop-box">
-      <div className="stop-box-header">
-        <span className="stop-box-title">{t.distractionTitle}</span>
-        <div style={{ display: "flex", gap: "3px" }}>
-          <button
-            className="ghost-btn"
-            onClick={() => onAddNewTag("distraction")}
-            title={t.newTagPrompt}
-          >
-            + Tag
-          </button>
-          <button className="ghost-btn" onClick={onToggleEditTags}>
-            {isEditingDistractTags ? t.doneEditing : t.editTags}
-          </button>
-        </div>
-      </div>
+  const [stage, setStage] = useState<DistractStage>("category");
+  const [category, setCategory] =
+    useState<DistractionCategory>("impulsive_task");
+  const [categoryTags, setCategoryTags] = useState<TagItem[]>([]);
+  const [tagIdx, setTagIdx] = useState<number>(0);
+  const [selectedTag, setSelectedTag] = useState<string>("");
+  const [addingTag, setAddingTag] = useState(false);
+  const [newTagInput, setNewTagInput] = useState("");
 
-      <InlineTagForm
-        kind="distraction"
-        tagForm={tagForm}
-        t={t}
-        onChangeTagForm={onChangeTagForm}
-        onSubmitTagForm={onSubmitTagForm}
-      />
+  const [noteText, setNoteText] = useState("");
+  const [popularEntries, setPopularEntries] = useState<string[]>([]);
+  const [focusedEntryIdx, setFocusedEntryIdx] = useState<number>(-1);
+
+  const [contextText, setContextText] = useState(currentContext || "");
+  const [focusedContextIdx, setFocusedContextIdx] = useState<number>(-1);
+
+  const boxRef = useRef<HTMLDivElement>(null);
+  const noteInputRef = useRef<HTMLInputElement>(null);
+  const contextInputRef = useRef<HTMLInputElement>(null);
+  const newTagInputRef = useRef<HTMLInputElement>(null);
+  const entryRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    requestAnimationFrame(() => boxRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    getCategoryTagsByPopularity(category, t.defaultCategoryTags[category])
+      .then(setCategoryTags)
+      .catch(() => {});
+  }, [category, t]);
+
+  const enterTagStage = (cat: DistractionCategory) => {
+    setCategory(cat);
+    setTagIdx(0);
+    setSelectedTag("");
+    setAddingTag(false);
+    setNewTagInput("");
+    setStage("tag");
+    requestAnimationFrame(() => boxRef.current?.focus());
+  };
+
+  const confirmTagByIndex = async (idx: number) => {
+    const chosen = idx <= 0 ? "" : categoryTags[idx - 1]?.name || "";
+    setTagIdx(idx);
+    setSelectedTag(chosen);
+    setFocusedEntryIdx(-1);
+    setStage("input");
+    const entries = await getTopCategoryReasons(category, chosen, 5).catch(
+      () => [],
+    );
+    setPopularEntries(entries);
+    requestAnimationFrame(() => noteInputRef.current?.focus());
+  };
+
+  const handleSaveNewTag = async () => {
+    const trimmed = newTagInput.trim();
+    if (!trimmed) {
+      setAddingTag(false);
+      setNewTagInput("");
+      requestAnimationFrame(() => boxRef.current?.focus());
+      return;
+    }
+    const created = await addCategoryTag(trimmed, category);
+    const updated = await getCategoryTagsByPopularity(
+      category,
+      t.defaultCategoryTags[category],
+    );
+    setCategoryTags(updated);
+    setAddingTag(false);
+    setNewTagInput("");
+    if (created) {
+      const idx = updated.findIndex((item) => item.name === created.name);
+      if (idx >= 0) {
+        setTagIdx(idx + 1);
+        setSelectedTag(created.name);
+      }
+    }
+    requestAnimationFrame(() => boxRef.current?.focus());
+  };
+
+  const advanceFromInput = (overrideNote?: string) => {
+    const finalNote = (
+      overrideNote !== undefined ? overrideNote : noteText
+    ).trim();
+    if (!finalNote) return;
+
+    setNoteText(finalNote);
+    if (category === "internal" || category === "external") {
+      setContextText(currentContext || "");
+      setFocusedContextIdx(-1);
+      setStage("context");
+      requestAnimationFrame(() => {
+        contextInputRef.current?.focus();
+        contextInputRef.current?.select();
+      });
+    } else {
+      onSubmit({
+        category,
+        tag: selectedTag,
+        text: finalNote,
+      });
+    }
+  };
+
+  const topContexts = recentContexts.slice(0, 5);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (addingTag) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setAddingTag(false);
+        setNewTagInput("");
+        requestAnimationFrame(() => boxRef.current?.focus());
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveNewTag().catch(() => {});
+      }
+      return;
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (stage === "category") onCancel();
+      else if (stage === "tag") {
+        setStage("category");
+        requestAnimationFrame(() => boxRef.current?.focus());
+      } else if (stage === "input") {
+        setStage("tag");
+        requestAnimationFrame(() => boxRef.current?.focus());
+      } else if (stage === "context") {
+        onSubmit({
+          category,
+          tag: selectedTag,
+          text: noteText.trim(),
+        });
+      }
+      return;
+    }
+
+    if (stage === "category") {
+      if (e.key === "Tab" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const idx = DISTRACT_CATEGORIES.indexOf(category);
+        const step = e.shiftKey || e.key === "ArrowLeft" ? -1 : 1;
+        setCategory(
+          DISTRACT_CATEGORIES[
+            (idx + step + DISTRACT_CATEGORIES.length) %
+              DISTRACT_CATEGORIES.length
+          ],
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        enterTagStage(category);
+        return;
+      }
+      if (["1", "2", "3", "4"].includes(e.key)) {
+        e.preventDefault();
+        enterTagStage(DISTRACT_CATEGORIES[Number(e.key) - 1]);
+      }
+      return;
+    }
+
+    if (stage === "tag") {
+      const addTagOptionIdx = 1 + categoryTags.length;
+      const totalTagOptions = addTagOptionIdx + 1;
+      if (e.key === "Tab" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const step = e.shiftKey || e.key === "ArrowLeft" ? -1 : 1;
+        const nextIdx = (tagIdx + step + totalTagOptions) % totalTagOptions;
+        setTagIdx(nextIdx);
+        setSelectedTag(
+          nextIdx === 0 || nextIdx === addTagOptionIdx
+            ? ""
+            : categoryTags[nextIdx - 1]?.name || "",
+        );
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (tagIdx === addTagOptionIdx) {
+          setAddingTag(true);
+          requestAnimationFrame(() => newTagInputRef.current?.focus());
+        } else {
+          confirmTagByIndex(tagIdx).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    if (stage === "input") {
+      if (e.key === "Tab" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (popularEntries.length === 0) {
+          noteInputRef.current?.focus();
+          return;
+        }
+        const total = popularEntries.length + 1;
+        const curPos = focusedEntryIdx + 1;
+        const back = e.shiftKey || e.key === "ArrowUp";
+        const nextIdx = ((curPos + (back ? -1 : 1) + total) % total) - 1;
+        setFocusedEntryIdx(nextIdx);
+        if (nextIdx === -1) {
+          requestAnimationFrame(() => noteInputRef.current?.focus());
+        } else {
+          noteInputRef.current?.blur();
+          boxRef.current?.focus();
+          requestAnimationFrame(() =>
+            entryRowRefs.current[nextIdx]?.scrollIntoView({ block: "nearest" }),
+          );
+        }
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (focusedEntryIdx >= 0 && popularEntries[focusedEntryIdx]) {
+          advanceFromInput(popularEntries[focusedEntryIdx]);
+        } else {
+          advanceFromInput();
+        }
+        return;
+      }
+      if (
+        e.key === " " &&
+        focusedEntryIdx >= 0 &&
+        popularEntries[focusedEntryIdx]
+      ) {
+        e.preventDefault();
+        setNoteText(popularEntries[focusedEntryIdx]);
+        setFocusedEntryIdx(-1);
+        requestAnimationFrame(() => noteInputRef.current?.focus());
+      }
+      return;
+    }
+
+    if (stage === "context") {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        if (topContexts.length === 0) {
+          contextInputRef.current?.focus();
+          return;
+        }
+        const total = topContexts.length + 1;
+        const curPos = focusedContextIdx + 1;
+        const nextIdx = ((curPos + (e.shiftKey ? -1 : 1) + total) % total) - 1;
+        setFocusedContextIdx(nextIdx);
+        if (nextIdx === -1) {
+          requestAnimationFrame(() => contextInputRef.current?.focus());
+        } else {
+          contextInputRef.current?.blur();
+          boxRef.current?.focus();
+        }
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const chosenContext =
+          focusedContextIdx >= 0 && topContexts[focusedContextIdx]
+            ? topContexts[focusedContextIdx]
+            : contextText.trim();
+        onSubmit({
+          category,
+          tag: selectedTag,
+          text: noteText.trim(),
+          newContext: chosenContext || undefined,
+        });
+      }
+    }
+  };
+
+  return (
+    <div
+      ref={boxRef}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      className="stop-box"
+    >
+      <div className="stop-box-header">
+        <span className="stop-box-title">⠿ {t.distractionTitle}</span>
+        <button className="ghost-btn" onClick={onCancel}>
+          ✕
+        </button>
+      </div>
 
       {/* Son Kalınan Context & Son Açık Uygulama / Sekme Şeridi */}
       <div className="active-app-strip">
@@ -327,19 +579,20 @@ export function DistractModal({
         )}
       </div>
 
-      {/* 6 Kategori Seçici */}
+      {/* 4 Kategori Seçici */}
       <div className="cat5-grid">
         {DISTRACT_CATEGORIES.map((cat) => {
-          const isSel = distractCategory === cat;
+          const isSel = category === cat;
           const addsPen = doesCategoryAddPenalty(cat);
           return (
             <button
               key={cat}
               type="button"
+              tabIndex={-1}
               className={`cat5-btn ${isSel ? "active" : ""} ${
                 addsPen ? "has-pen" : "zero-pen"
               }`}
-              onClick={() => onChangeCategory(cat)}
+              onClick={() => enterTagStage(cat)}
               title={`${t.catKeyHints[cat]} ${getCategoryDisplayName(cat)} (${
                 addsPen
                   ? t.addsPenaltyBadge(distractPenaltyMins)
@@ -353,93 +606,217 @@ export function DistractModal({
         })}
       </div>
 
-      {/* 3·S Ekran Görüntüsü Notu Modu İçin Kompakt Önizleme & Bölge Kırpıcı */}
-      {distractCategory === "screenshot_note" && (
-        <ScreenshotCropper
-          previewUrl={distractPreviewShot}
-          cropBox={distractCropBox}
-          onChangeCropBox={onChangeCropBox}
-          onRetake={onRetakeScreenshot}
-          cropHint={t.ssCropHint}
-          resetCropLabel={t.ssResetCropBtn}
-          retakeLabel="🔄"
-          minCropPct={3}
-          emptyPlaceholder={
-            <div
-              style={{
-                fontSize: "9px",
-                color: "#a1a1aa",
-                textAlign: "center",
-                padding: "6px",
+      {stage === "tag" && (
+        <div className="qc-tags-row">
+          <button
+            type="button"
+            tabIndex={-1}
+            className={`qc-tag-chip ${tagIdx === 0 ? "selected" : ""}`}
+            onClick={() => confirmTagByIndex(0).catch(() => {})}
+          >
+            {t.noTagLabel}
+          </button>
+          {categoryTags.map((tagItem, idx) => (
+            <button
+              key={tagItem.id}
+              type="button"
+              tabIndex={-1}
+              className={`qc-tag-chip ${tagIdx === idx + 1 ? "selected" : ""}`}
+              onClick={() => confirmTagByIndex(idx + 1).catch(() => {})}
+            >
+              {tagItem.name}
+            </button>
+          ))}
+          {addingTag ? (
+            <div className="qc-tag-inline-form">
+              <input
+                ref={newTagInputRef}
+                type="text"
+                className="qc-tag-inline-input"
+                value={newTagInput}
+                onChange={(e) => setNewTagInput(e.target.value)}
+                placeholder={t.newTagPlaceholder}
+                autoFocus
+                maxLength={24}
+              />
+              <button
+                type="button"
+                className="qc-tag-inline-btn save"
+                onClick={() => handleSaveNewTag().catch(() => {})}
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                className="qc-tag-inline-btn cancel"
+                onClick={() => {
+                  setAddingTag(false);
+                  setNewTagInput("");
+                  requestAnimationFrame(() => boxRef.current?.focus());
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              tabIndex={-1}
+              className={`qc-tag-chip add-chip ${
+                tagIdx === 1 + categoryTags.length ? "selected" : ""
+              }`}
+              onClick={() => {
+                setTagIdx(1 + categoryTags.length);
+                setAddingTag(true);
+                requestAnimationFrame(() => newTagInputRef.current?.focus());
               }}
             >
-              {t.ssCaptureActive}
-            </div>
-          }
-        />
+              {t.addNewTagBtn}
+            </button>
+          )}
+        </div>
       )}
 
-      <div className="section-subhead">{t.selectTagHint}</div>
-      <TagChipsSelector
-        tags={distractTags}
-        selectedTag={selectedDistractTag}
-        isEditing={isEditingDistractTags}
-        kind="distraction"
-        onSelectTag={onSelectTag}
-        onEditTag={onEditTagItem}
-        onDeleteTag={onDeleteTagItem}
-      />
+      {stage === "input" && (
+        <>
+          <div className="qc-step-hint">
+            <span>
+              {getCategoryDisplayName(category)} •{" "}
+              {selectedTag || t.noTagLabel}
+            </span>
+          </div>
+          <div className="new-reason-row">
+            <input
+              ref={noteInputRef}
+              type="text"
+              className={`distract-textarea ${
+                focusedEntryIdx === -1 ? "is-focused" : ""
+              }`}
+              placeholder={t.qcInputPlaceholders[category]}
+              value={noteText}
+              onFocus={() => setFocusedEntryIdx(-1)}
+              onChange={(e) => setNoteText(e.target.value)}
+              maxLength={240}
+            />
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() => advanceFromInput()}
+            >
+              {doesCategoryAddPenalty(category)
+                ? t.saveAndAddMin(distractPenaltyMins)
+                : t.feedbackSaveBtn}
+            </button>
+          </div>
+          {popularEntries.length > 0 && (
+            <div className="qc-entries-box">
+              <div className="qc-entries-header">{t.popularEntriesLabel}</div>
+              <div className="qc-entries-list">
+                {popularEntries.map((entry, idx) => {
+                  const isFocused = focusedEntryIdx === idx;
+                  return (
+                    <button
+                      key={`${entry}-${idx}`}
+                      ref={(el) => {
+                        entryRowRefs.current[idx] = el;
+                      }}
+                      type="button"
+                      tabIndex={-1}
+                      className={`qc-entry-row ${isFocused ? "selected" : ""}`}
+                      onClick={() => advanceFromInput(entry)}
+                    >
+                      <span className="qc-entry-idx">
+                        {isFocused ? "▶" : `${idx + 1}.`}
+                      </span>
+                      <span className="qc-entry-text">{entry}</span>
+                      <span className="qc-entry-hint">
+                        {isFocused ? "Enter ↵" : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
-      <PreviousReasonsChips
-        reasons={distractPreviousReasons}
-        label={t.previousReasons}
-        onSelectReason={onChangeReasonText}
-      />
-
-      <div className="new-reason-row">
-        <textarea
-          className="distract-textarea"
-          rows={2}
-          placeholder={t.qcInputPlaceholders[distractCategory]}
-          value={distractReasonText}
-          autoFocus
-          onChange={(e) => onChangeReasonText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Tab") {
-              e.preventDefault();
-              const idx = DISTRACT_CATEGORIES.indexOf(distractCategory);
-              const next =
-                DISTRACT_CATEGORIES[
-                  (idx + (e.shiftKey ? DISTRACT_CATEGORIES.length - 1 : 1)) %
-                    DISTRACT_CATEGORIES.length
-                ];
-              onChangeCategory(next);
-              return;
-            }
-            if (e.altKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
-              e.preventDefault();
-              onChangeCategory(DISTRACT_CATEGORIES[Number(e.key) - 1]);
-              return;
-            }
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onSubmit();
-            }
-            if (e.key === "Escape") onCancel();
-          }}
-        />
-        <button className="primary-btn" onClick={onSubmit}>
-          {doesCategoryAddPenalty(distractCategory)
-            ? t.saveAndAddMin(distractPenaltyMins)
-            : `${t.feedbackSaveBtn} (${t.noPenaltyParkingBadge})`}
-        </button>
-      </div>
+      {stage === "context" && (
+        <>
+          <div className="qc-step-hint">
+            <span>
+              🎯 {t.qcContextHeader}: <b>{noteText}</b>
+            </span>
+          </div>
+          <div className="new-reason-row">
+            <input
+              ref={contextInputRef}
+              type="text"
+              className="distract-textarea"
+              placeholder={t.qcContextPlaceholder}
+              value={contextText}
+              onFocus={() => setFocusedContextIdx(-1)}
+              onChange={(e) => setContextText(e.target.value)}
+              maxLength={120}
+            />
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={() =>
+                onSubmit({
+                  category,
+                  tag: selectedTag,
+                  text: noteText.trim(),
+                  newContext: contextText.trim() || undefined,
+                })
+              }
+            >
+              ✓
+            </button>
+          </div>
+          {topContexts.length > 0 && (
+            <div className="qc-recent-row">
+              <span className="qc-muted">{t.qcRecentContextsLabel}</span>
+              <div className="qc-recent-chips">
+                {topContexts.map((ctx, idx) => (
+                  <button
+                    key={ctx}
+                    type="button"
+                    tabIndex={-1}
+                    className={`qc-recent-chip ${
+                      focusedContextIdx === idx ? "selected" : ""
+                    }`}
+                    onClick={() =>
+                      onSubmit({
+                        category,
+                        tag: selectedTag,
+                        text: noteText.trim(),
+                        newContext: ctx,
+                      })
+                    }
+                  >
+                    {ctx}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       <div className="stop-box-actions">
         <span style={{ fontSize: "9px", color: "#a1a1aa" }}>
-          Tag: <b>{selectedDistractTag}</b>
+          {stage === "category"
+            ? t.qcStepCategoryHint
+            : stage === "tag"
+              ? t.qcStepTagHint
+              : stage === "input"
+                ? t.qcStepInputHint
+                : t.qcStepContextHint}
         </span>
-        <button onClick={onCancel}>{t.cancel}</button>
+        <button type="button" onClick={onCancel}>
+          {t.cancel}
+        </button>
       </div>
     </div>
   );
@@ -648,7 +1025,9 @@ export function BreakOverdueModal({
               e.preventDefault();
               onSubmit(false);
             }
-            if (e.key === "Escape") onSubmit(true);
+            if (e.key === "Escape") {
+              onSubmit(true);
+            }
           }}
         />
       </div>
@@ -657,7 +1036,9 @@ export function BreakOverdueModal({
         <button className="primary-btn" onClick={() => onSubmit(false)}>
           {t.saveAndStartWork}
         </button>
-        <button onClick={() => onSubmit(true)}>{t.skipAndStartWork}</button>
+        <button onClick={() => onSubmit(true)}>
+          {t.skipAndStartWork}
+        </button>
       </div>
     </div>
   );
@@ -665,29 +1046,80 @@ export function BreakOverdueModal({
 
 export interface LightboxModalProps {
   entry: WorkStoryEntry;
+  entries?: WorkStoryEntry[];
   t: Translations;
+  onSelectEntry?: (entry: WorkStoryEntry) => void;
   onClose: () => void;
   onDelete: (id: number) => void;
 }
 
 export function LightboxModal({
   entry,
+  entries,
   t,
+  onSelectEntry,
   onClose,
   onDelete,
 }: LightboxModalProps) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const groupList = entries && entries.length > 1 ? entries : null;
+  const curIdx = groupList
+    ? Math.max(
+        0,
+        groupList.findIndex((item) => item.id === entry.id),
+      )
+    : 0;
+
+  useEffect(() => {
+    if (!isPlaying || !groupList || !onSelectEntry) return;
+    const timer = window.setInterval(() => {
+      onSelectEntry(groupList[(curIdx + 1) % groupList.length]);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, groupList, curIdx, onSelectEntry]);
+
   return (
     <div className="lightbox-overlay no-drag" onClick={onClose}>
       <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
         <div className="lightbox-header">
           <span className="lightbox-title">
-            📸{" "}
-            {entry.entry_type === "periodic"
-              ? "5dk Periyodik Ekran Kaydı"
-              : "📸 Ekran Alıntısı Notu"}{" "}
-            • {entry.created_at.replace("T", " ").slice(0, 16)}
+            📸 {new Date(entry.created_at).toLocaleString()}
+            {groupList ? ` (${curIdx + 1}/${groupList.length})` : ""}
           </span>
           <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            {groupList && onSelectEntry && (
+              <>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    onSelectEntry(
+                      groupList[(curIdx - 1 + groupList.length) % groupList.length],
+                    );
+                  }}
+                >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => setIsPlaying((p) => !p)}
+                >
+                  {isPlaying ? t.storyPauseBtn : t.storyPlayBtn}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    onSelectEntry(groupList[(curIdx + 1) % groupList.length]);
+                  }}
+                >
+                  ▶
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="tag-icon-btn del-btn"
@@ -709,14 +1141,19 @@ export function LightboxModal({
           />
         </div>
         <div className="lightbox-footer">
+          {entry.work_tag && (
+            <div className="lightbox-meta-item">
+              💼 <b>{t.topicShortLabel}:</b> {entry.work_tag}
+            </div>
+          )}
           {entry.context_text && (
             <div className="lightbox-meta-item">
-              🎯 <b>Meşguliyet:</b> {entry.context_text}
+              🎯 <b>{t.contextShortLabel}:</b> {entry.context_text}
             </div>
           )}
           {entry.active_app && (
             <div className="lightbox-meta-item">
-              🌐 <b>Uygulama / Sekme:</b> {entry.active_app}
+              🌐 <b>{t.qcActiveTabLabel}:</b> {entry.active_app}
               {entry.active_window ? ` — ${entry.active_window}` : ""}
             </div>
           )}

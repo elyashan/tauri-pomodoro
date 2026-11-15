@@ -86,6 +86,7 @@ pub fn setup_tray(app: &App) -> tauri::Result<()> {
                 }
             }
             "quit" => {
+                crate::focus_mode::restore_focus_mode_on_exit();
                 app.exit(0);
             }
             _ => {}

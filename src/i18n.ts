@@ -1,6 +1,19 @@
 export type LangCode = "auto" | "tr" | "en";
 export type ActiveLang = "tr" | "en";
 
+const PLACEHOLDER_INSIGHT_TAGS = new Set([
+  "Tag Yok",
+  "No Tag",
+  "Diğer",
+  "Other",
+  "",
+]);
+
+function sanitizeInsightTopTag(topTag: string | null): string | null {
+  const trimmed = topTag?.trim() || "";
+  return PLACEHOLDER_INSIGHT_TAGS.has(trimmed) ? null : trimmed;
+}
+
 export interface Translations {
   work: string;
   break: string;
@@ -19,12 +32,6 @@ export interface Translations {
   average: string;
   summaryTitle: string;
   summaryHoverHint: string;
-  summaryBarDetails: (
-    label: string,
-    hours: string,
-    sessions: number,
-    avgMins: number,
-  ) => { main: string; sub: string };
   filterToday: string;
   filterAll: string;
   noDistractions: string;
@@ -62,6 +69,8 @@ export interface Translations {
   deleteTagConfirm: (name: string) => string;
   editTagPrompt: (name: string) => string;
   newTagPrompt: string;
+  newTagPlaceholder: string;
+  addNewTagBtn: string;
 
   // Dikkat Dağılması pop-up & Ek süre
   distractionTitle: string;
@@ -73,8 +82,8 @@ export interface Translations {
   distractPenaltySetting: string;
 
   // Özet haftalık görünüm, etiket kırılımı & sıfırlama
-  viewWeekly: string;
-  viewRecentDays: string;
+  summaryDailyTab: string;
+  summaryWeeklyTab: string;
   weeklyTotal: string;
   weeklyDailyAvg: string;
   resetAllData: string;
@@ -86,15 +95,17 @@ export interface Translations {
   endingReasonsTab: string;
   workTagsTab: string;
   breakOvertimeTab: string;
-  timelineTab: string;
   noTimelineSessions: string;
   noEndingReasons: string;
   sessionCompleted: string;
 
-  // Always on top & Export & Break presets
-  alwaysOnTop: string;
-  alwaysOnTopTooltip: (on: boolean) => string;
+  // Export & Break Overdue / Extension
   exportDataBtn: string;
+  exportDataTooltip: (dirPath: string) => string;
+  exportSavedMsg: (filePath: string) => string;
+  todayBtn: string;
+  calendarPickerTooltip: string;
+  breakdownTitle: string;
   breakOverdueBadge: (time: string) => string;
   breakOverdueTitle: string;
   breakOverdueDesc: (time: string) => string;
@@ -107,6 +118,8 @@ export interface Translations {
   workTopicPlaceholder: string;
   selectWorkTopic: string;
   changeWorkTopic: string;
+  topicShortLabel: string;
+  contextShortLabel: string;
 
   // Çalışma Planları & Döngü & Kısa Mola
   planNames: Record<string, string>;
@@ -118,22 +131,24 @@ export interface Translations {
     longMins: number,
     interval: number,
   ) => string;
+  planBreaksChipTooltip: (
+    shortMins: number,
+    stdMins: number,
+    longMins: number,
+    interval: number,
+  ) => string;
   planLockedDuringSession: string;
   planWorkMins: string;
   planShortBreakMins: string;
   planStandardBreakMins: string;
   planLongBreakMins: string;
   planLongBreakInterval: string;
-  planLongBreakIntervalDesc: (n: number) => string;
   shortBreakBtn: (m: number) => string;
   shortBreakBtnTooltip: (m: number) => string;
   shortBreaksCountBadge: (n: number) => string;
-  distractionsCountTooltip: (n: number) => string;
   distractedBtnCompact: (mins: number) => string;
   distractedBtnTooltip: (mins: number) => string;
   stopBtnTooltip: string;
-  extendBreakCompact: string;
-  extendBreakTooltip: string;
   cycleProgressBadge: (curr: number, total: number) => string;
   cycleTooltip: (curr: number, total: number, longMins: number) => string;
   standardBreakBadge: (m: number, curr: number, total: number) => string;
@@ -184,6 +199,7 @@ export interface Translations {
   feedbackEmpty: string;
 
   windowSizeTitle: string;
+  uiScaleLabel: string;
   windowSizeHint: (w: number, h: number) => string;
   saveCurrentSizeBtn: string;
   resetStandardSizeBtn: string;
@@ -211,39 +227,40 @@ export interface Translations {
     topTag: string | null,
   ) => string;
 
-  defaultDistractionTags: string[];
+  defaultCategoryTags: Record<
+    "impulsive_task" | "idea" | "internal" | "external",
+    string[]
+  >;
+  noTagLabel: string;
   defaultEndingTags: string[];
   defaultWorkTags: string[];
   defaultBreakOvertimeTags: string[];
 
-  // v0.1.13 & v0.1.14: 6 Dikkat Kategorisi (3. şık SS Alma), Global Hızlı Yakalama, Otopark, Çalışma Hikayesi & Bulut Dashboard
+  // 4 Dikkat Kategorisi, Global Hızlı Yakalama, Otopark, Çalışma Hikayesi & Bulut Dashboard
   catImpulsiveTask: string;
   catIdea: string;
-  catScreenshotNote: string;
   catInternal: string;
   catExternal: string;
-  catEscape: string;
   catKeyHints: {
     impulsive_task: string;
     idea: string;
-    screenshot_note: string;
     internal: string;
     external: string;
-    escape: string;
   };
   noPenaltyParkingBadge: string;
   addsPenaltyBadge: (mins: number) => string;
 
-  qcSelectKeyHint: string;
   qcInputPlaceholders: {
     impulsive_task: string;
     idea: string;
-    screenshot_note: string;
     internal: string;
     external: string;
-    escape: string;
   };
-  qcSwitchCatHint: string;
+  qcStepCategoryHint: string;
+  qcStepTagHint: string;
+  qcStepInputHint: string;
+  qcStepContextHint: string;
+  popularEntriesLabel: string;
   qcActiveTabLabel: string;
   qcCurrentContextLabel: string;
   qcContextNone: string;
@@ -252,10 +269,6 @@ export interface Translations {
   qcContextHeader: string;
   qcContextPlaceholder: string;
   qcRecentContextsLabel: string;
-
-  ssCropHint: string;
-  ssResetCropBtn: string;
-  ssRetakeBtn: string;
 
   parkingBreakBannerTitle: string;
   parkingToggleBtn: (cnt: number) => string;
@@ -276,9 +289,18 @@ export interface Translations {
   openGoogleDocBtn: string;
   googleDocUrlHint: string;
 
-  workStoryTab: string;
-  workStoryTitle: string;
   workStoryEmpty: string;
+  storyFramesCount: (n: number) => string;
+  storyPlayBtn: string;
+  storyPauseBtn: string;
+  storyFullscreenBtn: string;
+  storyHoverTooltip: (
+    title: string,
+    topics: string,
+    contexts: string,
+    apps: string,
+    count: number,
+  ) => string;
 
   dashboardBtn: string;
   dashboardTitle: string;
@@ -303,17 +325,14 @@ export interface Translations {
   noImportantIdeas: string;
   dashboardUnimportantIdeas: string;
   noUnimportantIdeas: string;
-  workStoryDesc: string;
   contextStatsTitle: string;
   appDistractionTitle: string;
-  ssCaptureActive: string;
 
   shortBreakPromptTitle: string;
   shortBreakPromptHint: string;
   shortBreakPromptPlaceholder: string;
   shortBreakStartBtn: string;
   contextReminderPrefix: string;
-  setContextBadgePlaceholder: string;
 
   contextShortTab: string;
   contextFullTab: string;
@@ -324,7 +343,6 @@ export interface Translations {
 
   shortcutsSectionTitle: string;
   shortcutDistractLabel: string;
-  shortcutContextLabel: string;
   shortcutRecordPressKeys: string;
   shortcutResetBtn: string;
   shortcutTestBtn: string;
@@ -344,14 +362,10 @@ const tr: Translations = {
   cancel: "İptal",
   other: "Diğer",
   totalWork: "Toplam Çalışma",
-  sessions: "Seans",
+  sessions: "Tur",
   average: "Ortalama",
   summaryTitle: "⠿ Çalışma ve Odak Özeti",
   summaryHoverHint: "Detay görmek için gün çubuklarının üzerine gel",
-  summaryBarDetails: (label, hours, sessions, avgMins) => ({
-    main: `${label}: ${hours} sa`,
-    sub: `${sessions} seans • Ort: ${avgMins} dk`,
-  }),
   filterToday: "Filtre: Bugün",
   filterAll: "Filtre: Genel",
   noDistractions: "Henüz kayıtlı dikkat dağılma nedeni yok.",
@@ -385,7 +399,7 @@ const tr: Translations = {
   },
 
   // Erken durdurma & Taglar
-  earlyStopTitle: "Seansı Bitir (Neden & Tag)",
+  earlyStopTitle: "Turu Erken Bitir (Neden & Tag)",
   earlyStopWorkedTime: (mins) => `${mins} dakika çalışıldı`,
   finishWithoutTag: "Tag'siz Bitir",
   cancelReturn: "Vazgeç / Devam Et",
@@ -395,6 +409,8 @@ const tr: Translations = {
   deleteTagConfirm: (name) => `"${name}" tag'ini silmek istiyor musunuz?`,
   editTagPrompt: (name) => `"${name}" için yeni tag adı:`,
   newTagPrompt: "Yeni tag adı girin:",
+  newTagPlaceholder: "Yeni tag adı...",
+  addNewTagBtn: "+ Tag",
 
   // Dikkat Dağılması pop-up & Ek süre
   distractionTitle: "Dikkat Dağılması Kaydet",
@@ -406,8 +422,8 @@ const tr: Translations = {
   distractPenaltySetting: "Dikkat Dağılma Ekleme Süresi",
 
   // Özet haftalık görünüm, etiket kırılımı & sıfırlama
-  viewWeekly: "Haftalık Görünüm",
-  viewRecentDays: "Son Günler",
+  summaryDailyTab: "Günlük",
+  summaryWeeklyTab: "Haftalık",
   weeklyTotal: "Haftalık Toplam",
   weeklyDailyAvg: "Haftalık Günlük Ort.",
   resetAllData: "Verileri Sıfırla",
@@ -415,23 +431,23 @@ const tr: Translations = {
   resetConfirmDesc:
     "Tüm geçmiş çalışma seansları, günler ve dikkat dağılma kayıtları tamamen silinecektir. Bu işlem geri alınamaz.",
   resetConfirmYes: "Evet, Tümünü Sıfırla",
-  avgDistractionsPerSession: "Seans Başı Ort. Dikkat",
+  avgDistractionsPerSession: "Tur Başı Ort. Dikkat",
   distractionReasonsTab: "Dikkat Dağılmaları",
   endingReasonsTab: "Erken Bitirmeler",
   workTagsTab: "Çalışma Konuları",
   breakOvertimeTab: "Mola Gecikmeleri",
-  timelineTab: "24s Çizelge",
   noTimelineSessions: "Henüz kayıtlı zaman dilimi yok.",
   noEndingReasons: "Henüz kayıtlı erken bitirme nedeni yok.",
-  sessionCompleted: "Seans Tamamlandı! 🎉",
+  sessionCompleted: "Çalışma Turu Tamamlandı! 🎉",
 
-  // Always on top & Export & Break
-  alwaysOnTop: "Her Zaman Üstte",
-  alwaysOnTopTooltip: (on: boolean) =>
-    on
-      ? "Her Zaman Üstte: Açık (Kapatmak için tıkla)"
-      : "Her Zaman Üstte: Kapalı (Sabitlemek için tıkla)",
+  // Export & Break
   exportDataBtn: "📥 Verileri İndir (JSON)",
+  exportDataTooltip: (dirPath) =>
+    `Tek JSON yedeği İndirilenler klasörüne kaydedilir (resimsiz & stories hariç):\n${dirPath}\\pomodoro-backup.json`,
+  exportSavedMsg: (filePath) => `✓ Kaydedildi: ${filePath}`,
+  todayBtn: "Bugün",
+  calendarPickerTooltip: "Takvimden gün seç",
+  breakdownTitle: "Dağılma, Gecikme & Erken Bitirme Kırılımı",
   breakOverdueBadge: (time: string) => `Mola Bitti! (+${time})`,
   breakOverdueTitle: "Mola Uzatma / Gecikme Sebebi",
   breakOverdueDesc: (time: string) =>
@@ -444,7 +460,9 @@ const tr: Translations = {
   whatAreYouWorkingOn: "Ne Çalışıyorsun?",
   workTopicPlaceholder: "Ders, konu veya görev yaz (örn: Matematik, Rust)...",
   selectWorkTopic: "Konu Seç",
-  changeWorkTopic: "Çalışma Konusunu Değiştir",
+  changeWorkTopic: "Konu",
+  topicShortLabel: "Konu",
+  contextShortLabel: "Bağlam",
 
   // Çalışma Planları & Döngü & Kısa Mola
   planNames: {
@@ -455,6 +473,8 @@ const tr: Translations = {
   },
   planDetailTooltip: (name, w, sb, std, lb, cyc) =>
     `${name}: ${w} dk çalışma • ${sb} dk kısa mola • ${std} dk standart mola • Her ${cyc} çalışmada ${lb} dk uzun mola`,
+  planBreaksChipTooltip: (sb, std, lb, cyc) =>
+    `Kısa Mola: ${sb} dk • Standart Mola: ${std} dk • Uzun Mola: ${lb} dk (her ${cyc} döngüde)`,
   planLockedDuringSession:
     "Aktif seans sürerken plan değiştirilemez. Önce seansı bitirin.",
   planWorkMins: "Çalışma Süresi (dk)",
@@ -462,21 +482,16 @@ const tr: Translations = {
   planStandardBreakMins: "Standart Mola (dk)",
   planLongBreakMins: "Uzun Mola (dk)",
   planLongBreakInterval: "Uzun Mola Döngüsü",
-  planLongBreakIntervalDesc: (n: number) => `Her ${n} çalışmada bir uzun mola`,
   shortBreakBtn: (m: number) => `☕ ${m}dk`,
   shortBreakBtnTooltip: (m: number) =>
     `Kısa Mola (${m} dk) — Mevcut çalışma süreniz korunur`,
-  shortBreaksCountBadge: (n: number) => `Seansta ${n} kısa mola verildi`,
-  distractionsCountTooltip: (n: number) =>
-    `Bu çalışmada ${n} kez dikkat dağılması kaydedildi`,
+  shortBreaksCountBadge: (n: number) => `Bu oturumda ${n} kısa mola verildi`,
   distractedBtnCompact: (mins: number) => (mins > 0 ? `⚡ +${mins}dk` : "⚡"),
   distractedBtnTooltip: (mins: number) =>
     mins > 0
       ? `Dikkatim dağıldı (+${mins} dk ekle ve neden kaydet)`
       : "Dikkatim dağıldı (Süre eklemeden neden kaydet)",
   stopBtnTooltip: "Mevcut sayacı erken bitir veya sıfırla",
-  extendBreakCompact: "+5dk",
-  extendBreakTooltip: "Molayı 5 dakika uzat",
   cycleProgressBadge: (curr: number, total: number) => `${curr}/${total}`,
   cycleTooltip: (curr: number, total: number, longMins: number) =>
     `Uzun mola döngüsü: ${curr}/${total} tamamlandı (${total}. çalışma sonunda ${longMins} dk uzun mola)`,
@@ -492,17 +507,17 @@ const tr: Translations = {
   returnToWorkBtn: "Çalışmaya Dön",
   startWorkCompact: "▶ Çalışma",
   returnToWorkCompact: "▶ Dön",
-  startSessionBtn: "▶ Seansı Başlat",
-  startSessionTooltip: "Seçili planla yeni seans başlatır ve sayacı açar",
-  finishSessionBtn: "⏹ Seansı Bitir",
-  finishSessionTooltip: "Aktif seansı sonlandırır ve ilerlemeyi kaydeder",
+  startSessionBtn: "▶ Oturumu Başlat",
+  startSessionTooltip: "Seçili planla yeni çalışma oturumu başlatır ve sayacı açar",
+  finishSessionBtn: "⏹ Oturumu Bitir",
+  finishSessionTooltip: "Aktif oturumu sonlandırır ve ilerlemeyi kaydeder",
   returnToWorkMenuBtn: "▶ Çalışmaya Dön",
   returnToBreakMenuBtn: "▶ Molaya Dön",
-  sessionIdleLabel: "Aktif seans yok",
+  sessionIdleLabel: "Aktif oturum yok",
   sessionIdleTooltip:
-    "Sayaç başlatmak için aşağıdan plan seçip 'Seansı Başlat'a tıklayın",
+    "Sayaç başlatmak için aşağıdan plan seçip 'Oturumu Başlat'a tıklayın",
   sessionActiveTooltip: (modeLabel, topic, shortBreaks) =>
-    `Aktif Seans • Mod: ${modeLabel} • Konu: ${topic || "Belirtilmedi"} • Kısa mola: ${shortBreaks}`,
+    `Aktif Oturum • Mod: ${modeLabel} • Konu: ${topic || "Belirtilmedi"} • Kısa mola: ${shortBreaks}`,
   statusRunning: "Çalışıyor",
   statusPaused: "Duraklatıldı",
   editPlansTitle: "Çalışma & Mola Planları",
@@ -530,6 +545,7 @@ const tr: Translations = {
   feedbackEmpty: "Henüz kayıtlı geri bildirim yok.",
 
   windowSizeTitle: "📐 Pencere Boyutu",
+  uiScaleLabel: "🔍 Ekran Ölçeği (UI Boyutu)",
   windowSizeHint: (w, h) =>
     `Pencereyi kenarlarından sürükleyip büyütebilir/küçültebilirsin (Şu an: ${w}×${h}px)`,
   saveCurrentSizeBtn: "💾 Mevcut Boyutu Kaydet",
@@ -561,6 +577,7 @@ const tr: Translations = {
   adhdCompletionDesc: (pct, hyperCnt) =>
     `%${pct} tamamlama • ${hyperCnt} hiperodak (35+ dk)`,
   adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
+    const safeTopTag = sanitizeInsightTopTag(topTag);
     const parts: string[] = [];
     if (thresholdMins !== null && thresholdMins < 25) {
       parts.push(
@@ -573,11 +590,11 @@ const tr: Translations = {
     }
     if (intPct >= 65) {
       parts.push(
-        `🧠 Bölünmelerinin %${intPct}'i içsel dürtü kaynaklı${topTag ? ` (en sık: ${topTag})` : ""}. Aklına gelen şeyi "sonra bakılacaklar" notuna yazıp sayaca dönmeyi dene.`,
+        `🧠 Bölünmelerinin %${intPct}'i içsel dürtü kaynaklı${safeTopTag ? ` (en sık: ${safeTopTag})` : ""}. Aklına gelen şeyi "sonra bakılacaklar" notuna yazıp sayaca dönmeyi dene.`,
       );
     } else if (intPct > 0 && intPct <= 35) {
       parts.push(
-        `🔔 Bölünmelerinin çoğu dışsal uyaranlardan geliyor${topTag ? ` (${topTag})` : ""}. Seans başında bildirimleri sessize almak odak süreni ciddi artıracaktır.`,
+        `🔔 Bölünmelerinin çoğu dışsal uyaranlardan geliyor${safeTopTag ? ` (${safeTopTag})` : ""}. Seans başında bildirimleri sessize almak odak süreni ciddi artıracaktır.`,
       );
     }
     if (overtimeRate >= 40) {
@@ -590,14 +607,13 @@ const tr: Translations = {
       : "🌱 Seansların ve dikkat dağılma kayıtların biriktikçe burada senin ADHD odak profiline özel kişisel çıkarımlar belirecek.";
   },
 
-  defaultDistractionTags: [
-    "Telefon",
-    "Sosyal Medya",
-    "Çevre / İnsanlar",
-    "Açlık / Mola",
-    "Düşünceler",
-    "Diğer",
-  ],
+  defaultCategoryTags: {
+    impulsive_task: ["Mesaj / E-posta", "Ufak İş", "Araştırma", "Alışveriş", "Düzenleme"],
+    idea: ["Proje", "Özellik", "İçerik", "Hayat", "Not"],
+    internal: ["Düşünceler", "Sosyal Medya", "Telefon", "Açlık / Kahve", "Yorgunluk", "Sıkılma"],
+    external: ["Bildirim", "İnsanlar / Ses", "Telefon Çağrısı", "Acil İş", "Ortam"],
+  },
+  noTagLabel: "Tag Yok",
   defaultEndingTags: [
     "Toplantı",
     "Yemek",
@@ -626,50 +642,41 @@ const tr: Translations = {
     "Diğer",
   ],
 
-  // v0.1.13 & v0.1.14
+  // 4 Dikkat Kategorisi
   catImpulsiveTask: "Dürtüsel Görev",
   catIdea: "Akla Gelen Fikir",
-  catScreenshotNote: "📸 SS Notu",
   catInternal: "İçsel Tetikleyici",
   catExternal: "Dışsal Tetikleyici",
-  catEscape: "Zorluktan Kaçış",
   catKeyHints: {
     impulsive_task: "1·G",
     idea: "2·F",
-    screenshot_note: "3·S",
-    internal: "4·İ",
-    external: "5·D",
-    escape: "6·Z",
+    internal: "3·İ",
+    external: "4·D",
   },
   noPenaltyParkingBadge: "+0dk • Otopark",
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}dk eklenir` : "+0dk"),
 
-  qcSelectKeyHint:
-    "1–6 veya harfe (1·G: Görev, 2·F: Fikir, 3·S: 📸 SS Alma, 4·İ: İçsel, 5·D: Dışsal, 6·Z: Kaçış) bas • Esc kapat",
   qcInputPlaceholders: {
     impulsive_task:
       "Molada yapılacak dürtüsel görevi yaz ve Enter'a bas (ek süre eklenmez)...",
     idea: "Aklına gelen fikri yaz ve Enter'a bas (ek süre eklenmez)...",
-    screenshot_note:
-      "Ekran görüntüsü için kısa notunu yaz ve Enter'a bas (fareyle bölge kırpabilirsin, ek süre eklenmez)...",
     internal: "İçsel tetikleyiciyi / düşünceyi yaz ve Enter'a bas...",
     external: "Dışsal uyaranı (bildirim, ses vb.) yaz ve Enter'a bas...",
-    escape: "Zorlandığın / kaçtığın noktayı kısaca yaz ve Enter'a bas...",
   },
-  qcSwitchCatHint: "Tab: Kategori değiştir • Enter: Kaydet • Esc: İptal",
+  qcStepCategoryHint: "Tab: Kategori • Enter: Seç • 1-4: Hızlı Seç • Esc: Kapat",
+  qcStepTagHint: "Tab: Tag Seç • Enter: Onayla • Esc: Geri",
+  qcStepInputHint: "Tab: Popüler Kayıtlar • Enter: Kaydet • Esc: Geri",
+  qcStepContextHint: "Tab: Son Bağlamlar • Enter: Onayla • Esc: Geç",
+  popularEntriesLabel: "Popüler kayıtlar (Tab ile seç):",
   qcActiveTabLabel: "Son Açık Sekme",
-  qcCurrentContextLabel: "Son Kalınan Meşguliyet",
-  qcContextNone: "Meşguliyet belirtilmedi",
+  qcCurrentContextLabel: "Aktif Bağlam",
+  qcContextNone: "Belirtilmedi",
   qcReminderTitle: "🎯 Son Kalınan Meşguliyet — Kaldığın Yerden Devam Et:",
   qcReminderCloseHint: "Enter / Space / Esc ile hemen pencereye dön",
-  qcContextHeader: "🎯 Şu An Neyle Meşgulsün? (Context)",
+  qcContextHeader: "Bağlam (Context)",
   qcContextPlaceholder:
     "Şu an odaklandığın spesifik işi yaz ve Enter'a bas (örn: Türev Test 2, API Auth)...",
-  qcRecentContextsLabel: "Son meşguliyetler (Tıkla veya ↑↓):",
-
-  ssCropHint: "✂️ Görüntü üzerinde fareyle sürükleyerek istediğin alanı kırpabilirsin",
-  ssResetCropBtn: "Tam Ekran",
-  ssRetakeBtn: "🔄 Yeniden Çek",
+  qcRecentContextsLabel: "Son bağlamlar (Tab ile seç):",
 
   parkingBreakBannerTitle:
     "🅿️ Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
@@ -691,12 +698,16 @@ const tr: Translations = {
   openGoogleDocBtn: "📄 Odak Defteri Dokümanını Aç",
   googleDocUrlHint: "Google Docs ve Drive API ile canlı senkronize edilen dokümanınız",
 
-  workStoryTab: "📸 Hikaye",
-  workStoryTitle: "📸 Çalışma Hikayesi (5 dk'da 1 SS + Açık Pencere + Context)",
   workStoryEmpty:
     "Henüz çalışma hikayesi kaydı yok. Çalışma sayacı çalışırken her 5 dakikada bir otomatik ekran görüntüsü + açık pencere + context kaydedilir.",
+  storyFramesCount: (n) => `${n} kare • 5'er dk`,
+  storyPlayBtn: "▶ Oynat",
+  storyPauseBtn: "⏸ Duraklat",
+  storyFullscreenBtn: "🔍 Büyüt",
+  storyHoverTooltip: (title, topics, contexts, apps, count) =>
+    `${title} (${count} kare)\n💼 Konu: ${topics}\n🎯 Bağlam: ${contexts}\n🌐 Uygulama / Not: ${apps}`,
 
-  dashboardBtn: "📊 Dashboard",
+  dashboardBtn: "Dashboard",
   dashboardTitle: "📊 Kişisel Odak & Bulut Dashboard",
   cloudAuthTitle: "☁️ Google Hesabı & Bulut Senkronizasyonu (Çevrimdışı Destekli)",
   cloudEmailPlaceholder: "Google E-posta (örn: ad.soyad@gmail.com)",
@@ -720,35 +731,30 @@ const tr: Translations = {
   noImportantIdeas: "Önemli olarak işaretlenmiş fikir yok.",
   dashboardUnimportantIdeas: "Önemsiz / İncelenecek Fikirler",
   noUnimportantIdeas: "İncelenecek fikir yok.",
-  workStoryDesc:
-    "5 dakikada bir otomatik alınan ekran görüntüleri ve dikkat dağılma ekranından kaydedilen SS notlarıyla oluşan çalışma hikayesi",
   contextStatsTitle: "Meşguliyet Dağılımı",
   appDistractionTitle: "Açık Pencere & Sekmeler",
-  ssCaptureActive: "📸 Ekran görüntüsü alınıyor...",
 
-  shortBreakPromptTitle: "🎯 Şu An Neyle Meşgulsün? (Context)",
+  shortBreakPromptTitle: "Aktif Bağlam",
   shortBreakPromptHint:
     "Kısa molaya girmeden önce aktif meşguliyetini belirle; mola bitince kaldığın yeri hatırlatalım:",
   shortBreakPromptPlaceholder:
     "Şu an odaklandığın spesifik işi yaz (örn: Türev Test 2, API Auth)...",
   shortBreakStartBtn: "☕ Molaya Geç",
   contextReminderPrefix: "🎯 Son Meşguliyet:",
-  setContextBadgePlaceholder: "Meşguliyet",
 
   contextShortTab: "Bağlam",
   contextFullTab: "Meşguliyet (Context) Çalışma İstatistikleri",
   appsShortTab: "Sekme",
   appsFullTab: "Açık Uygulama & Sekme Bazlı Dağılmalar",
   noContextStats:
-    "Henüz meşguliyet (context) kaydı yok. Kısayol ile o an neyle uğraştığını kaydedebilirsin.",
+    "Henüz meşguliyet (context) kaydı yok. Konu alanından veya içsel/dışsal dağılma sonrası bağlam ekleyebilirsin.",
   noAppDistractions:
     "Henüz açık uygulama veya sekme bilgisi içeren dağılma kaydı yok.",
 
   shortcutsSectionTitle: "⌨️ Global Kısayollar (Ekran Ortasında Hızlı Input)",
   shortcutDistractLabel: "⚡ Dikkat / Görev / Fikir Yakala",
-  shortcutContextLabel: "🎯 Aktif Meşguliyet (Context) Yaz",
   shortcutRecordPressKeys: "Tuş kombinasyonuna basın... (Esc iptal)",
-  shortcutResetBtn: "Varsayılan Kısayollar",
+  shortcutResetBtn: "Varsayılan Kısayol",
   shortcutTestBtn: "Test",
 };
 
@@ -766,14 +772,10 @@ const en: Translations = {
   cancel: "Cancel",
   other: "Other",
   totalWork: "Total Work",
-  sessions: "Sessions",
+  sessions: "Rounds",
   average: "Average",
   summaryTitle: "⠿ Work & Focus Summary",
   summaryHoverHint: "Hover over day bars to view details",
-  summaryBarDetails: (label, hours, sessions, avgMins) => ({
-    main: `${label}: ${hours} h`,
-    sub: `${sessions} sessions • Avg: ${avgMins} min`,
-  }),
   filterToday: "Filter: Today",
   filterAll: "Filter: All-Time",
   noDistractions: "No distractions recorded yet.",
@@ -807,7 +809,7 @@ const en: Translations = {
   },
 
   // Erken durdurma & Taglar
-  earlyStopTitle: "End Session (Reason & Tag)",
+  earlyStopTitle: "End Round Early (Reason & Tag)",
   earlyStopWorkedTime: (mins) => `${mins} minutes completed`,
   finishWithoutTag: "End Without Tag",
   cancelReturn: "Cancel / Continue",
@@ -817,6 +819,8 @@ const en: Translations = {
   deleteTagConfirm: (name) => `Delete tag "${name}"?`,
   editTagPrompt: (name) => `Enter new name for "${name}":`,
   newTagPrompt: "Enter new tag name:",
+  newTagPlaceholder: "New tag name...",
+  addNewTagBtn: "+ Tag",
 
   // Dikkat Dağılması pop-up & Ek süre
   distractionTitle: "Record Distraction",
@@ -828,8 +832,8 @@ const en: Translations = {
   distractPenaltySetting: "Distraction Added Time",
 
   // Özet haftalık görünüm, etiket kırılımı & sıfırlama
-  viewWeekly: "Weekly View",
-  viewRecentDays: "Recent Days",
+  summaryDailyTab: "Daily",
+  summaryWeeklyTab: "Weekly",
   weeklyTotal: "Weekly Total",
   weeklyDailyAvg: "Daily Avg (Week)",
   resetAllData: "Reset All Data",
@@ -837,23 +841,23 @@ const en: Translations = {
   resetConfirmDesc:
     "All session history, days, and distraction records will be permanently erased. This cannot be undone.",
   resetConfirmYes: "Yes, Reset All",
-  avgDistractionsPerSession: "Avg Distractions/Session",
+  avgDistractionsPerSession: "Avg Distractions/Round",
   distractionReasonsTab: "Distractions",
   endingReasonsTab: "Early Stops",
   workTagsTab: "Work Topics",
   breakOvertimeTab: "Break Delays",
-  timelineTab: "24h Timeline",
   noTimelineSessions: "No session intervals recorded yet.",
   noEndingReasons: "No early stop reasons recorded yet.",
-  sessionCompleted: "Session Completed! 🎉",
+  sessionCompleted: "Work Round Completed! 🎉",
 
-  // Always on top & Export & Break
-  alwaysOnTop: "Always on Top",
-  alwaysOnTopTooltip: (on: boolean) =>
-    on
-      ? "Always on Top: On (Click to unpin)"
-      : "Always on Top: Off (Click to pin)",
+  // Export & Break
   exportDataBtn: "📥 Export Data (JSON)",
+  exportDataTooltip: (dirPath) =>
+    `Single JSON backup saved to Downloads (no images or stories):\n${dirPath}\\pomodoro-backup.json`,
+  exportSavedMsg: (filePath) => `✓ Saved: ${filePath}`,
+  todayBtn: "Today",
+  calendarPickerTooltip: "Pick a date from calendar",
+  breakdownTitle: "Distractions, Overtime & Early Stops",
   breakOverdueBadge: (time: string) => `Break Over! (+${time})`,
   breakOverdueTitle: "Break Overdue Reason",
   breakOverdueDesc: (time: string) =>
@@ -866,7 +870,9 @@ const en: Translations = {
   whatAreYouWorkingOn: "What are you working on?",
   workTopicPlaceholder: "Enter topic or task (e.g. Math, Rust, Study)...",
   selectWorkTopic: "Select Topic",
-  changeWorkTopic: "Change Work Topic",
+  changeWorkTopic: "Work Topic",
+  topicShortLabel: "Topic",
+  contextShortLabel: "Context",
 
   // Study Plans & Cycle & Short Break
   planNames: {
@@ -877,6 +883,8 @@ const en: Translations = {
   },
   planDetailTooltip: (name, w, sb, std, lb, cyc) =>
     `${name}: ${w}m work • ${sb}m short break • ${std}m standard break • ${lb}m long break every ${cyc} cycles`,
+  planBreaksChipTooltip: (sb, std, lb, cyc) =>
+    `Short Break: ${sb}m • Standard Break: ${std}m • Long Break: ${lb}m (every ${cyc} cycles)`,
   planLockedDuringSession:
     "Cannot change plan during an active session. Finish the session first.",
   planWorkMins: "Work Duration (min)",
@@ -884,21 +892,16 @@ const en: Translations = {
   planStandardBreakMins: "Standard Break (min)",
   planLongBreakMins: "Long Break (min)",
   planLongBreakInterval: "Long Break Cycle",
-  planLongBreakIntervalDesc: (n: number) => `Long break every ${n} work cycles`,
   shortBreakBtn: (m: number) => `☕ ${m}m`,
   shortBreakBtnTooltip: (m: number) =>
     `Take Short Break (${m} min) — keeps your current work timer`,
   shortBreaksCountBadge: (n: number) => `${n} short break(s) taken in this session`,
-  distractionsCountTooltip: (n: number) =>
-    `${n} distraction(s) recorded in this work interval`,
   distractedBtnCompact: (mins: number) => (mins > 0 ? `⚡ +${mins}m` : "⚡"),
   distractedBtnTooltip: (mins: number) =>
     mins > 0
       ? `Distracted (+${mins} min & log reason)`
       : "Distracted (log reason without adding time)",
   stopBtnTooltip: "End early or reset current timer",
-  extendBreakCompact: "+5m",
-  extendBreakTooltip: "Extend break by 5 minutes",
   cycleProgressBadge: (curr: number, total: number) => `${curr}/${total}`,
   cycleTooltip: (curr: number, total: number, longMins: number) =>
     `Long break cycle: ${curr}/${total} completed (${longMins} min long break after ${total} work cycles)`,
@@ -915,7 +918,8 @@ const en: Translations = {
   startWorkCompact: "▶ Work",
   returnToWorkCompact: "▶ Resume",
   startSessionBtn: "▶ Start Session",
-  startSessionTooltip: "Start a new session with the selected plan",
+  startSessionTooltip:
+    "Start a new work session (set of Pomodoro rounds) with the selected plan",
   finishSessionBtn: "⏹ Finish Session",
   finishSessionTooltip: "End the active session and save your stats",
   returnToWorkMenuBtn: "▶ Back to Work",
@@ -951,6 +955,7 @@ const en: Translations = {
   feedbackEmpty: "No feedback notes saved yet.",
 
   windowSizeTitle: "📐 Window Size",
+  uiScaleLabel: "🔍 Display Scale (UI Size)",
   windowSizeHint: (w, h) =>
     `Drag window edges to resize freely (Current: ${w}×${h}px)`,
   saveCurrentSizeBtn: "💾 Save Current Size",
@@ -982,6 +987,7 @@ const en: Translations = {
   adhdCompletionDesc: (pct, hyperCnt) =>
     `${pct}% completed • ${hyperCnt} hyperfocus (35+ min)`,
   adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
+    const safeTopTag = sanitizeInsightTopTag(topTag);
     const parts: string[] = [];
     if (thresholdMins !== null && thresholdMins < 25) {
       parts.push(
@@ -994,16 +1000,16 @@ const en: Translations = {
     }
     if (intPct >= 65) {
       parts.push(
-        `🧠 ${intPct}% of your distractions are internal impulses${topTag ? ` (top: ${topTag})` : ""}. Keep a quick "parking lot" scratchpad for sudden thoughts.`,
+        `🧠 ${intPct}% of your distractions are internal impulses${safeTopTag ? ` (top: ${safeTopTag})` : ""}. Keep a quick "parking lot" scratchpad for sudden thoughts.`,
       );
     } else if (intPct > 0 && intPct <= 35) {
       parts.push(
-        `🔔 Most distractions are external triggers${topTag ? ` (${topTag})` : ""}. Silencing notifications before starting will protect your flow.`,
+        `🔔 Most distractions are external triggers${safeTopTag ? ` (${safeTopTag})` : ""}. Silencing notifications before starting will protect your flow.`,
       );
     }
     if (overtimeRate >= 40) {
       parts.push(
-        `⏰ You experience transition friction returning from breaks (${overtimeRate}% overtime). Avoiddopamine traps (scrolling) during short breaks.`,
+        `⏰ You experience transition friction returning from breaks (${overtimeRate}% overtime). Avoid dopamine traps (scrolling) during short breaks.`,
       );
     }
     return parts.length > 0
@@ -1011,14 +1017,13 @@ const en: Translations = {
       : "🌱 As you complete sessions and log distractions, personalized ADHD self-realization insights will appear here.";
   },
 
-  defaultDistractionTags: [
-    "Phone",
-    "Social Media",
-    "People / Noise",
-    "Hunger / Rest",
-    "Thoughts",
-    "Other",
-  ],
+  defaultCategoryTags: {
+    impulsive_task: ["Message / Email", "Quick Chore", "Lookup", "Shopping", "Organize"],
+    idea: ["Project", "Feature", "Content", "Life", "Note"],
+    internal: ["Thoughts", "Social Media", "Phone", "Hunger / Coffee", "Fatigue", "Boredom"],
+    external: ["Notification", "People / Noise", "Phone Call", "Urgent Task", "Environment"],
+  },
+  noTagLabel: "No Tag",
   defaultEndingTags: [
     "Meeting",
     "Meal",
@@ -1047,50 +1052,41 @@ const en: Translations = {
     "Other",
   ],
 
-  // v0.1.13 & v0.1.14
+  // 4 Distraction Categories
   catImpulsiveTask: "Impulsive Task",
   catIdea: "Sudden Idea",
-  catScreenshotNote: "📸 SS Note",
   catInternal: "Internal Trigger",
   catExternal: "External Trigger",
-  catEscape: "Difficulty Escape",
   catKeyHints: {
     impulsive_task: "1·G",
     idea: "2·F",
-    screenshot_note: "3·S",
-    internal: "4·I",
-    external: "5·D",
-    escape: "6·Z",
+    internal: "3·I",
+    external: "4·D",
   },
   noPenaltyParkingBadge: "+0m • Parking Lot",
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}m added` : "+0m"),
 
-  qcSelectKeyHint:
-    "Press 1–6 or letter (1·G: Task, 2·F: Idea, 3·S: 📸 Screenshot, 4·I: Internal, 5·D: External, 6·Z: Escape) • Esc close",
   qcInputPlaceholders: {
     impulsive_task:
       "Type impulsive task for your break & press Enter (no time added)...",
     idea: "Type your idea & press Enter (no time added)...",
-    screenshot_note:
-      "Type a note for this screenshot & press Enter (drag to crop region, no time added)...",
     internal: "Type internal thought / urge & press Enter...",
     external: "Type external trigger (notification, noise...) & press Enter...",
-    escape: "What felt hard or boring right now? Press Enter...",
   },
-  qcSwitchCatHint: "Tab: Switch category • Enter: Save • Esc: Cancel",
+  qcStepCategoryHint: "Tab: Category • Enter: Select • 1-4: Quick Pick • Esc: Close",
+  qcStepTagHint: "Tab: Select Tag • Enter: Confirm • Esc: Back",
+  qcStepInputHint: "Tab: Popular Entries • Enter: Save • Esc: Back",
+  qcStepContextHint: "Tab: Recent Contexts • Enter: Confirm • Esc: Skip",
+  popularEntriesLabel: "Popular entries (Tab to select):",
   qcActiveTabLabel: "Last Open Tab",
-  qcCurrentContextLabel: "Last Active Context",
-  qcContextNone: "No active context set",
+  qcCurrentContextLabel: "Active Context",
+  qcContextNone: "Not set",
   qcReminderTitle: "🎯 Last Active Context — Resume Right Here:",
   qcReminderCloseHint: "Press Enter / Space / Esc to return immediately",
-  qcContextHeader: "🎯 What Are You Occupied With Right Now? (Context)",
+  qcContextHeader: "Active Context",
   qcContextPlaceholder:
     "Type what you're actively working on & press Enter (e.g. Calc Problem 4, Auth API)...",
-  qcRecentContextsLabel: "Recent contexts (Click or ↑↓):",
-
-  ssCropHint: "✂️ Drag on the preview image to crop a specific region",
-  ssResetCropBtn: "Full Screen",
-  ssRetakeBtn: "🔄 Retake",
+  qcRecentContextsLabel: "Recent contexts (Tab to select):",
 
   parkingBreakBannerTitle:
     "🅿️ These popped into your head while working — check them now:",
@@ -1112,12 +1108,16 @@ const en: Translations = {
   openGoogleDocBtn: "📄 Open Focus Notebook Doc",
   googleDocUrlHint: "Your living Google Doc synchronized via Google Docs & Drive API",
 
-  workStoryTab: "📸 Story",
-  workStoryTitle: "📸 Work Story (5m Screenshot + Active Window + Context)",
   workStoryEmpty:
     "No work story snapshots yet. While the work timer is running, a snapshot + active window + context is captured every 5 minutes.",
+  storyFramesCount: (n) => `${n} frames • 5m intervals`,
+  storyPlayBtn: "▶ Play",
+  storyPauseBtn: "⏸ Pause",
+  storyFullscreenBtn: "🔍 Expand",
+  storyHoverTooltip: (title, topics, contexts, apps, count) =>
+    `${title} (${count} frames)\n💼 Topic: ${topics}\n🎯 Context: ${contexts}\n🌐 App / Note: ${apps}`,
 
-  dashboardBtn: "📊 Dashboard",
+  dashboardBtn: "Dashboard",
   dashboardTitle: "📊 Personal Focus & Cloud Dashboard",
   cloudAuthTitle: "☁️ Google Account & Cloud Sync (Offline-First)",
   cloudEmailPlaceholder: "Google Email (e.g. name@gmail.com)",
@@ -1141,34 +1141,29 @@ const en: Translations = {
   noImportantIdeas: "No ideas marked as important.",
   dashboardUnimportantIdeas: "Minor / Unrated Ideas",
   noUnimportantIdeas: "No minor ideas.",
-  workStoryDesc:
-    "Work story formed by 5-minute periodic screenshots and screenshot notes taken from distraction screens",
   contextStatsTitle: "Active Contexts Breakdown",
   appDistractionTitle: "Open Windows & Tabs",
-  ssCaptureActive: "📸 Capturing screen...",
 
-  shortBreakPromptTitle: "🎯 What Are You Occupied With? (Context)",
+  shortBreakPromptTitle: "Active Context",
   shortBreakPromptHint:
     "Set your active context before taking a short break; we'll remind you where you left off:",
   shortBreakPromptPlaceholder:
     "Type what you're actively working on (e.g. Calc Problem 4, Auth API)...",
   shortBreakStartBtn: "☕ Start Short Break",
   contextReminderPrefix: "🎯 Last Context:",
-  setContextBadgePlaceholder: "Context",
 
   contextShortTab: "Context",
   contextFullTab: "Context Study Statistics",
   appsShortTab: "App/Tab",
   appsFullTab: "Distractions by Open App & Tab",
   noContextStats:
-    "No context entries yet. Use the context global hotkey to log what you are working on.",
+    "No context entries yet. Set it from the Work Topic modal or after an internal/external distraction.",
   noAppDistractions: "No app/tab distraction records logged yet.",
 
   shortcutsSectionTitle: "⌨️ Global Shortcuts (Centered Spotlight Input)",
   shortcutDistractLabel: "⚡ Capture Distraction / Task / Idea",
-  shortcutContextLabel: "🎯 Log Current Context",
   shortcutRecordPressKeys: "Press shortcut keys... (Esc cancel)",
-  shortcutResetBtn: "Default Shortcuts",
+  shortcutResetBtn: "Default Shortcut",
   shortcutTestBtn: "Test",
 };
 
