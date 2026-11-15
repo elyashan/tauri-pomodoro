@@ -1,70 +1,61 @@
 # Pomodoro Widget
 
-A small always-on-top desktop Pomodoro timer and distraction tracker built with Tauri v2, React, TypeScript, and SQLite.
+Floating desktop Pomodoro timer with quick distraction capture, context tracking, and session analytics. Built with Tauri v2, Rust, React 19, TypeScript, and SQLite.
 
-## Why I built this
+Prebuilt installers and auto-updater manifests are available on [Releases](https://github.com/elyashan/tauri-pomodoro/releases).
 
-Most timers just count down from 25 or 50 minutes and ring a bell. When I actually sit down to study or code, the timer isn't what breaks the session—it's noticing an unrelated bug halfway through and opening three tabs to chase it, forgetting what exact line I was debugging after getting coffee, or letting a 5-minute break turn into 35 minutes without realizing why.
+## Usage
 
-I wanted a lightweight floating widget that stays out of the way while I work, catches stray thoughts in two seconds via a keyboard shortcut, and gives me an honest look at how my focus actually holds up over a day or a week.
+### Timer Window
+- Select a preset (`Classic`, `Developer`, `Ultradian`, or `Custom`) and set a topic to start.
+- Click the topic or active context text on the timer to update it inline.
+- Click `−` to collapse the timer into a bottom-right mini-dock.
+- Click `✕` to hide the window to the system tray.
 
-## What it does
+### Quick Capture (`Ctrl+Alt+D`)
+- Press `Ctrl+Alt+D` globally to open the capture popup.
+- Switch categories and tags with `Tab` and submit with `Enter`.
+- **Impulsive Task / Idea**: Saved to the Parking Lot with no timer penalty and surfaced during breaks.
+- **Internal / External Distraction**: Logged under distractions with an optional timer penalty and context prompt.
 
-- **Floating timer & mini-dock**: Stays always-on-top without getting in the way, shrinks into a small corner pill (`−`) or system tray (`✕`), and turns on Windows Focus Assist / Do Not Disturb during work sessions so desktop notifications stay quiet.
-- **Quick Capture (`Ctrl+Alt+D`)**: A keyboard-first popup (`Tab` / `Enter`) that opens anywhere, even while working in another app:
-  - **Impulsive tasks & ideas** go straight into a "Parking Lot" so you don't act on them mid-session—they show up once your break starts.
-  - **Internal / external triggers** get logged with optional tags, past suggestions, and an optional time penalty, plus an active context update so you remember where to pick up.
-- **Active Context tracking**: Keeps track of the specific task or sub-problem you're currently on (before a short break or a distraction) and brings it back as a reminder when you return.
-- **Break overtime & sleep detection**: Asks why a break ran long instead of silently pretending it didn't, and detects system sleep or long idle gaps so leaving the lid closed doesn't log fake 6-hour work sessions.
-- **Daily & Weekly Summary**:
-  - 24-hour session timeline with optional 5-minute work story snapshots (screenshot + active window + context) viewable as a slideshow per work block.
-  - Collapsible Parking Lot checklists/ideas (with optional Google Docs export/sync).
-  - Breakdown of distractions (internal/external triggers), break delays, and early stops.
-  - Pattern stats from your own logs: typical minute attention tends to drift, internal vs. external trigger split, break-to-work friction, and peak focus hours.
-- **Display scaling & localization**: 100% / 125% / 150% UI scaling, dark/light/custom themes, and full English & Turkish support.
+### Summary & Export
+- **Daily / Weekly**: Shows a 24-hour work/break timeline and session totals. Click any work block to open its 5-minute work story slideshow.
+- **Parking Lot**: Collapsible list of captured tasks with optional Google Docs sync.
+- **Breakdown**: Filter counts across `Distract` (`internal` and `external`), `Overtime`, and `Stopped` events.
+- **Backup**: Exports all records to `Downloads/pomodoro-backup.json` in a single file (excluding images and stories).
 
-## Install
+## Technical Details
 
-Prebuilt installers for Windows (`.msi` / `.exe`), macOS (Universal `.dmg`), and Linux (`.deb` / `.AppImage`) are available on the [Releases](https://github.com/elyashan/tauri-pomodoro/releases) page.
+### Stack
+- **Shell & Native Core**: Rust + Tauri v2 (`main` timer window and `capture` popup window).
+- **UI**: React 19, TypeScript, Vite.
+- **Database**: Local SQLite via `tauri-plugin-sql`.
+- **Tauri Plugins**: `global-shortcut`, `autostart`, `updater` (Minisign), `opener`, `process`.
 
-New versions can also be checked and installed directly from inside the app's Settings screen via GitHub Releases (`latest.json`).
+### OS Integration
+- **Active Window & Idle Detection**:
+  - Windows: Win32 API for foreground HWND tracking/restoration and idle/sleep detection.
+  - macOS: `osascript`.
+  - Linux: `xdotool`.
+- **Windows Focus Assist**: Toggles Focus Assist via WNF.
+- **Screen Snapshots**: Captures periodic 5-minute frames for the work story slideshow.
 
-## Building from source
+### CI & Updates
+- `.github/workflows/release.yml` runs `tauri-apps/tauri-action@v0` across `windows-latest`, `macos-latest` (`universal-apple-darwin`), and `ubuntu-22.04`.
+- Releases generate `latest.json` for `tauri-plugin-updater` signature verification.
 
-**Prerequisites:**
-- Node.js 22+
-- Rust (stable toolchain)
-- On Linux: `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`
+## Build from Source
 
+Requires Node.js 22 and Rust (stable).
+
+Linux (`ubuntu-22.04`) system packages:
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+```
+
+Install dependencies and run or build:
 ```bash
 npm install
 npm run tauri dev
-```
-
-To build a release installer locally:
-
-```bash
 npm run tauri build
 ```
-
-## Data & Privacy
-
-Everything is stored locally in a SQLite database on your machine—sessions, distractions, parking items, work story snapshots, and context logs never leave your computer unless you explicitly use Google Docs export or cloud sync.
-
-You can export a single lightweight JSON backup (`pomodoro-backup.json` saved to your `Downloads` folder, excluding screenshots and story images) anytime from the Summary screen.
-
----
-
-## Türkçe
-
-Bilgisayarda ders çalışırken veya kod yazarken dikkatin dağıldığı anları (dürtüsel görevler, akla gelen fikirler, içsel/dışsal bölünmeler) çalışmayı bölmeden kaydetmek için Tauri v2, React ve SQLite ile geliştirilmiş masaüstü Pomodoro aracı.
-
-**Temel özellikler:**
-- Her zaman üstte durabilen sade sayaç, sağ alt köşe mini modu (`−`), sistem tepsisi (`✕`) desteği ve çalışma sırasında Windows Odaklanma Yardımı (bildirim gizleme).
-- Herhangi bir uygulamadayken `Ctrl+Alt+D` ile açılan klavye odaklı hızlı yakalama penceresi (`Tab` / `Enter` ile kategori, tag ve not seçimi; dürtüsel görev ve fikirleri mola otoparkına atma).
-- Kısa mola veya bölünme öncesi nerede kaldığınızı hatırlatan Active Context takibi.
-- Mola uzatma sebebi sorma ve bilgisayar uyku modunda kaldığında sahte saatler loglamasını engelleyen idle/sleep algılama.
-- Günlük/haftalık özet ekranında 24 saatlik çizelge, çalışma bloklarına göre 5 dakikalık slayt hikayesi, mola otoparkı (isteğe bağlı Google Docs aktarımı), kırılımlar ve kişisel odak çıkarımları.
-- Tek dosyada resimsiz JSON yedeği (`Downloads/pomodoro-backup.json`) ve Türkçe / İngilizce arayüz desteği.
-
-Kurulum dosyaları için [Releases](https://github.com/elyashan/tauri-pomodoro/releases) sayfasına göz atabilirsiniz.
