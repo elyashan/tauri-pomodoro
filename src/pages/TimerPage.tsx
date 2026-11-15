@@ -29,12 +29,14 @@ export interface TimerPageProps {
   docsStatusMsg: string | null;
   updateAvailable: boolean;
   isBreakAlarm: boolean;
+  isRunning: boolean;
   breakOverdueSec: number;
   activeSeconds: number;
   hasPausedProgress: boolean;
   workElapsedSec: number;
   distractPenaltyMins: number;
   reminderBanner: { kind?: "context" | "short_break"; text: string } | null;
+  onToggleRunning: () => void;
   onOpenWorkTopicBox: () => void;
   onOpenContextBox: () => void;
   onToggleBreakParking: () => void;
@@ -76,12 +78,14 @@ export function TimerPage({
   docsStatusMsg,
   updateAvailable,
   isBreakAlarm,
+  isRunning,
   breakOverdueSec,
   activeSeconds,
   hasPausedProgress,
   workElapsedSec,
   distractPenaltyMins,
   reminderBanner,
+  onToggleRunning,
   onOpenWorkTopicBox,
   onOpenContextBox,
   onToggleBreakParking,
@@ -211,7 +215,13 @@ export function TimerPage({
             -{formatClock(breakOverdueSec)}
           </div>
         ) : (
-          <div className="timer-display">{formatClock(activeSeconds)}</div>
+          <div
+            className="timer-display clickable-timer"
+            onClick={onToggleRunning}
+            title={isRunning ? t.timerPauseTooltip : t.timerResumeTooltip}
+          >
+            {formatClock(activeSeconds)}
+          </div>
         )}
 
         {timerMode === "work" && (
@@ -283,11 +293,20 @@ export function TimerPage({
       {timerMode === "break" ? (
         <div
           className={
-            hasBreakParkingView ? "btn-row" : "btn-row hover-reveal"
+            hasBreakParkingView || !isRunning ? "btn-row" : "btn-row hover-reveal"
           }
         >
+          {!isRunning && !isBreakAlarm && (
+            <button
+              className="primary-btn"
+              onClick={onToggleRunning}
+              title={t.timerResumeTooltip}
+            >
+              {t.resumeWorkBtn}
+            </button>
+          )}
           <button
-            className="primary-btn"
+            className={isRunning || isBreakAlarm ? "primary-btn" : ""}
             onClick={onStartWorkFromBreak}
             title={breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn}
           >
@@ -297,7 +316,16 @@ export function TimerPage({
           </button>
         </div>
       ) : (
-        <div className="btn-row hover-reveal">
+        <div className={isRunning ? "btn-row hover-reveal" : "btn-row"}>
+          {!isRunning && (
+            <button
+              className="primary-btn"
+              onClick={onToggleRunning}
+              title={t.timerResumeTooltip}
+            >
+              {t.resumeWorkBtn}
+            </button>
+          )}
           <button
             className="short-break-btn"
             onClick={onTakeShortBreak}

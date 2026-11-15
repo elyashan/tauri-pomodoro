@@ -1109,6 +1109,9 @@ export default function App() {
     invoke("set_window_zoom", { zoom: scaleMult }).catch(() => {});
   }, [theme.uiScale, loaded]);
 
+  const hasWorkElapsed = workElapsedSec > 0;
+  const hasReminderBanner = Boolean(reminderBanner);
+
   // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
   useEffect(() => {
     if (!loaded || isMiniDock) return;
@@ -1152,9 +1155,33 @@ export default function App() {
         breakParkingData.totalIdeas +
         breakParkingData.totalScreenshots >
         0;
+    const hasPausedHint =
+      targetPage === "timer" &&
+      sessionActive &&
+      !isRunning &&
+      timerMode === "work" &&
+      hasWorkElapsed;
+    const hasTimerReminder = targetPage === "timer" && hasReminderBanner;
+    const timerMinW =
+      timerMode === "work" && !isRunning
+        ? 304
+        : DEFAULT_WINDOW_SIZES.timer.width;
+    const timerMinH =
+      (timerMode === "work" ? DEFAULT_WINDOW_SIZES.timer.height : 138) +
+      (hasPausedHint ? 20 : 0) +
+      (hasTimerReminder ? 28 : 0);
+
     if (custom) {
-      const w = hasBreakParking ? Math.max(custom.width, 345) : custom.width;
-      const h = hasBreakParking ? Math.max(custom.height, 365) : custom.height;
+      const w = hasBreakParking
+        ? Math.max(custom.width, 345)
+        : targetPage === "timer"
+          ? Math.max(custom.width, timerMinW)
+          : custom.width;
+      const h = hasBreakParking
+        ? Math.max(custom.height, 365)
+        : targetPage === "timer"
+          ? Math.max(custom.height, timerMinH)
+          : custom.height;
       applyScaledSize(w, h);
       return;
     }
@@ -1180,8 +1207,8 @@ export default function App() {
         DEFAULT_WINDOW_SIZES.settings.height,
       );
     } else {
-      const w = hasBreakParking ? 345 : DEFAULT_WINDOW_SIZES.timer.width;
-      const h = hasBreakParking ? 365 : DEFAULT_WINDOW_SIZES.timer.height;
+      const w = hasBreakParking ? 345 : timerMinW;
+      const h = hasBreakParking ? 365 : timerMinH;
       applyScaledSize(w, h);
     }
   }, [
@@ -1200,6 +1227,9 @@ export default function App() {
     isMiniDock,
     customSizes,
     sessionActive,
+    isRunning,
+    hasWorkElapsed,
+    hasReminderBanner,
     timerMode,
     showBreakParking,
     breakParkingData.totalTasks,
@@ -2496,6 +2526,19 @@ export default function App() {
     setPage("dashboard");
   };
 
+  const handleToggleRunning = () => {
+    if (isBreakAlarm) return;
+    setIsRunning((prev) => {
+      const next = !prev;
+      if (next && timerMode === "work" && !workStartedAtRef.current) {
+        workStartedAtRef.current = new Date(
+          Date.now() - workElapsedSec * 1000,
+        ).toISOString();
+      }
+      return next;
+    });
+  };
+
   // ---------------------------------------------------------------------------
   // MENÜ, AYARLAR VE ÖZET SAYFASI GEÇİŞLERİ
   // ---------------------------------------------------------------------------
@@ -2509,9 +2552,6 @@ export default function App() {
     setShowShortBreakPrompt(false);
     setShowContextEditBox(false);
     setTagForm(null);
-    if (sessionActive) {
-      setIsRunning(true);
-    }
     setDayStats(
       await getActiveDayStats(activeLang === "tr" ? "tr-TR" : "en-US"),
     );
@@ -3079,12 +3119,14 @@ export default function App() {
               docsStatusMsg={docsStatusMsg}
               updateAvailable={updateAvailable}
               isBreakAlarm={isBreakAlarm}
+              isRunning={isRunning}
               breakOverdueSec={breakOverdueSec}
               activeSeconds={activeSeconds}
               hasPausedProgress={hasPausedProgress}
               workElapsedSec={workElapsedSec}
               distractPenaltyMins={distractPenaltyMins}
               reminderBanner={reminderBanner}
+              onToggleRunning={handleToggleRunning}
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
               onOpenContextBox={handleOpenContextBox}
               onToggleBreakParking={() => setShowBreakParking((p) => !p)}
@@ -3138,6 +3180,7 @@ export default function App() {
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
               onReturnToTimer={() => {
                 setIsCelebrating(false);
+                if (sessionActive && !isBreakAlarm) setIsRunning(true);
                 setPage("timer");
               }}
               onFinishSession={handleFinishSession}

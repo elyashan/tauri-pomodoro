@@ -1788,7 +1788,7 @@ export async function deleteFeedback(id: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
-  timer: { width: 284, height: 138 },
+  timer: { width: 296, height: 170 },
   menu: { width: 315, height: 305 },
   summary: { width: 420, height: 560 },
   settings: { width: 335, height: 495 },

@@ -160,6 +160,9 @@ export interface Translations {
   returnToWorkBtn: string;
   startWorkCompact: string;
   returnToWorkCompact: string;
+  resumeWorkBtn: string;
+  timerPauseTooltip: string;
+  timerResumeTooltip: string;
   startSessionBtn: string;
   startSessionTooltip: string;
   finishSessionBtn: string;
@@ -355,7 +358,7 @@ const tr: Translations = {
   home: "Ana Sayfa",
   settings: "Ayarlar",
   summary: "Özet",
-  resumeHint: (mins) => `Kaldığın yer (${mins} dk çalışıldı)`,
+  resumeHint: (mins) => `Duraklatıldı (${mins} dk çalışıldı)`,
   start: "Başlat",
   stop: "Durdur",
   add: "Ekle",
@@ -507,6 +510,9 @@ const tr: Translations = {
   returnToWorkBtn: "Çalışmaya Dön",
   startWorkCompact: "▶ Çalışma",
   returnToWorkCompact: "▶ Dön",
+  resumeWorkBtn: "▶ Devam",
+  timerPauseTooltip: "Duraklatmak için tıklayın",
+  timerResumeTooltip: "Devam etmek için tıklayın",
   startSessionBtn: "▶ Oturumu Başlat",
   startSessionTooltip: "Seçili planla yeni çalışma oturumu başlatır ve sayacı açar",
   finishSessionBtn: "⏹ Oturumu Bitir",
@@ -765,7 +771,7 @@ const en: Translations = {
   home: "Home",
   settings: "Settings",
   summary: "Summary",
-  resumeHint: (mins) => `Resumed (${mins} min worked)`,
+  resumeHint: (mins) => `Paused (${mins} min worked)`,
   start: "Start",
   stop: "Stop",
   add: "Add",
@@ -917,6 +923,9 @@ const en: Translations = {
   returnToWorkBtn: "Return to Work",
   startWorkCompact: "▶ Work",
   returnToWorkCompact: "▶ Resume",
+  resumeWorkBtn: "▶ Resume",
+  timerPauseTooltip: "Click to pause",
+  timerResumeTooltip: "Click to resume",
   startSessionBtn: "▶ Start Session",
   startSessionTooltip:
     "Start a new work session (set of Pomodoro rounds) with the selected plan",
