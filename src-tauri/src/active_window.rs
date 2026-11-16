@@ -1,9 +1,32 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use crate::{lock_state, SharedCaptureState};
+
+const SLEEP_GAP_THRESHOLD_MS: u64 = 25_000;
+static LAST_AWAKE_BEAT_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_OS_SLEEP_AT_MS: AtomicU64 = AtomicU64::new(0);
+
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+/// Returns true if the native watcher thread observed an OS sleep/suspend gap
+/// (>25s between 1.2s ticks) since `since_ms` or has not ticked in >25s.
+pub fn did_os_sleep_since(since_ms: u64) -> bool {
+    let now = current_epoch_ms();
+    if LAST_OS_SLEEP_AT_MS.load(Ordering::Relaxed) > since_ms {
+        return true;
+    }
+    let last_beat = LAST_AWAKE_BEAT_MS.load(Ordering::Relaxed);
+    last_beat > 0 && now.saturating_sub(last_beat) > SLEEP_GAP_THRESHOLD_MS
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,21 +119,29 @@ pub fn get_system_idle_secs() -> u64 {
 }
 
 pub fn spawn_foreground_watcher(app: &AppHandle) {
-    #[cfg(target_os = "windows")]
-    {
-        let handle = app.clone();
-        std::thread::spawn(move || loop {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let mut prev_ms = current_epoch_ms();
+        LAST_AWAKE_BEAT_MS.store(prev_ms, Ordering::Relaxed);
+
+        loop {
             std::thread::sleep(Duration::from_millis(1200));
+            let now = current_epoch_ms();
+            if prev_ms > 0 && now.saturating_sub(prev_ms) > SLEEP_GAP_THRESHOLD_MS {
+                LAST_OS_SLEEP_AT_MS.store(now, Ordering::Relaxed);
+            }
+            LAST_AWAKE_BEAT_MS.store(now, Ordering::Relaxed);
+            prev_ms = now;
+
+            #[cfg(target_os = "windows")]
             if let Some((info, hwnd)) = inspect_external_foreground() {
                 let state = handle.state::<Mutex<SharedCaptureState>>();
                 lock_state(&state).update_external(info, hwnd);
             }
-        });
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = app;
-    }
+            #[cfg(not(target_os = "windows"))]
+            let _ = &handle;
+        }
+    });
 }
 
 #[cfg(target_os = "windows")]
@@ -236,6 +267,10 @@ mod platform {
             if GetLastInputInfo(&mut lii) != 0 {
                 let now = GetTickCount();
                 let elapsed_ms = now.wrapping_sub(lii.dw_time);
+                // Guard against minor clock skew where dw_time slightly leads GetTickCount
+                if elapsed_ms > 0x8000_0000 {
+                    return 0;
+                }
                 return (elapsed_ms / 1000) as u64;
             }
         }

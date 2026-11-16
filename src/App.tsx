@@ -1303,58 +1303,104 @@ export default function App() {
   // Sistem saatine dayalı sayaç döngüsü (StrictMode güvenli — iç içe setState yok)
   useEffect(() => {
     if (!isRunning || !sessionActive) return;
+    let disposed = false;
+    let sleepCheckInFlight = false;
     lastTickRef.current = Date.now();
 
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const delta = Math.floor((now - lastTickRef.current) / 1000);
-      if (delta < 1) return;
-      // Uyku / hazırda bekletme sonrası büyük zaman atlamasını loglama — otomatik duraklat
-      if (delta > 15) {
-        lastTickRef.current = now;
-        setIsRunning(false);
-        return;
-      }
+    const applyDelta = (delta: number, now: number) => {
       lastTickRef.current += delta * 1000;
 
       const rt = runtimeStateRef.current;
       const appSt = appStateRef.current;
 
       if (rt.mode === "work") {
-        setWorkSecondsLeft(Math.max(0, appSt.work_seconds_left - delta));
-        setWorkElapsedSec(appSt.work_elapsed_sec + delta);
-      } else {
-        const prevLeft = appSt.break_seconds_left;
-        if (prevLeft > 0) {
-          if (prevLeft > delta) {
-            setBreakSecondsLeft(prevLeft - delta);
-            setBreakElapsedSec(rt.breakElapsedSec + delta);
-          } else {
-            // Mola tam bu adımda doldu: aşan kısmı gecikmeye yaz ve alarm çal
-            const overflow = delta - prevLeft;
-            setBreakSecondsLeft(0);
-            setBreakElapsedSec(rt.breakElapsedSec + prevLeft);
-            setBreakOverdueSec(rt.breakOverdueSec + overflow);
-            if (rt.breakKind === "short" && rt.currentContext.trim()) {
-              setReminderBanner({
-                kind: "context",
-                text: rt.currentContext.trim(),
-              });
-            }
-            playAlarmChime();
-            lastAlarmPlayRef.current = now;
-          }
+        setWorkSecondsLeft((prev) => Math.max(0, prev - delta));
+        setWorkElapsedSec((prev) => prev + delta);
+        return;
+      }
+
+      const prevLeft = appSt.break_seconds_left;
+      if (prevLeft > 0) {
+        if (prevLeft > delta) {
+          setBreakSecondsLeft(prevLeft - delta);
+          setBreakElapsedSec(rt.breakElapsedSec + delta);
         } else {
-          setBreakOverdueSec(rt.breakOverdueSec + delta);
-          if (now - lastAlarmPlayRef.current >= 12000) {
-            playAlarmChime();
-            lastAlarmPlayRef.current = now;
+          // Mola tam bu adımda doldu: aşan kısmı gecikmeye yaz ve alarm çal
+          const overflow = delta - prevLeft;
+          setBreakSecondsLeft(0);
+          setBreakElapsedSec(rt.breakElapsedSec + prevLeft);
+          setBreakOverdueSec(rt.breakOverdueSec + overflow);
+          if (rt.breakKind === "short" && rt.currentContext.trim()) {
+            setReminderBanner({
+              kind: "context",
+              text: rt.currentContext.trim(),
+            });
           }
+          playAlarmChime();
+          lastAlarmPlayRef.current = now;
+        }
+      } else {
+        setBreakOverdueSec(rt.breakOverdueSec + delta);
+        if (now - lastAlarmPlayRef.current >= 12000) {
+          playAlarmChime();
+          lastAlarmPlayRef.current = now;
         }
       }
-    }, 500);
+    };
 
-    return () => clearInterval(timer);
+    const runTick = async () => {
+      if (disposed || sleepCheckInFlight) return;
+      const now = Date.now();
+      const delta = Math.floor((now - lastTickRef.current) / 1000);
+      if (delta < 1) return;
+
+      if (delta <= 15) {
+        applyDelta(delta, now);
+        return;
+      }
+
+      // WebView2 arka plan/tepsi kısıtlaması (throttling) nedeniyle delta > 15 olabilir;
+      // sadece Rust tarafı gerçek bir OS uyku/askıya alma boşluğu gördüyse duraklat.
+      sleepCheckInFlight = true;
+      const tickAnchor = lastTickRef.current;
+      try {
+        const osSlept = await invoke<boolean>("did_os_sleep_since", {
+          sinceMs: tickAnchor,
+        }).catch(() => delta > 300);
+        if (disposed) return;
+        if (osSlept) {
+          lastTickRef.current = Date.now();
+          setIsRunning(false);
+          return;
+        }
+        const latestNow = Date.now();
+        const latestDelta = Math.floor((latestNow - lastTickRef.current) / 1000);
+        if (latestDelta >= 1) {
+          applyDelta(latestDelta, latestNow);
+        }
+      } finally {
+        sleepCheckInFlight = false;
+      }
+    };
+
+    const onWakeCheck = () => {
+      if (document.visibilityState === "visible") {
+        void runTick();
+      }
+    };
+
+    const timer = setInterval(() => {
+      void runTick();
+    }, 500);
+    window.addEventListener("focus", onWakeCheck);
+    document.addEventListener("visibilitychange", onWakeCheck);
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      window.removeEventListener("focus", onWakeCheck);
+      document.removeEventListener("visibilitychange", onWakeCheck);
+    };
   }, [isRunning, sessionActive]);
 
   // Ekran kapalı / PC başından uzun süre ayrılma durumunda otomatik duraklatma

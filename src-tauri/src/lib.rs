@@ -262,6 +262,11 @@ fn get_system_idle_secs() -> u64 {
     active_window::get_system_idle_secs()
 }
 
+#[tauri::command]
+fn did_os_sleep_since(since_ms: u64) -> bool {
+    active_window::did_os_sleep_since(since_ms)
+}
+
 fn resolve_backup_dir(app: &AppHandle) -> std::path::PathBuf {
     if let Ok(dir) = app.path().download_dir() {
         return dir;
@@ -340,6 +345,7 @@ pub fn run() {
             update_tray_tooltip,
             set_windows_focus_mode,
             get_system_idle_secs,
+            did_os_sleep_since,
             get_backup_export_dir,
             save_backup_json,
         ])
