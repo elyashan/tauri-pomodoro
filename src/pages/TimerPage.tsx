@@ -34,6 +34,7 @@ export interface TimerPageProps {
   activeSeconds: number;
   hasPausedProgress: boolean;
   workElapsedSec: number;
+  workPausedLiveSec: number;
   distractPenaltyMins: number;
   reminderBanner: { kind?: "context" | "short_break"; text: string } | null;
   onToggleRunning: () => void;
@@ -83,6 +84,7 @@ export function TimerPage({
   activeSeconds,
   hasPausedProgress,
   workElapsedSec,
+  workPausedLiveSec,
   distractPenaltyMins,
   reminderBanner,
   onToggleRunning,
@@ -247,9 +249,15 @@ export function TimerPage({
           </div>
         )}
 
-        {hasPausedProgress && (
+        {(hasPausedProgress ||
+          (!isRunning && timerMode === "work" && workPausedLiveSec > 0)) && (
           <div className="resume-hint">
-            {t.resumeHint(Math.floor(workElapsedSec / 60))}
+            {t.resumeHint(
+              Math.floor(workElapsedSec / 60),
+              workPausedLiveSec >= 1
+                ? formatClock(workPausedLiveSec)
+                : undefined,
+            )}
           </div>
         )}
 

@@ -81,6 +81,7 @@ import {
   getAdhdInsights,
   addParkingItem,
   getParkingLotData,
+  getBreakParkingLotData,
   toggleParkingTaskDone,
   rateParkingIdea,
   deleteParkingItem,
@@ -275,6 +276,19 @@ export default function App() {
   const [breakOverdueReasonText, setBreakOverdueReasonText] = useState("");
   const [isEditingBreakOverdueTags, setIsEditingBreakOverdueTags] =
     useState(false);
+  const [workPauseStartedAtMs, setWorkPauseStartedAtMs] = useState<
+    number | null
+  >(null);
+  const workPauseStartedAtRef = useRef<number | null>(null);
+  workPauseStartedAtRef.current = workPauseStartedAtMs;
+  const [workPausedLiveSec, setWorkPausedLiveSec] = useState<number>(0);
+  const [breakOverdueSource, setBreakOverdueSource] = useState<
+    "break" | "work_pause"
+  >("break");
+  const [pendingWorkPauseSec, setPendingWorkPauseSec] = useState<number>(0);
+  const [pendingWorkPauseStartIso, setPendingWorkPauseStartIso] = useState<
+    string | null
+  >(null);
 
   // Çalışma Konusu (Subject / Task)
   const [currentWorkTag, setCurrentWorkTag] = useState<string>("Ders");
@@ -350,6 +364,9 @@ export default function App() {
 
   // Sağ Alt Mini Sayaç Widget (isMiniDock) & Özel Pencere Boyutları
   const [isMiniDock, setIsMiniDock] = useState(false);
+  const isMiniDockRef = useRef<boolean>(false);
+  isMiniDockRef.current = isMiniDock;
+  const miniDockUserDraggedRef = useRef<boolean>(false);
   const [miniDockContextToast, setMiniDockContextToast] = useState<
     string | null
   >(null);
@@ -508,6 +525,7 @@ export default function App() {
     currentContext: "",
     activeContextLogId: null,
     contextStartedAtElapsedSec: 0,
+    workPauseStartedAt: null,
   });
   runtimeStateRef.current = {
     sessionActive,
@@ -527,6 +545,7 @@ export default function App() {
     currentContext,
     activeContextLogId,
     contextStartedAtElapsedSec,
+    workPauseStartedAt: workPauseStartedAtMs,
   };
 
   const distractPenaltyRef = useRef<number>(distractPenaltyMins);
@@ -624,6 +643,13 @@ export default function App() {
             setBreakSecondsLeft(saved.break_seconds_left);
             // PC yeniden başlatıldı / uyandıysa kullanıcı devam ettirene kadar duraklatılmış başla
             setIsRunning(false);
+            if (
+              savedRuntime.mode === "work" &&
+              savedRuntime.workPauseStartedAt &&
+              Date.now() - savedRuntime.workPauseStartedAt < 6 * 3600 * 1000
+            ) {
+              setWorkPauseStartedAtMs(savedRuntime.workPauseStartedAt);
+            }
             const normalizedPage: NavPage =
               saved.page === "timer" ||
               saved.page === "work" ||
@@ -695,7 +721,7 @@ export default function App() {
           .then(setShortcutStatus)
           .catch(() => {});
 
-        setBreakParkingData(await getParkingLotData(false));
+        setBreakParkingData(await getBreakParkingLotData());
         setRecentContexts(await getRecentContexts(6));
         setWorkStoryEntries(await getWorkStoryEntries(false, 80));
         invoke<string>("get_backup_export_dir")
@@ -885,7 +911,7 @@ export default function App() {
       setIsModeSwitching(true);
       if (timerMode === "break") {
         setShowBreakParking(true);
-        getParkingLotData(false)
+        getBreakParkingLotData()
           .then(setBreakParkingData)
           .catch(() => {});
       }
@@ -987,11 +1013,27 @@ export default function App() {
       if (mon) {
         const physW = Math.round(miniW * scale);
         const physH = Math.round(miniH * scale);
-        const targetX =
-          mon.position.x + mon.size.width - physW - Math.round(14 * scale);
-        const targetY =
-          mon.position.y + mon.size.height - physH - Math.round(52 * scale);
-        await win.setPosition(new PhysicalPosition(targetX, targetY));
+        if (!miniDockUserDraggedRef.current) {
+          const targetX =
+            mon.position.x + mon.size.width - physW - Math.round(14 * scale);
+          const targetY =
+            mon.position.y + mon.size.height - physH - Math.round(52 * scale);
+          await win.setPosition(new PhysicalPosition(targetX, targetY));
+        } else {
+          const pos = await win.outerPosition();
+          const minX = mon.position.x;
+          const minY = mon.position.y;
+          const maxX = Math.max(minX, mon.position.x + mon.size.width - physW);
+          const maxY = Math.max(
+            minY,
+            mon.position.y + mon.size.height - physH,
+          );
+          const clampedX = Math.min(Math.max(pos.x, minX), maxX);
+          const clampedY = Math.min(Math.max(pos.y, minY), maxY);
+          if (clampedX !== pos.x || clampedY !== pos.y) {
+            await win.setPosition(new PhysicalPosition(clampedX, clampedY));
+          }
+        }
       }
       await win.show();
     } catch (err) {
@@ -1027,6 +1069,7 @@ export default function App() {
         const pos = await win.outerPosition();
         savedNormalPosRef.current = { x: pos.x, y: pos.y };
       }
+      miniDockUserDraggedRef.current = false;
       setIsMiniDock(true);
       triggerMiniDockContextToast();
     } catch (err) {
@@ -1041,6 +1084,7 @@ export default function App() {
         miniDockToastTimerRef.current = null;
       }
       setMiniDockContextToast(null);
+      miniDockUserDraggedRef.current = false;
       const win = getCurrentWindow();
       setIsMiniDock(false);
       await win.show();
@@ -1110,6 +1154,7 @@ export default function App() {
   }, [theme.uiScale, loaded]);
 
   const hasWorkElapsed = workElapsedSec > 0;
+  const hasWorkPauseStart = workPauseStartedAtMs !== null;
   const hasReminderBanner = Boolean(reminderBanner);
 
   // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
@@ -1151,16 +1196,13 @@ export default function App() {
       sessionActive &&
       timerMode === "break" &&
       showBreakParking &&
-      breakParkingData.totalTasks +
-        breakParkingData.totalIdeas +
-        breakParkingData.totalScreenshots >
-        0;
+      breakParkingData.pendingTasks.length > 0;
     const hasPausedHint =
       targetPage === "timer" &&
       sessionActive &&
       !isRunning &&
       timerMode === "work" &&
-      hasWorkElapsed;
+      (hasWorkElapsed || hasWorkPauseStart);
     const hasTimerReminder = targetPage === "timer" && hasReminderBanner;
     const timerMinW =
       timerMode === "work" && !isRunning
@@ -1229,12 +1271,11 @@ export default function App() {
     sessionActive,
     isRunning,
     hasWorkElapsed,
+    hasWorkPauseStart,
     hasReminderBanner,
     timerMode,
     showBreakParking,
-    breakParkingData.totalTasks,
-    breakParkingData.totalIdeas,
-    breakParkingData.totalScreenshots,
+    breakParkingData.pendingTasks.length,
     theme.uiScale,
   ]);
 
@@ -1287,6 +1328,37 @@ export default function App() {
     currentContext,
     activeContextLogId,
     contextStartedAtElapsedSec,
+    workPauseStartedAtMs,
+  ]);
+
+  // Çalışma sırasında duraklatıldığında geçen ara süresini canlı say
+  useEffect(() => {
+    if (
+      !loaded ||
+      !sessionActive ||
+      isRunning ||
+      timerMode !== "work" ||
+      workPauseStartedAtMs === null ||
+      showBreakOverdueBox
+    ) {
+      setWorkPausedLiveSec(0);
+      return;
+    }
+    const updatePauseClock = () => {
+      setWorkPausedLiveSec(
+        Math.max(0, Math.floor((Date.now() - workPauseStartedAtMs) / 1000)),
+      );
+    };
+    updatePauseClock();
+    const tmr = setInterval(updatePauseClock, 1000);
+    return () => clearInterval(tmr);
+  }, [
+    loaded,
+    sessionActive,
+    isRunning,
+    timerMode,
+    workPauseStartedAtMs,
+    showBreakOverdueBox,
   ]);
 
   // Sayaç çalışırken 5 saniyede bir yedekle
@@ -1337,6 +1409,14 @@ export default function App() {
             });
           }
           playAlarmChime();
+          if (isMiniDockRef.current) {
+            triggerMiniDockContextToast(t.breakOverAlert);
+            setTimeout(() => {
+              invoke("alert_break_started").catch(() => {});
+            }, 90);
+          } else {
+            invoke("alert_break_started").catch(() => {});
+          }
           lastAlarmPlayRef.current = now;
         }
       } else {
@@ -1359,8 +1439,13 @@ export default function App() {
         return;
       }
 
+      if (runtimeStateRef.current.mode === "break") {
+        applyDelta(delta, now);
+        return;
+      }
+
       // WebView2 arka plan/tepsi kısıtlaması (throttling) nedeniyle delta > 15 olabilir;
-      // sadece Rust tarafı gerçek bir OS uyku/askıya alma boşluğu gördüyse duraklat.
+      // sadece Rust tarafı gerçek bir OS uyku/askıya alma boşluğu gördüyse çalışmayı duraklat.
       sleepCheckInFlight = true;
       const tickAnchor = lastTickRef.current;
       try {
@@ -1369,6 +1454,9 @@ export default function App() {
         }).catch(() => delta > 300);
         if (disposed) return;
         if (osSlept) {
+          if (!workPauseStartedAtRef.current) {
+            setWorkPauseStartedAtMs(tickAnchor);
+          }
           lastTickRef.current = Date.now();
           setIsRunning(false);
           return;
@@ -1403,7 +1491,7 @@ export default function App() {
     };
   }, [isRunning, sessionActive]);
 
-  // Ekran kapalı / PC başından uzun süre ayrılma durumunda otomatik duraklatma
+  // Ekran kapalı / PC başından 5 dk ayrılma durumunda çalışmayı duraklat ve ara başlangıcını kaydet (mola kesilmez)
   useEffect(() => {
     if (!isRunning || !sessionActive) return;
     const pollIdle = setInterval(async () => {
@@ -1411,13 +1499,18 @@ export default function App() {
         () => 0,
       );
       const rt = runtimeStateRef.current;
-      if (rt.mode === "work" && idleSecs >= 1800) {
-        setIsRunning(false);
-      } else if (
-        rt.mode === "break" &&
-        rt.breakOverdueSec > 0 &&
-        idleSecs >= 600
-      ) {
+      if (rt.mode === "work" && idleSecs >= 300) {
+        const rewindSec = Math.min(
+          idleSecs,
+          appStateRef.current.work_elapsed_sec,
+        );
+        if (rewindSec > 0) {
+          setWorkElapsedSec((prev) => Math.max(0, prev - rewindSec));
+          setWorkSecondsLeft((prev) => prev + rewindSec);
+        }
+        if (!workPauseStartedAtRef.current) {
+          setWorkPauseStartedAtMs(Date.now() - rewindSec * 1000);
+        }
         setIsRunning(false);
       }
     }, 10000);
@@ -1466,6 +1559,8 @@ export default function App() {
       workStartedAtRef.current = null;
 
       // Otomatik molaya geç ve başlat
+      setWorkPauseStartedAtMs(null);
+      setWorkPausedLiveSec(0);
       setBreakKind(bKind);
       setTimerMode("break");
       setBreakSecondsLeft(bSec);
@@ -1475,6 +1570,16 @@ export default function App() {
       setBreakOvertimeAccumSec(0);
       setIsRunning(true);
       playBreakChime();
+      if (isMiniDockRef.current) {
+        triggerMiniDockContextToast(
+          isLong ? t.longBreakStartedAlert : t.breakStartedAlert,
+        );
+        setTimeout(() => {
+          invoke("alert_break_started").catch(() => {});
+        }, 90);
+      } else {
+        invoke("alert_break_started").catch(() => {});
+      }
       breakStartedAtRef.current = finishedEndedAt;
 
       (async () => {
@@ -1492,7 +1597,7 @@ export default function App() {
         setDayStats(await getActiveDayStats(locale));
         setWeeklySummary(await getWeeklySummary(locale));
         setTimelineSessions(await getTimelineSessions());
-        setBreakParkingData(await getParkingLotData(false));
+        setBreakParkingData(await getBreakParkingLotData());
       })();
     }
   }, [
@@ -1529,6 +1634,9 @@ export default function App() {
       )
     ) {
       return;
+    }
+    if (isMiniDockRef.current) {
+      miniDockUserDraggedRef.current = true;
     }
     getCurrentWindow().startDragging();
   };
@@ -1718,8 +1826,18 @@ export default function App() {
         activeWindow: params.activeWindow,
         contextText: effectiveCtx,
       });
-      setBreakParkingData(await getParkingLotData(false));
-      setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
+      setBreakParkingData(await getBreakParkingLotData());
+      if (page === "summary") {
+        const scopeRange =
+          summaryTab === "weekly"
+            ? getWeekBoundsIso(selectedSummaryDate)
+            : getDateBoundsIso(selectedSummaryDate);
+        setSummaryParkingData(await getParkingLotData(false, scopeRange));
+      } else {
+        setSummaryParkingData(
+          await getParkingLotData(freqOnlyTodayRef.current),
+        );
+      }
     }
 
     await recordDistraction({
@@ -1782,6 +1900,28 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // SEANS BAŞLATMA & SEANS BİTİRME (SESSION LIFECYCLE)
   // ---------------------------------------------------------------------------
+  const flushPendingWorkPauseSilently = async () => {
+    const startMs = workPauseStartedAtRef.current;
+    if (startMs) {
+      const pausedSec = Math.floor((Date.now() - startMs) / 1000);
+      if (pausedSec >= 10) {
+        await recordBreakSession(
+          pausedSec,
+          t.workPauseDefaultTag,
+          undefined,
+          pausedSec,
+          new Date(startMs).toISOString(),
+          new Date().toISOString(),
+        );
+      }
+    }
+    setWorkPauseStartedAtMs(null);
+    setWorkPausedLiveSec(0);
+    setPendingWorkPauseSec(0);
+    setPendingWorkPauseStartIso(null);
+    setBreakOverdueSource("break");
+  };
+
   const handleStartSession = async () => {
     setPlanDropdownOpen(false);
     setIsCelebrating(false);
@@ -1809,6 +1949,11 @@ export default function App() {
     setBreakElapsedSec(0);
     setBreakOverdueSec(0);
     setBreakOvertimeAccumSec(0);
+    setWorkPauseStartedAtMs(null);
+    setWorkPausedLiveSec(0);
+    setPendingWorkPauseSec(0);
+    setPendingWorkPauseStartIso(null);
+    setBreakOverdueSource("break");
     setCurrentSessionDistractions(0);
 
     workStartedAtRef.current = nowIso;
@@ -1840,6 +1985,7 @@ export default function App() {
     setShowWorkTopicBox(false);
     setShowShortBreakPrompt(false);
     setShowContextEditBox(false);
+    await flushPendingWorkPauseSilently();
 
     const nowIso = new Date().toISOString();
 
@@ -1914,6 +2060,11 @@ export default function App() {
     setBreakElapsedSec(0);
     setBreakOverdueSec(0);
     setBreakOvertimeAccumSec(0);
+    setWorkPauseStartedAtMs(null);
+    setWorkPausedLiveSec(0);
+    setPendingWorkPauseSec(0);
+    setPendingWorkPauseStartIso(null);
+    setBreakOverdueSource("break");
     setCurrentSessionDistractions(0);
     setCompletedWorkCount(0);
     setSessionShortBreakCount(0);
@@ -1930,7 +2081,7 @@ export default function App() {
     setDayStats(freshStats);
     setWeeklySummary(await getWeeklySummary(locale));
     setTimelineSessions(await getTimelineSessions(freshStats.dayId));
-    setBreakParkingData(await getParkingLotData(false));
+    setBreakParkingData(await getBreakParkingLotData());
     setPage("menu");
   };
 
@@ -2007,7 +2158,11 @@ export default function App() {
     setEndingReasonText("");
     setIsEditingEndingTags(false);
     if (sessionActive) {
-      setIsRunning(true);
+      if (timerMode === "work") {
+        void handleResumeWork();
+      } else {
+        setIsRunning(true);
+      }
     }
   };
 
@@ -2018,6 +2173,7 @@ export default function App() {
   };
 
   const submitEnding = async (withTag = true) => {
+    await flushPendingWorkPauseSilently();
     if (activeContextLogId) {
       await finalizeContextLog(
         activeContextLogId,
@@ -2096,6 +2252,7 @@ export default function App() {
 
   const confirmStartShortBreak = async () => {
     if (!sessionActive) return;
+    await flushPendingWorkPauseSilently();
     const chosenContext = shortBreakDraft.trim() || currentContext.trim();
     setShowShortBreakPrompt(false);
 
@@ -2177,7 +2334,13 @@ export default function App() {
     }
   };
 
-  const handleOpenBreakOverdueBox = async () => {
+  const handleOpenBreakOverdueBox = async (
+    source: "break" | "work_pause" = "break",
+  ) => {
+    setBreakOverdueSource(source);
+    if (isMiniDockRef.current) {
+      await exitMiniDock();
+    }
     const loadedTags = await getTags(
       "break_overtime",
       t.defaultBreakOvertimeTags,
@@ -2203,6 +2366,42 @@ export default function App() {
     skipReason = false,
     autoRunWork = autoStartAfterBreakRef.current,
   ) => {
+    if (breakOverdueSource === "work_pause") {
+      const pauseSec = Math.max(10, pendingWorkPauseSec);
+      const tag = !skipReason
+        ? selectedBreakOverdueTag
+        : t.workPauseDefaultTag;
+      const reason = !skipReason
+        ? breakOverdueReasonText.trim() || selectedBreakOverdueTag
+        : undefined;
+      const endIso = new Date().toISOString();
+      const startIso =
+        pendingWorkPauseStartIso ||
+        new Date(Date.now() - pauseSec * 1000).toISOString();
+
+      await recordBreakSession(pauseSec, tag, reason, pauseSec, startIso, endIso);
+      setTimelineSessions(await getTimelineSessions());
+
+      setShowBreakOverdueBox(false);
+      setIsEditingBreakOverdueTags(false);
+      setTagForm(null);
+      setBreakOverdueSource("break");
+      setWorkPauseStartedAtMs(null);
+      setWorkPausedLiveSec(0);
+      setPendingWorkPauseSec(0);
+      setPendingWorkPauseStartIso(null);
+
+      if (!workStartedAtRef.current) {
+        workStartedAtRef.current = new Date(
+          Date.now() - workElapsedSec * 1000,
+        ).toISOString();
+      }
+      setTimerMode("work");
+      setPage("timer");
+      setIsRunning(true);
+      return;
+    }
+
     const totalOvertime = breakOvertimeAccumSec + breakOverdueSec;
     const actualBreakSec = breakElapsedSec + totalOvertime;
     const defaultTag =
@@ -2237,6 +2436,7 @@ export default function App() {
     setShowBreakOverdueBox(false);
     setIsEditingBreakOverdueTags(false);
     setTagForm(null);
+    setBreakOverdueSource("break");
     setBreakElapsedSec(0);
     setBreakOverdueSec(0);
     setBreakOvertimeAccumSec(0);
@@ -2535,7 +2735,7 @@ export default function App() {
       setCloudAuth(await loadCloudAuthState());
       const pData = await getParkingLotData(freqOnlyTodayRef.current);
       setSummaryParkingData(pData);
-      setBreakParkingData(await getParkingLotData(false));
+      setBreakParkingData(await getBreakParkingLotData());
       setWorkStoryEntries(
         await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
       );
@@ -2572,17 +2772,47 @@ export default function App() {
     setPage("dashboard");
   };
 
-  const handleToggleRunning = () => {
-    if (isBreakAlarm) return;
-    setIsRunning((prev) => {
-      const next = !prev;
-      if (next && timerMode === "work" && !workStartedAtRef.current) {
+  const handleResumeWork = async () => {
+    if (!sessionActive) return;
+    if (timerMode === "work") {
+      const startMs = workPauseStartedAtRef.current;
+      const pausedSec = startMs
+        ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
+        : 0;
+      if (pausedSec >= 10 && startMs) {
+        setPendingWorkPauseSec(pausedSec);
+        setPendingWorkPauseStartIso(new Date(startMs).toISOString());
+        setPage("timer");
+        await handleOpenBreakOverdueBox("work_pause");
+        return;
+      }
+      setWorkPauseStartedAtMs(null);
+      setWorkPausedLiveSec(0);
+      if (!workStartedAtRef.current) {
         workStartedAtRef.current = new Date(
           Date.now() - workElapsedSec * 1000,
         ).toISOString();
       }
-      return next;
-    });
+      setPage("timer");
+      setIsRunning(true);
+      return;
+    }
+    if (!isBreakAlarm) {
+      setPage("timer");
+      setIsRunning(true);
+    }
+  };
+
+  const handleToggleRunning = () => {
+    if (isBreakAlarm) return;
+    if (isRunning) {
+      if (timerMode === "work" && !workPauseStartedAtRef.current) {
+        setWorkPauseStartedAtMs(Date.now());
+      }
+      setIsRunning(false);
+    } else {
+      void handleResumeWork();
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -2704,7 +2934,7 @@ export default function App() {
 
   // Mola Otoparkı & Özet Otoparkı Etkileşimleri (Veritabanına Ekleme Sırasıyla Kaydedilir)
   const refreshParkingViews = async () => {
-    setBreakParkingData(await getParkingLotData(false));
+    setBreakParkingData(await getBreakParkingLotData());
     if (page === "summary") {
       const scopeRange =
         summaryTab === "weekly"
@@ -2789,6 +3019,11 @@ export default function App() {
     setBreakElapsedSec(0);
     setBreakOverdueSec(0);
     setBreakOvertimeAccumSec(0);
+    setWorkPauseStartedAtMs(null);
+    setWorkPausedLiveSec(0);
+    setPendingWorkPauseSec(0);
+    setPendingWorkPauseStartIso(null);
+    setBreakOverdueSource("break");
     setCurrentSessionDistractions(0);
     setCompletedWorkCount(0);
     setSessionShortBreakCount(0);
@@ -2969,6 +3204,7 @@ export default function App() {
         isLight={isLightColor(theme.bgColor)}
         modeClass={modeClass}
         isBreakAlarm={isBreakAlarm}
+        isCelebrating={isCelebrating}
         miniDockContextToast={miniDockContextToast}
         shellStyle={shellStyle}
         sessionActive={sessionActive}
@@ -2984,10 +3220,7 @@ export default function App() {
     );
   }
 
-  const breakParkingTotalCount =
-    breakParkingData.totalTasks +
-    breakParkingData.totalIdeas +
-    breakParkingData.totalScreenshots;
+  const breakParkingTotalCount = breakParkingData.pendingTasks.length;
   const hasBreakParkingView =
     page === "timer" &&
     sessionActive &&
@@ -3129,7 +3362,12 @@ export default function App() {
         <BreakOverdueModal
           {...tagHandlers}
           t={t}
-          totalOvertimeSec={breakOvertimeAccumSec + breakOverdueSec}
+          source={breakOverdueSource}
+          totalOvertimeSec={
+            breakOverdueSource === "work_pause"
+              ? pendingWorkPauseSec
+              : breakOvertimeAccumSec + breakOverdueSec
+          }
           breakOverdueTags={breakOverdueTags}
           selectedBreakOverdueTag={selectedBreakOverdueTag}
           breakOverduePrevReasons={breakOverduePrevReasons}
@@ -3170,6 +3408,7 @@ export default function App() {
               activeSeconds={activeSeconds}
               hasPausedProgress={hasPausedProgress}
               workElapsedSec={workElapsedSec}
+              workPausedLiveSec={workPausedLiveSec}
               distractPenaltyMins={distractPenaltyMins}
               reminderBanner={reminderBanner}
               onToggleRunning={handleToggleRunning}
@@ -3226,7 +3465,13 @@ export default function App() {
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
               onReturnToTimer={() => {
                 setIsCelebrating(false);
-                if (sessionActive && !isBreakAlarm) setIsRunning(true);
+                if (sessionActive && !isBreakAlarm) {
+                  if (!isRunning && timerMode === "work") {
+                    void handleResumeWork();
+                    return;
+                  }
+                  setIsRunning(true);
+                }
                 setPage("timer");
               }}
               onFinishSession={handleFinishSession}

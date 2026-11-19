@@ -137,10 +137,7 @@ export function SummaryPage({
           activeLang === "tr" ? "tr-TR" : "en-US",
           { weekday: "short", day: "numeric", month: "short", year: "numeric" },
         );
-  const totalParkingCount =
-    summaryParkingData.totalTasks +
-    summaryParkingData.totalIdeas +
-    summaryParkingData.totalScreenshots;
+  const totalParkingCount = summaryParkingData.pendingTasks.length;
 
   return (
     <>

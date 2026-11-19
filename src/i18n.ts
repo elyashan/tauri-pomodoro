@@ -21,7 +21,7 @@ export interface Translations {
   home: string;
   settings: string;
   summary: string;
-  resumeHint: (mins: number) => string;
+  resumeHint: (mins: number, awayClock?: string) => string;
   start: string;
   stop: string;
   add: string;
@@ -111,6 +111,14 @@ export interface Translations {
   breakOverdueDesc: (time: string) => string;
   saveAndStartWork: string;
   skipAndStartWork: string;
+  breakStartedAlert: string;
+  longBreakStartedAlert: string;
+  breakOverAlert: string;
+  workPauseOverdueTitle: string;
+  workPauseOverdueDesc: (time: string) => string;
+  workPauseDefaultTag: string;
+  saveAndResumeWork: string;
+  skipAndResumeWork: string;
   startWorkBtn: string;
 
   // Çalışma konusu (What are you working on)
@@ -210,6 +218,7 @@ export interface Translations {
 
   miniDockTooltip: string;
   restoreWindowTooltip: string;
+  miniDockDragTooltip: string;
   hideToTrayOnlyTooltip: string;
 
   adhdTab: string;
@@ -358,7 +367,10 @@ const tr: Translations = {
   home: "Ana Sayfa",
   settings: "Ayarlar",
   summary: "Özet",
-  resumeHint: (mins) => `Duraklatıldı (${mins} dk çalışıldı)`,
+  resumeHint: (mins, awayClock) =>
+    awayClock
+      ? `Duraklatıldı (${mins} dk çalışıldı • +${awayClock} ara)`
+      : `Duraklatıldı (${mins} dk çalışıldı)`,
   start: "Başlat",
   stop: "Durdur",
   add: "Ekle",
@@ -457,6 +469,15 @@ const tr: Translations = {
     `Molayı ${time} uzattın. Sebebini seçebilir veya not ekleyebilirsin:`,
   saveAndStartWork: "Kaydet & Çalışmaya Başla",
   skipAndStartWork: "Sebebi Geç & Başla",
+  breakStartedAlert: "☕ Mola Başladı!",
+  longBreakStartedAlert: "🎉 Uzun Mola Başladı!",
+  breakOverAlert: "🚨 Mola Süresi Doldu!",
+  workPauseOverdueTitle: "Çalışma İçi Ara / Gecikme Sebebi",
+  workPauseOverdueDesc: (time: string) =>
+    `Çalışma sırasında ${time} ara verdin. Mola uzatma olarak kaydedilecek, sebebini seçebilirsin:`,
+  workPauseDefaultTag: "Çalışma İçi Ara",
+  saveAndResumeWork: "Kaydet & Devam Et",
+  skipAndResumeWork: "Sebebi Geç & Devam Et",
   startWorkBtn: "Çalışmaya Başla",
 
   // Çalışma Konusu
@@ -560,6 +581,7 @@ const tr: Translations = {
 
   miniDockTooltip: "Sağ alt mini sayaç moduna küçült",
   restoreWindowTooltip: "Normal pencere boyutuna geri dön",
+  miniDockDragTooltip: "Sürükle • Büyütmek için çift tıkla",
   hideToTrayOnlyTooltip: "Tamamen sistem tepsisine (tray) gizle",
 
   adhdTab: "🧠 Farkındalık",
@@ -771,7 +793,10 @@ const en: Translations = {
   home: "Home",
   settings: "Settings",
   summary: "Summary",
-  resumeHint: (mins) => `Paused (${mins} min worked)`,
+  resumeHint: (mins, awayClock) =>
+    awayClock
+      ? `Paused (${mins} min worked • +${awayClock} away)`
+      : `Paused (${mins} min worked)`,
   start: "Start",
   stop: "Stop",
   add: "Add",
@@ -870,6 +895,15 @@ const en: Translations = {
     `Break exceeded by ${time}. Select reason or enter a note:`,
   saveAndStartWork: "Save & Start Work",
   skipAndStartWork: "Skip Reason & Start",
+  breakStartedAlert: "☕ Break Started!",
+  longBreakStartedAlert: "🎉 Long Break Started!",
+  breakOverAlert: "🚨 Break Time Over!",
+  workPauseOverdueTitle: "Work Pause / Away Reason",
+  workPauseOverdueDesc: (time: string) =>
+    `You were paused/away for ${time} during work. Logged as break overtime — select a reason:`,
+  workPauseDefaultTag: "Work Pause",
+  saveAndResumeWork: "Save & Resume Work",
+  skipAndResumeWork: "Skip & Resume",
   startWorkBtn: "Start Work",
 
   // Study Topic
@@ -973,6 +1007,7 @@ const en: Translations = {
 
   miniDockTooltip: "Minimize to bottom-right mini counter widget",
   restoreWindowTooltip: "Restore normal window size",
+  miniDockDragTooltip: "Drag to move • Double-click to restore",
   hideToTrayOnlyTooltip: "Hide completely to system tray",
 
   adhdTab: "🧠 Insights",

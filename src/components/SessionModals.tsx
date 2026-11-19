@@ -935,6 +935,7 @@ export function EarlyStopModal({
 
 export interface BreakOverdueModalProps extends TagManagementHandlers {
   t: Translations;
+  source?: "break" | "work_pause";
   totalOvertimeSec: number;
   breakOverdueTags: TagItem[];
   selectedBreakOverdueTag: string;
@@ -949,6 +950,7 @@ export interface BreakOverdueModalProps extends TagManagementHandlers {
 
 export function BreakOverdueModal({
   t,
+  source = "break",
   totalOvertimeSec,
   breakOverdueTags,
   selectedBreakOverdueTag,
@@ -969,7 +971,11 @@ export function BreakOverdueModal({
   return (
     <div className="stop-box">
       <div className="stop-box-header">
-        <span className="stop-box-title">{t.breakOverdueTitle}</span>
+        <span className="stop-box-title">
+          {source === "work_pause"
+            ? t.workPauseOverdueTitle
+            : t.breakOverdueTitle}
+        </span>
         <div style={{ display: "flex", gap: "3px" }}>
           <button
             className="ghost-btn"
@@ -985,7 +991,9 @@ export function BreakOverdueModal({
       </div>
 
       <div className="stop-box-hint">
-        {t.breakOverdueDesc(formatClock(totalOvertimeSec))}
+        {source === "work_pause"
+          ? t.workPauseOverdueDesc(formatClock(totalOvertimeSec))
+          : t.breakOverdueDesc(formatClock(totalOvertimeSec))}
       </div>
 
       <InlineTagForm
@@ -1034,10 +1042,10 @@ export function BreakOverdueModal({
 
       <div className="stop-box-actions">
         <button className="primary-btn" onClick={() => onSubmit(false)}>
-          {t.saveAndStartWork}
+          {source === "work_pause" ? t.saveAndResumeWork : t.saveAndStartWork}
         </button>
         <button onClick={() => onSubmit(true)}>
-          {t.skipAndStartWork}
+          {source === "work_pause" ? t.skipAndResumeWork : t.skipAndStartWork}
         </button>
       </div>
     </div>

@@ -6,6 +6,7 @@ export interface MiniDockProps {
   isLight: boolean;
   modeClass: string;
   isBreakAlarm: boolean;
+  isCelebrating: boolean;
   miniDockContextToast: string | null;
   shellStyle: React.CSSProperties;
   sessionActive: boolean;
@@ -23,6 +24,7 @@ export function MiniDock({
   isLight,
   modeClass,
   isBreakAlarm,
+  isCelebrating,
   miniDockContextToast,
   shellStyle,
   sessionActive,
@@ -40,17 +42,16 @@ export function MiniDock({
       className={`widget-shell mini-dock-shell ${
         isLight ? "light-theme" : ""
       } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""} ${
-        miniDockContextToast ? "has-toast" : ""
-      }`}
+        isCelebrating ? "celebrating-shell" : ""
+      } ${miniDockContextToast ? "has-toast" : ""}`}
       style={shellStyle}
       onMouseDown={onMouseDown}
       onDoubleClick={onExitMiniDock}
     >
       {miniDockContextToast && (
         <div
-          className="mini-dock-context-toast no-drag"
-          title={`${t.qcCurrentContextLabel}: ${miniDockContextToast}`}
-          onClick={onExitMiniDock}
+          className="mini-dock-context-toast"
+          title={`${t.qcCurrentContextLabel}: ${miniDockContextToast} (${t.miniDockDragTooltip})`}
         >
           🎯 {miniDockContextToast}
         </div>
@@ -58,9 +59,8 @@ export function MiniDock({
 
       <div className="mini-dock-row">
         <div
-          className="mini-dock-left no-drag"
-          onClick={onExitMiniDock}
-          title={t.restoreWindowTooltip}
+          className="mini-dock-left"
+          title={t.miniDockDragTooltip}
         >
           <span className="mini-dock-icon">
             {!sessionActive

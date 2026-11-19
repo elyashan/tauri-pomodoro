@@ -28,6 +28,7 @@ export interface RuntimeState {
   activeContextLogId: number | null;
   contextStartedAtElapsedSec: number;
   shortBreakNote?: string;
+  workPauseStartedAt?: number | null;
 }
 
 export interface ThemeSettings {
@@ -2085,6 +2086,12 @@ export async function loadRuntimeState(): Promise<RuntimeState | null> {
       contextStartedAtElapsedSec: posInt(raw.contextStartedAtElapsedSec, 0),
       shortBreakNote:
         typeof raw.shortBreakNote === "string" ? raw.shortBreakNote : "",
+      workPauseStartedAt:
+        typeof raw.workPauseStartedAt === "number" &&
+        Number.isFinite(raw.workPauseStartedAt) &&
+        raw.workPauseStartedAt > 0
+          ? Math.round(raw.workPauseStartedAt)
+          : null,
     };
   } catch {
     return null;
@@ -2179,19 +2186,49 @@ export async function addParkingItem(params: {
   return item;
 }
 
+function mapParkingRow(r: ParkingItem): ParkingItem {
+  const iType: ParkingItemType =
+    r.item_type === "idea"
+      ? "idea"
+      : r.item_type === "screenshot"
+        ? "screenshot"
+        : "task";
+
+  return {
+    id: Number(r.id),
+    day_id: Number(r.day_id),
+    item_type: iType,
+    content: r.content,
+    status: r.status as ParkingStatus,
+    active_app: r.active_app ?? null,
+    active_window: r.active_window ?? null,
+    context_text: r.context_text ?? null,
+    screenshot_data: r.screenshot_data ?? null,
+    keep_synced: Number(r.keep_synced ?? 0),
+    keep_note_id: r.keep_note_id ?? null,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
 export async function getParkingLotData(
   onlyToday = false,
   dateRange?: DateRangeFilter,
+  includeAllPendingTasks = true,
 ): Promise<ParkingLotData> {
   const db = await getDb();
   const params: (number | string)[] = [];
   let whereClause = "";
   if (dateRange) {
-    whereClause = "WHERE created_at >= $1 AND created_at <= $2";
+    whereClause = includeAllPendingTasks
+      ? "WHERE (created_at >= $1 AND created_at <= $2) OR (item_type = 'task' AND status != 'done')"
+      : "WHERE created_at >= $1 AND created_at <= $2";
     params.push(dateRange.startIso, dateRange.endIso);
   } else if (onlyToday) {
     const day = await getOrCreateActiveDay(db);
-    whereClause = "WHERE day_id = $1";
+    whereClause = includeAllPendingTasks
+      ? "WHERE day_id = $1 OR (item_type = 'task' AND status != 'done')"
+      : "WHERE day_id = $1";
     params.push(day.id);
   }
 
@@ -2213,28 +2250,7 @@ export async function getParkingLotData(
   const screenshotNotes: ParkingItem[] = [];
 
   for (const r of rows) {
-    const iType: ParkingItemType =
-      r.item_type === "idea"
-        ? "idea"
-        : r.item_type === "screenshot"
-          ? "screenshot"
-          : "task";
-
-    const item: ParkingItem = {
-      id: Number(r.id),
-      day_id: Number(r.day_id),
-      item_type: iType,
-      content: r.content,
-      status: r.status as ParkingStatus,
-      active_app: r.active_app ?? null,
-      active_window: r.active_window ?? null,
-      context_text: r.context_text ?? null,
-      screenshot_data: r.screenshot_data ?? null,
-      keep_synced: Number(r.keep_synced ?? 0),
-      keep_note_id: r.keep_note_id ?? null,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-    };
+    const item = mapParkingRow(r);
 
     if (item.item_type === "task") {
       if (item.status === "done") {
@@ -2264,6 +2280,43 @@ export async function getParkingLotData(
     totalIdeas:
       unratedIdeas.length + importantIdeas.length + unimportantIdeas.length,
     totalScreenshots: screenshotNotes.length,
+  };
+}
+
+/**
+ * Fetches recent open (pending) tasks from the last `recentDays` days for break view.
+ */
+export async function getBreakParkingLotData(
+  recentDays = 3,
+  limit = 12,
+): Promise<ParkingLotData> {
+  const db = await getDb();
+  const cutoffIso = new Date(
+    Date.now() - recentDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const rows = await db.select<ParkingItem[]>(
+    `SELECT id, day_id, item_type, content, status, active_app, active_window,
+            context_text, screenshot_data, COALESCE(keep_synced, 0) AS keep_synced,
+            keep_note_id, created_at, updated_at
+     FROM parking_items
+     WHERE item_type = 'task' AND status != 'done' AND created_at >= $1
+     ORDER BY id DESC
+     LIMIT $2`,
+    [cutoffIso, limit],
+  );
+
+  const pendingTasks = rows.map(mapParkingRow);
+  return {
+    pendingTasks,
+    doneTasks: [],
+    unratedIdeas: [],
+    importantIdeas: [],
+    unimportantIdeas: [],
+    screenshotNotes: [],
+    totalTasks: pendingTasks.length,
+    totalIdeas: 0,
+    totalScreenshots: 0,
   };
 }
 

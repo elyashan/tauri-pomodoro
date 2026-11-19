@@ -6,9 +6,15 @@ mod tray;
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, Window, WindowEvent};
+use tauri::{
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Position, Size, State, UserAttentionType,
+    WebviewWindow, Window, WindowEvent,
+};
+
+static SHAKE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::Shortcut;
 
@@ -267,6 +273,68 @@ fn did_os_sleep_since(since_ms: u64) -> bool {
     active_window::did_os_sleep_since(since_ms)
 }
 
+struct ShakeResetGuard;
+impl Drop for ShakeResetGuard {
+    fn drop(&mut self) {
+        SHAKE_IN_PROGRESS.store(false, Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+fn alert_break_started(app: AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = win.show();
+    let _ = win.unminimize();
+    let _ = win.request_user_attention(Some(UserAttentionType::Critical));
+
+    if SHAKE_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        let _guard = ShakeResetGuard;
+        let Ok(orig) = win.outer_position() else {
+            return;
+        };
+
+        let mut expected_x = orig.x;
+        let expected_y = orig.y;
+        let mut run_burst = |offsets: &[i32]| -> bool {
+            for &dx in offsets {
+                if let Ok(cur) = win.outer_position() {
+                    if (cur.x - expected_x).abs() > 24 || (cur.y - expected_y).abs() > 24 {
+                        return false;
+                    }
+                }
+                let nx = orig.x + dx;
+                if win
+                    .set_position(Position::Physical(PhysicalPosition::new(nx, orig.y)))
+                    .is_err()
+                {
+                    return false;
+                }
+                expected_x = nx;
+                std::thread::sleep(std::time::Duration::from_millis(28));
+            }
+            true
+        };
+
+        if !run_burst(&[-10, 10, -8, 8, -5, 5, -2, 2, 0]) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(320));
+        if !run_burst(&[-7, 7, -4, 4, 0]) {
+            return;
+        }
+        let _ = win.set_position(Position::Physical(orig));
+    });
+}
+
 fn resolve_backup_dir(app: &AppHandle) -> std::path::PathBuf {
     if let Ok(dir) = app.path().download_dir() {
         return dir;
@@ -346,6 +414,7 @@ pub fn run() {
             set_windows_focus_mode,
             get_system_idle_secs,
             did_os_sleep_since,
+            alert_break_started,
             get_backup_export_dir,
             save_backup_json,
         ])

@@ -1376,9 +1376,35 @@ button:disabled {
   }
 }
 
+@keyframes breakAlertShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  45% {
+    transform: translateX(-4px);
+  }
+  30%,
+  60% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+  90% {
+    transform: translateX(2px);
+  }
+}
+
 .widget-shell.celebrating-shell {
-  animation: celebratePulse 1.6s infinite ease-in-out;
-  border-color: rgba(251, 191, 36, 0.8) !important;
+  animation:
+    celebratePulse 1.1s infinite ease-in-out,
+    breakAlertShake 0.45s ease-in-out 3;
+  border-color: rgba(251, 191, 36, 0.9) !important;
+  box-shadow:
+    0 0 22px rgba(251, 191, 36, 0.7),
+    inset 0 0 14px rgba(56, 189, 248, 0.35);
 }
 
 .celebration-badge {
@@ -2150,7 +2176,11 @@ button.parking-toggle-badge:hover {
   align-items: center;
   gap: 5px;
   min-width: 0;
-  cursor: pointer;
+  cursor: grab;
+}
+
+.mini-dock-left:active {
+  cursor: grabbing;
 }
 
 .mini-dock-icon {
@@ -3278,7 +3308,11 @@ button.shortcut-record-btn.recording {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: grab;
+}
+
+.mini-dock-context-toast:active {
+  cursor: grabbing;
 }
 
 .light-theme .mini-dock-context-toast {
