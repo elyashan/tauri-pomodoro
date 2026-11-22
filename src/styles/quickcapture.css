@@ -1,0 +1,625 @@
+/* Global Spotlight QuickCapture window (Ctrl+Alt+D)
+   v0.1.13: GLOBAL HIZLI YAKALAMA (SPOTLIGHT), 5 KATEGORİ, MOLA OTOPARKI,
+   MEŞGULİYET (CONTEXT) HATIRLATICISI & GLOBAL KISAYOL AYARLARI (DÜZ TASARIM) */
+.qc-shell {
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 20, 24, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 13px;
+  padding: 10px 12px;
+  color: #f4f4f5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 7px;
+  outline: none;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.qc-shell:active {
+  cursor: grabbing;
+}
+
+.qc-shell.light-theme {
+  background: rgba(244, 244, 245, 0.96);
+  border-color: rgba(0, 0, 0, 0.18);
+  color: #18181b;
+}
+
+.qc-top-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  min-width: 0;
+}
+
+.qc-context-pill {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #e4e4e7;
+}
+
+.qc-shell.light-theme .qc-context-pill {
+  color: #18181b;
+}
+
+.qc-muted {
+  color: #a1a1aa;
+}
+
+.qc-shell.light-theme .qc-muted {
+  color: #52525b;
+}
+
+.qc-tab-pill {
+  max-width: 44%;
+  font-size: 9.5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #93c5fd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.qc-shell.light-theme .qc-tab-pill {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #1d4ed8;
+}
+
+.qc-cat-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.qc-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-height: 58px;
+  overflow-y: auto;
+}
+
+button.qc-tag-chip {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e4e4e7;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+button.qc-tag-chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+button.qc-tag-chip.selected {
+  background: rgba(59, 130, 246, 0.3);
+  border-color: #60a5fa;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.qc-shell.light-theme button.qc-tag-chip {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #18181b;
+}
+
+.qc-shell.light-theme button.qc-tag-chip.selected {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: #2563eb;
+  color: #1e3a8a;
+}
+
+button.qc-tag-chip.add-chip {
+  border-style: dashed;
+  border-color: rgba(96, 165, 250, 0.45);
+  color: #93c5fd;
+}
+
+button.qc-tag-chip.add-chip:hover,
+button.qc-tag-chip.add-chip.selected {
+  background: rgba(59, 130, 246, 0.25);
+  border-style: solid;
+  border-color: #60a5fa;
+  color: #ffffff;
+}
+
+.qc-tag-inline-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(96, 165, 250, 0.55);
+}
+
+.qc-tag-inline-input {
+  width: 92px;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  font-size: 10px;
+  outline: none;
+}
+
+.qc-tag-inline-btn {
+  padding: 1px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  border: none;
+  cursor: pointer;
+}
+
+.qc-tag-inline-btn.save {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.qc-tag-inline-btn.cancel {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+
+.light-theme .qc-tag-inline-form,
+.qc-shell.light-theme .qc-tag-inline-form {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: #2563eb;
+}
+
+.light-theme .qc-tag-inline-input,
+.qc-shell.light-theme .qc-tag-inline-input {
+  color: #18181b;
+}
+
+.light-theme button.qc-tag-chip.add-chip,
+.qc-shell.light-theme button.qc-tag-chip.add-chip {
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.qc-step-hint {
+  font-size: 10px;
+  font-weight: 600;
+  color: #93c5fd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qc-shell.light-theme .qc-step-hint {
+  color: #1d4ed8;
+}
+
+.qc-entries-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 6px 7px;
+}
+
+.qc-entries-header {
+  font-size: 9px;
+  font-weight: 700;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.qc-entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: none;
+  overflow-y: visible;
+}
+
+button.qc-entry-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+  font-size: 10.5px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+button.qc-entry-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+button.qc-entry-row.selected {
+  background: rgba(59, 130, 246, 0.28);
+  border-color: #60a5fa;
+  color: #ffffff;
+  box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.qc-entry-idx {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #93c5fd;
+  flex-shrink: 0;
+  min-width: 14px;
+}
+
+.qc-entry-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qc-entry-hint {
+  font-size: 9px;
+  color: #93c5fd;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.light-theme .qc-entries-box,
+.qc-shell.light-theme .qc-entries-box {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.light-theme .qc-entries-header,
+.qc-shell.light-theme .qc-entries-header {
+  color: #52525b;
+}
+
+.light-theme button.qc-entry-row,
+.qc-shell.light-theme button.qc-entry-row {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #18181b;
+}
+
+.light-theme button.qc-entry-row:hover,
+.light-theme button.qc-entry-row.selected,
+.qc-shell.light-theme button.qc-entry-row:hover,
+.qc-shell.light-theme button.qc-entry-row.selected {
+  background: rgba(37, 99, 235, 0.16);
+  border-color: #2563eb;
+  color: #1e3a8a;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.light-theme .qc-entry-idx,
+.light-theme .qc-entry-hint,
+.qc-shell.light-theme .qc-entry-idx,
+.qc-shell.light-theme .qc-entry-hint {
+  color: #1d4ed8;
+}
+
+button.qc-cat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 4px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #d4d4d8;
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+button.qc-cat-pill:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+button.qc-cat-pill.selected.parking {
+  background: rgba(16, 185, 129, 0.24);
+  border-color: #34d399;
+  color: #ecfdf5;
+}
+
+button.qc-cat-pill.selected.penalty {
+  background: rgba(239, 68, 68, 0.24);
+  border-color: #f87171;
+  color: #fef2f2;
+}
+
+.qc-shell.light-theme button.qc-cat-pill.selected.parking {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: #059669;
+  color: #064e3b;
+}
+
+.qc-shell.light-theme button.qc-cat-pill.selected.penalty {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #dc2626;
+  color: #7f1d1d;
+}
+
+.qc-key-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fbbf24;
+  letter-spacing: 0.3px;
+}
+
+.qc-shell.light-theme .qc-key-badge {
+  background: rgba(0, 0, 0, 0.1);
+  color: #92400e;
+}
+
+.qc-cat-name {
+  font-size: 9.5px;
+  font-weight: 600;
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qc-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qc-single-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  background: rgba(0, 0, 0, 0.42);
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+}
+
+.qc-single-input:focus,
+.qc-single-input.is-focused {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.45);
+}
+
+.qc-shell.light-theme .qc-single-input {
+  background: rgba(255, 255, 255, 0.9);
+  color: #18181b;
+  border-color: rgba(37, 99, 235, 0.5);
+}
+
+.qc-penalty-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.qc-penalty-tag.parking {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #6ee7b7;
+}
+
+.qc-penalty-tag.penalty {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #fca5a5;
+}
+
+.qc-shell.light-theme .qc-penalty-tag.parking {
+  color: #065f46;
+}
+
+.qc-shell.light-theme .qc-penalty-tag.penalty {
+  color: #991b1b;
+}
+
+.qc-footer-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: #a1a1aa;
+}
+
+button.qc-close-btn {
+  padding: 2px 6px;
+  font-size: 9px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a1a1aa;
+}
+
+.qc-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  overflow: hidden;
+}
+
+.qc-recent-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  flex: 1;
+}
+
+button.qc-recent-chip {
+  padding: 2px 7px;
+  font-size: 9.5px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e4e4e7;
+  white-space: nowrap;
+}
+
+button.qc-recent-chip.active,
+button.qc-recent-chip:hover {
+  background: rgba(59, 130, 246, 0.35);
+  border-color: #60a5fa;
+  color: #fff;
+}
+
+.qc-reminder-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.42);
+  cursor: pointer;
+}
+
+.qc-reminder-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.qc-reminder-context {
+  font-size: 17px;
+  font-weight: 800;
+  color: #ffffff;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qc-shell.light-theme .qc-reminder-header {
+  color: #065f46;
+}
+
+.qc-shell.light-theme .qc-reminder-context {
+  color: #18181b;
+}
+
+.qc-reminder-sub {
+  font-size: 10px;
+  color: #93c5fd;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qc-reminder-hint {
+  font-size: 9.5px;
+  color: #a1a1aa;
+}
+
+/* Tag Edit / Delete Mode in QuickCapture */
+button.qc-tag-chip.edit-chip {
+  border-style: dashed;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+button.qc-tag-chip.edit-chip:hover,
+button.qc-tag-chip.edit-chip.active {
+  border-color: var(--accent-work);
+  color: var(--accent-work);
+  background: var(--accent-work-soft);
+}
+
+.qc-tag-chip.editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-md);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: var(--text-primary);
+}
+
+.qc-shell.light-theme .qc-tag-chip.editing {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(217, 119, 6, 0.45);
+  color: var(--text-primary);
+}
+
+button.qc-tag-rename-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: var(--text-md);
+  line-height: 1.2;
+}
+
+button.qc-tag-rename-btn:hover {
+  background: transparent;
+  color: var(--accent-work);
+}
+
+button.qc-tag-del-btn {
+  background: transparent;
+  border: none;
+  padding: 1px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+}
+
+button.qc-tag-del-btn:hover {
+  color: #f87171;
+  background: var(--accent-danger-soft);
+}

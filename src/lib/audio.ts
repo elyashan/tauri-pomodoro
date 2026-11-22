@@ -113,3 +113,30 @@ export function playAlarmChime(): void {
     },
   );
 }
+
+export function playSubtleMilestoneChime(
+  kind: "warmup_done" | "halfway" | "final",
+): void {
+  const specs: Record<"warmup_done" | "halfway" | "final", NoteSpec[]> = {
+    warmup_done: [
+      { freq: 440.0, time: 0.0, dur: 0.11 },
+      { freq: 554.37, time: 0.12, dur: 0.16 },
+    ],
+    halfway: [
+      { freq: 523.25, time: 0.0, dur: 0.11 },
+      { freq: 659.25, time: 0.13, dur: 0.18 },
+    ],
+    final: [
+      { freq: 587.33, time: 0.0, dur: 0.1 },
+      { freq: 783.99, time: 0.11, dur: 0.18 },
+    ],
+  };
+
+  playNotes(specs[kind], {
+    type: "sine",
+    peakGain: kind === "final" ? 0.065 : 0.055,
+    attackSec: 0.025,
+    releasePadSec: 0.06,
+    closeAfterMs: 480,
+  });
+}

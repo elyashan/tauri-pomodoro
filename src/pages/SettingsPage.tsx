@@ -1,24 +1,32 @@
+import { useState } from "react";
 import {
+  AmbientNoiseSettings,
+  AmbientSoundType,
   DEFAULT_STUDY_PLANS,
   DEFAULT_THEME,
   FeedbackCategory,
   FeedbackItem,
   GlobalShortcutSettings,
   LangCode,
+  RescueExerciseSettings,
   StudyPlan,
+  TagKind,
   ThemeSettings,
+  TimerVisualStyle,
 } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
 import type { UpdateStatus } from "../updater";
 import {
   BG_PRESETS,
   PENALTY_OPTIONS,
+  RELEASE_COMMANDS,
   ShortcutStatus,
   TIMER_PRESETS,
   UI_SCALE_OPTIONS,
 } from "../constants";
 import { formatKeyCombo } from "../lib/keyCombo";
-import { IconArrowLeft } from "../components/Icons";
+import { IconArrowLeft, IconClose } from "../components/Icons";
+import { TagManagerSection } from "../components/TagManagerSection";
 
 export interface SettingsPageProps {
   t: Translations;
@@ -31,6 +39,9 @@ export interface SettingsPageProps {
   studyPlans: StudyPlan[];
   editingPlanId: string;
   theme: ThemeSettings;
+  ambientNoise: AmbientNoiseSettings;
+  rescueExercises: RescueExerciseSettings;
+  breakChecklistItems: string[];
   autoStartOn: boolean;
   sizeSavedFlash: boolean;
   currentWinSize: { w: number; h: number };
@@ -61,6 +72,9 @@ export interface SettingsPageProps {
     value: string | number,
   ) => void;
   onUpdateTheme: (patch: Partial<ThemeSettings>) => void;
+  onUpdateAmbientNoise: (patch: Partial<AmbientNoiseSettings>) => void;
+  onUpdateRescueExercises: (patch: Partial<RescueExerciseSettings>) => void;
+  onUpdateBreakChecklistItems: (items: string[]) => void;
   onToggleAutoStart: () => void;
   onSaveCurrentWindowSize: () => void;
   onResetStandardSizes: () => void;
@@ -72,6 +86,7 @@ export interface SettingsPageProps {
   onDeleteFeedbackItem: (id: number) => void;
   onInstallUpdate: () => void;
   onCheckUpdate: () => void;
+  onTagsChanged?: (kind: TagKind) => void;
 }
 
 export function SettingsPage({
@@ -85,6 +100,9 @@ export function SettingsPage({
   studyPlans,
   editingPlanId,
   theme,
+  ambientNoise,
+  rescueExercises,
+  breakChecklistItems,
   autoStartOn,
   sizeSavedFlash,
   currentWinSize,
@@ -106,6 +124,9 @@ export function SettingsPage({
   onSetEditingPlanId,
   onUpdatePlanField,
   onUpdateTheme,
+  onUpdateAmbientNoise,
+  onUpdateRescueExercises,
+  onUpdateBreakChecklistItems,
   onToggleAutoStart,
   onSaveCurrentWindowSize,
   onResetStandardSizes,
@@ -117,7 +138,19 @@ export function SettingsPage({
   onDeleteFeedbackItem,
   onInstallUpdate,
   onCheckUpdate,
+  onTagsChanged,
 }: SettingsPageProps) {
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [newChecklistItem, setNewChecklistItem] = useState("");
+
+  const handleCopyReleaseCmd = (cmd: string) => {
+    navigator.clipboard?.writeText(cmd).catch(() => {});
+    setCopiedCmd(cmd);
+    window.setTimeout(() => {
+      setCopiedCmd((cur) => (cur === cmd ? null : cur));
+    }, 1800);
+  };
+
   const currentEditPlan =
     studyPlans.find((p) => p.id === editingPlanId) ||
     studyPlans[0] ||
@@ -263,6 +296,9 @@ export function SettingsPage({
           </div>
         )}
       </div>
+
+      {/* ETİKET YÖNETİMİ (EKLE / DÜZENLE / SİL) */}
+      <TagManagerSection t={t} onTagsChanged={onTagsChanged} />
 
       {/* ÇALIŞMA PLANLARI & MOLA AYARLARI */}
       <div className="settings-section">
@@ -472,6 +508,163 @@ export function SettingsPage({
             onChange={(e) => onUpdateTheme({ timerColor: e.target.value })}
           />
         </div>
+        <div
+          className="settings-label"
+          style={{ marginTop: "6px", marginBottom: "2px" }}
+        >
+          {t.timerStyleLabel}
+        </div>
+        <div
+          className="penalty-selector"
+          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+        >
+          {(
+            [
+              { id: "digital", label: `🔢 ${t.timerStyleDigital}` },
+              { id: "pie", label: `◔ ${t.timerStylePie}` },
+              { id: "candle", label: `🕯️ ${t.timerStyleCandle}` },
+            ] as { id: TimerVisualStyle; label: string }[]
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`penalty-btn ${theme.timerStyle === opt.id ? "active" : ""}`}
+              onClick={() => onUpdateTheme({ timerStyle: opt.id })}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ARKA PLAN ODAK SESİ (BROWN NOISE VB.) */}
+      <div className="settings-section no-drag">
+        <div className="settings-label">{t.ambientNoiseTitle}</div>
+        <div className="penalty-selector ambient-sound-grid">
+          {(["off", "brown", "pink", "white", "rain"] as AmbientSoundType[]).map(
+            (snd) => (
+              <button
+                key={snd}
+                type="button"
+                className={`penalty-btn ${ambientNoise.sound === snd ? "active" : ""}`}
+                onClick={() => onUpdateAmbientNoise({ sound: snd })}
+              >
+                {t.ambientSoundLabels[snd]}
+              </button>
+            ),
+          )}
+        </div>
+        {ambientNoise.sound !== "off" && (
+          <>
+            <div className="settings-label slider-label">
+              <span>{t.ambientVolumeLabel}</span>
+              <span>%{ambientNoise.volume}</span>
+            </div>
+            <input
+              type="range"
+              className="range-input"
+              min={5}
+              max={100}
+              value={ambientNoise.volume}
+              onChange={(e) =>
+                onUpdateAmbientNoise({ volume: Number(e.target.value) })
+              }
+            />
+            <button
+              type="button"
+              className={`penalty-btn ambient-work-toggle ${
+                ambientNoise.playOnlyInWork ? "active" : ""
+              }`}
+              onClick={() =>
+                onUpdateAmbientNoise({
+                  playOnlyInWork: !ambientNoise.playOnlyInWork,
+                })
+              }
+            >
+              {t.ambientOnlyWorkToggle(ambientNoise.playOnlyInWork)}
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* BAŞLAYAMIYORUM EGZERSİZLERİ */}
+      <div className="settings-section no-drag">
+        <div className="settings-label">{t.rescueSettingsTitle}</div>
+        <div
+          className="penalty-selector"
+          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+        >
+          {(["breathing", "gaze", "physical"] as const).map((exKey) => (
+            <button
+              key={exKey}
+              type="button"
+              className={`penalty-btn ${rescueExercises[exKey] ? "active" : ""}`}
+              onClick={() =>
+                onUpdateRescueExercises({ [exKey]: !rescueExercises[exKey] })
+              }
+            >
+              {t.rescueExerciseNames[exKey]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* MOLA HATIRLATICI NOTLARI */}
+      <div className="settings-section no-drag">
+        <div className="settings-label">{t.breakChecklistSettingsTitle}</div>
+        {breakChecklistItems.length > 0 && (
+          <div className="break-reminder-chips-wrap">
+            {breakChecklistItems.map((item, idx) => (
+              <span key={`${item}-${idx}`} className="break-reminder-chip">
+                <span className="break-reminder-chip-txt">{item}</span>
+                <button
+                  type="button"
+                  className="break-reminder-chip-del"
+                  onClick={() =>
+                    onUpdateBreakChecklistItems(
+                      breakChecklistItems.filter((_, i) => i !== idx),
+                    )
+                  }
+                  title={t.cancel}
+                >
+                  <IconClose size={9} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="checklist-add-row">
+          <input
+            type="text"
+            className="plan-text-input"
+            placeholder={t.breakChecklistPlaceholder}
+            value={newChecklistItem}
+            onChange={(e) => setNewChecklistItem(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                const val = newChecklistItem.trim();
+                if (!val) return;
+                onUpdateBreakChecklistItems([...breakChecklistItems, val]);
+                setNewChecklistItem("");
+              }
+            }}
+            maxLength={50}
+          />
+          <button
+            type="button"
+            className="primary-btn"
+            style={{ fontSize: "10px", padding: "4px 10px" }}
+            onClick={() => {
+              const val = newChecklistItem.trim();
+              if (!val) return;
+              onUpdateBreakChecklistItems([...breakChecklistItems, val]);
+              setNewChecklistItem("");
+            }}
+          >
+            {t.add}
+          </button>
+        </div>
       </div>
 
       <div className="settings-actions">
@@ -496,7 +689,7 @@ export function SettingsPage({
             alignItems: "center",
           }}
         >
-          <span>📐 {t.windowSizeTitle}</span>
+          <span>{t.windowSizeTitle}</span>
           {sizeSavedFlash && (
             <span
               style={{
@@ -670,6 +863,31 @@ export function SettingsPage({
               </div>
             ))
           )}
+        </div>
+      </div>
+
+      <div className="settings-section no-drag">
+        <div className="settings-label">{t.releaseCommandsTitle}</div>
+        <div className="release-cmd-hint">{t.releaseCommandsHint}</div>
+        <div className="release-cmd-list">
+          {RELEASE_COMMANDS.map((item) => {
+            const isCopied = copiedCmd === item.cmd;
+            return (
+              <div key={item.id} className="release-cmd-row">
+                <div className="release-cmd-meta">
+                  <code className="release-cmd-code">{item.cmd}</code>
+                  <span className="release-cmd-desc">{t[item.descKey]}</span>
+                </div>
+                <button
+                  type="button"
+                  className={`release-copy-btn ${isCopied ? "copied" : ""}`}
+                  onClick={() => handleCopyReleaseCmd(item.cmd)}
+                >
+                  {isCopied ? t.copiedLabel : t.copyBtn}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 

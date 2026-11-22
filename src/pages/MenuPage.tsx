@@ -1,11 +1,21 @@
+import { useState } from "react";
 import type React from "react";
 import type {
   ActiveDayStats,
+  BioEventType,
+  BioLogItem,
+  MoodType,
   StudyPlan,
   TimerMode,
 } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
 import type { UpdateStatus } from "../updater";
+import {
+  BIO_EVENT_EMOJIS,
+  BIO_EVENT_TYPES,
+  MOOD_EMOJIS,
+  MOOD_TYPES,
+} from "../constants";
 import {
   IconChart,
   IconClose,
@@ -36,6 +46,8 @@ export interface MenuPageProps {
   planDropdownOpen: boolean;
   planDropdownRef: React.RefObject<HTMLDivElement | null>;
   liveClockStr: string;
+  todayBioLogs: BioLogItem[];
+  selectedStartMood: MoodType | null;
   getPlanDisplayName: (plan: StudyPlan) => string;
   onOpenDashboard: () => void;
   onOpenSummary: () => void;
@@ -46,6 +58,12 @@ export interface MenuPageProps {
   onTogglePlanDropdown: () => void;
   onSelectPlan: (planId: string) => void;
   onOpenWorkTopicBox: () => void;
+  onSelectStartMood: (mood: MoodType | null) => void;
+  onAddBioLog: (
+    eventType: BioEventType,
+    eventTime?: string,
+    note?: string,
+  ) => Promise<void> | void;
   onReturnToTimer: () => void;
   onFinishSession: () => void;
   onStartSession: () => void;
@@ -71,6 +89,8 @@ export function MenuPage({
   planDropdownOpen,
   planDropdownRef,
   liveClockStr,
+  todayBioLogs,
+  selectedStartMood,
   getPlanDisplayName,
   onOpenDashboard,
   onOpenSummary,
@@ -81,10 +101,48 @@ export function MenuPage({
   onTogglePlanDropdown,
   onSelectPlan,
   onOpenWorkTopicBox,
+  onSelectStartMood,
+  onAddBioLog,
   onReturnToTimer,
   onFinishSession,
   onStartSession,
 }: MenuPageProps) {
+  const [bioFormType, setBioFormType] = useState<BioEventType | null>(null);
+  const [bioTimeDraft, setBioTimeDraft] = useState("");
+  const [bioNoteDraft, setBioNoteDraft] = useState("");
+  const [bioToast, setBioToast] = useState<string | null>(null);
+
+  const getNowHm = () => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const handleToggleBioPill = (type: BioEventType) => {
+    if (bioFormType === type) {
+      setBioFormType(null);
+      return;
+    }
+    setBioFormType(type);
+    setBioTimeDraft(getNowHm());
+    setBioNoteDraft("");
+  };
+
+  const handleSubmitBioForm = async () => {
+    if (!bioFormType) return;
+    const hm = bioTimeDraft.trim() || getNowHm();
+    const note = bioNoteDraft.trim() || undefined;
+    const kind = bioFormType;
+    await onAddBioLog(kind, hm, note);
+    setBioFormType(null);
+    setBioNoteDraft("");
+    const msg = t.bioLoggedToast(t.bioEventLabels[kind], hm);
+    setBioToast(msg);
+    window.setTimeout(() => {
+      setBioToast((cur) => (cur === msg ? null : cur));
+    }, 2200);
+  };
+
   return (
     <>
       <div className="top-bar">
@@ -341,6 +399,100 @@ export function MenuPage({
           </div>
         </div>
       </div>
+
+      {/* BİYOLOJİK BAĞLAM BAR */}
+      <div className="bio-bar-box no-drag">
+        <div className="bio-bar-header">
+          <span className="bio-bar-title">{t.bioContextTitle}</span>
+          {bioToast && <span className="bio-toast">{bioToast}</span>}
+        </div>
+        <div className="bio-pills-row">
+          {BIO_EVENT_TYPES.map((evType) => {
+            const logsOfType = todayBioLogs.filter(
+              (b) => b.event_type === evType,
+            );
+            const latest = logsOfType[logsOfType.length - 1];
+            const isOpen = bioFormType === evType;
+            return (
+              <button
+                key={evType}
+                type="button"
+                className={`bio-pill-btn ${latest ? "logged" : ""} ${isOpen ? "open" : ""}`}
+                onClick={() => handleToggleBioPill(evType)}
+                title={
+                  latest?.note
+                    ? `${t.bioEventLabels[evType]} ${latest.event_time}: ${latest.note}`
+                    : t.bioEventLabels[evType]
+                }
+              >
+                <span>
+                  {BIO_EVENT_EMOJIS[evType]} {t.bioEventLabels[evType]}
+                </span>
+                {latest && (
+                  <span className="bio-pill-time">{latest.event_time}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {bioFormType && (
+          <div className="bio-inline-form">
+            <input
+              type="time"
+              className="bio-time-input"
+              value={bioTimeDraft}
+              onChange={(e) => setBioTimeDraft(e.target.value)}
+            />
+            <input
+              type="text"
+              className="bio-note-input"
+              placeholder={t.bioNotePlaceholder}
+              value={bioNoteDraft}
+              onChange={(e) => setBioNoteDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleSubmitBioForm();
+                } else if (e.key === "Escape") {
+                  setBioFormType(null);
+                }
+              }}
+              maxLength={60}
+              autoFocus
+            />
+            <button
+              type="button"
+              className="primary-btn bio-save-btn"
+              onClick={() => void handleSubmitBioForm()}
+            >
+              {t.bioSaveBtn}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* BAŞLANGIÇ RUH HALİ (Sadece seans başlamadan) */}
+      {!sessionActive && (
+        <div className="mood-start-box no-drag">
+          <div className="mood-strip-label">{t.moodPromptStart}</div>
+          <div className="mood-pills-row">
+            {MOOD_TYPES.map((m) => {
+              const active = selectedStartMood === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  className={`mood-pill-btn ${active ? "selected" : ""}`}
+                  onClick={() => onSelectStartMood(active ? null : m)}
+                >
+                  <span>{MOOD_EMOJIS[m]}</span>
+                  <span>{t.moodLabels[m]}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* SEANS AKSİYON BUTONLARI & CREDITS */}
       <div className="menu-footer-group">

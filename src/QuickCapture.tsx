@@ -4,16 +4,19 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   addCategoryTag,
+  deleteTag,
   DistractionCategory,
   doesCategoryAddPenalty,
   getCategoryTagsByPopularity,
   getTopCategoryReasons,
   TagItem,
+  TagKind,
+  updateTag,
 } from "./db";
 import { ActiveLang, translations } from "./i18n";
 import { DISTRACT_CATEGORIES } from "./constants";
 import { isLightColor } from "./lib/color";
-import { IconCheck, IconClose } from "./components/Icons";
+import { IconCheck, IconClose, IconEdit } from "./components/Icons";
 
 interface FrontendContextSnapshot {
   currentContext: string;
@@ -84,6 +87,9 @@ export default function QuickCapture() {
   const [selectedTag, setSelectedTag] = useState<string>("");
   const [addingTag, setAddingTag] = useState(false);
   const [newTagInput, setNewTagInput] = useState("");
+  const [editingTags, setEditingTags] = useState(false);
+  const [renamingTagId, setRenamingTagId] = useState<number | null>(null);
+  const [renameTagDraft, setRenameTagDraft] = useState("");
 
   const [text, setText] = useState("");
   const [popularEntries, setPopularEntries] = useState<string[]>([]);
@@ -168,6 +174,9 @@ export default function QuickCapture() {
     setSelectedTag("");
     setAddingTag(false);
     setNewTagInput("");
+    setEditingTags(false);
+    setRenamingTagId(null);
+    setRenameTagDraft("");
     setText("");
     setPopularEntries([]);
     setFocusedEntryIdx(-1);
@@ -232,6 +241,9 @@ export default function QuickCapture() {
     setSelectedTag("");
     setAddingTag(false);
     setNewTagInput("");
+    setEditingTags(false);
+    setRenamingTagId(null);
+    setRenameTagDraft("");
     setPopularEntries([]);
     setStage("tag");
     loadTagsForCategory(targetCat, lang).catch(() => {});
@@ -289,6 +301,37 @@ export default function QuickCapture() {
     requestAnimationFrame(() => shellRef.current?.focus());
   };
 
+  const handleSaveRenameTag = async (tagId: number) => {
+    const trimmed = renameTagDraft.trim();
+    if (trimmed) {
+      const kind = `distraction_${category}` as TagKind;
+      await updateTag(tagId, trimmed, kind);
+      const updated = await getCategoryTagsByPopularity(
+        category,
+        t.defaultCategoryTags[category],
+      );
+      setCategoryTags(updated);
+    }
+    setRenamingTagId(null);
+    setRenameTagDraft("");
+    requestAnimationFrame(() => shellRef.current?.focus());
+  };
+
+  const handleDeleteCategoryTag = async (tagId: number) => {
+    await deleteTag(tagId);
+    const updated = await getCategoryTagsByPopularity(
+      category,
+      t.defaultCategoryTags[category],
+    );
+    setCategoryTags(updated);
+    if (renamingTagId === tagId) {
+      setRenamingTagId(null);
+      setRenameTagDraft("");
+    }
+    setTagIdx((prev) => Math.min(prev, updated.length));
+    requestAnimationFrame(() => shellRef.current?.focus());
+  };
+
   const effectiveContext =
     payload.snapshot.currentContext.trim() ||
     (payload.snapshot.workTag
@@ -296,6 +339,8 @@ export default function QuickCapture() {
           payload.snapshot.workReason ? `: ${payload.snapshot.workReason}` : ""
         }`
       : "");
+
+  const isOffSession = !payload.snapshot.sessionActive;
 
   const emitDistractionAndFinish = async (
     finalNote: string,
@@ -313,7 +358,7 @@ export default function QuickCapture() {
     await emitTo("main", "capture-submitted", msg).catch(() => {});
 
     const isTrigger = category === "internal" || category === "external";
-    if (!isTrigger && effectiveContext) {
+    if (!isOffSession && !isTrigger && effectiveContext) {
       setStage("reminder");
       reminderTimerRef.current = window.setTimeout(() => {
         closeAndRestore();
@@ -330,7 +375,7 @@ export default function QuickCapture() {
     if (!finalNote) return;
 
     setText(finalNote);
-    if (category === "internal" || category === "external") {
+    if (!isOffSession && (category === "internal" || category === "external")) {
       setContextText(payload.snapshot.currentContext || "");
       setFocusedContextIdx(-1);
       setStage("context");
@@ -369,9 +414,29 @@ export default function QuickCapture() {
       return;
     }
 
+    if (renamingTagId !== null) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setRenamingTagId(null);
+        setRenameTagDraft("");
+        requestAnimationFrame(() => shellRef.current?.focus());
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveRenameTag(renamingTagId).catch(() => {});
+      }
+      return;
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
+      if (stage === "tag" && editingTags) {
+        setEditingTags(false);
+        requestAnimationFrame(() => shellRef.current?.focus());
+        return;
+      }
       if (stage === "category") {
         closeAndRestore();
       } else if (stage === "tag") {
@@ -607,9 +672,20 @@ export default function QuickCapture() {
       ) : (
         <>
           <div className="qc-top-strip">
-            <div className="qc-context-pill" title={effectiveContext}>
-              <span className="qc-muted">⠿ 🎯 {t.qcCurrentContextLabel}:</span>{" "}
-              <span>{effectiveContext || t.qcContextNone}</span>
+            <div
+              className="qc-context-pill"
+              title={isOffSession ? t.qcOffSessionLabel : effectiveContext}
+            >
+              {isOffSession ? (
+                <span>⠿ {t.qcOffSessionLabel}</span>
+              ) : (
+                <>
+                  <span className="qc-muted">
+                    ⠿ 🎯 {t.qcCurrentContextLabel}:
+                  </span>{" "}
+                  <span>{effectiveContext || t.qcContextNone}</span>
+                </>
+              )}
             </div>
             <div className="qc-tab-pill" title={activeTabDisplay}>
               <span className="qc-muted">🌐 {t.qcActiveTabLabel}:</span>{" "}
@@ -619,7 +695,7 @@ export default function QuickCapture() {
 
           <div className="qc-cat-row">
             {DISTRACT_CATEGORIES.map((cat) => {
-              const isParking = !doesCategoryAddPenalty(cat);
+              const isParking = !doesCategoryAddPenalty(cat) || isOffSession;
               const selected = category === cat;
               return (
                 <button
@@ -640,25 +716,86 @@ export default function QuickCapture() {
 
           {stage === "tag" && (
             <div className="qc-tags-row">
-              <button
-                type="button"
-                tabIndex={-1}
-                className={`qc-tag-chip ${tagIdx === 0 ? "selected" : ""}`}
-                onClick={() => confirmTagByIndex(0)}
-              >
-                {t.noTagLabel}
-              </button>
-              {categoryTags.map((tagItem, idx) => (
+              {!editingTags && (
                 <button
-                  key={tagItem.id}
                   type="button"
                   tabIndex={-1}
-                  className={`qc-tag-chip ${tagIdx === idx + 1 ? "selected" : ""}`}
-                  onClick={() => confirmTagByIndex(idx + 1)}
+                  className={`qc-tag-chip ${tagIdx === 0 ? "selected" : ""}`}
+                  onClick={() => confirmTagByIndex(0)}
                 >
-                  {tagItem.name}
+                  {t.noTagLabel}
                 </button>
-              ))}
+              )}
+              {categoryTags.map((tagItem, idx) =>
+                editingTags && renamingTagId === tagItem.id ? (
+                  <div key={tagItem.id} className="qc-tag-inline-form">
+                    <input
+                      type="text"
+                      className="qc-tag-inline-input"
+                      value={renameTagDraft}
+                      onChange={(e) => setRenameTagDraft(e.target.value)}
+                      autoFocus
+                      maxLength={24}
+                    />
+                    <button
+                      type="button"
+                      className="qc-tag-inline-btn save"
+                      onClick={() =>
+                        handleSaveRenameTag(tagItem.id).catch(() => {})
+                      }
+                    >
+                      <IconCheck size={10} />
+                    </button>
+                    <button
+                      type="button"
+                      className="qc-tag-inline-btn cancel"
+                      onClick={() => {
+                        setRenamingTagId(null);
+                        setRenameTagDraft("");
+                        requestAnimationFrame(() => shellRef.current?.focus());
+                      }}
+                    >
+                      <IconClose size={10} />
+                    </button>
+                  </div>
+                ) : editingTags ? (
+                  <span key={tagItem.id} className="qc-tag-chip editing">
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="qc-tag-rename-btn"
+                      onClick={() => {
+                        setRenamingTagId(tagItem.id);
+                        setRenameTagDraft(tagItem.name);
+                      }}
+                      title={t.tagManagerHint}
+                    >
+                      {tagItem.name}
+                    </button>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="qc-tag-del-btn"
+                      onClick={() =>
+                        handleDeleteCategoryTag(tagItem.id).catch(() => {})
+                      }
+                      title={t.cancel}
+                    >
+                      <IconClose size={9} />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    key={tagItem.id}
+                    type="button"
+                    tabIndex={-1}
+                    className={`qc-tag-chip ${tagIdx === idx + 1 ? "selected" : ""}`}
+                    onClick={() => confirmTagByIndex(idx + 1)}
+                  >
+                    {tagItem.name}
+                  </button>
+                ),
+              )}
               {addingTag ? (
                 <div className="qc-tag-inline-form">
                   <input
@@ -691,19 +828,49 @@ export default function QuickCapture() {
                   </button>
                 </div>
               ) : (
+                !editingTags && (
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    className={`qc-tag-chip add-chip ${
+                      tagIdx === 1 + categoryTags.length ? "selected" : ""
+                    }`}
+                    onClick={() => {
+                      setTagIdx(1 + categoryTags.length);
+                      setAddingTag(true);
+                      requestAnimationFrame(() =>
+                        newTagInputRef.current?.focus(),
+                      );
+                    }}
+                  >
+                    {t.addNewTagBtn}
+                  </button>
+                )
+              )}
+              {!addingTag && (
                 <button
                   type="button"
                   tabIndex={-1}
-                  className={`qc-tag-chip add-chip ${
-                    tagIdx === 1 + categoryTags.length ? "selected" : ""
-                  }`}
+                  className={`qc-tag-chip edit-chip ${editingTags ? "active" : ""}`}
                   onClick={() => {
-                    setTagIdx(1 + categoryTags.length);
-                    setAddingTag(true);
-                    requestAnimationFrame(() => newTagInputRef.current?.focus());
+                    const next = !editingTags;
+                    setEditingTags(next);
+                    setRenamingTagId(null);
+                    setRenameTagDraft("");
+                    if (!next) {
+                      requestAnimationFrame(() => shellRef.current?.focus());
+                    }
                   }}
+                  title={t.qcEditTagsTooltip}
                 >
-                  {t.addNewTagBtn}
+                  {editingTags ? (
+                    <>
+                      <IconCheck size={10} />
+                      <span>{t.qcDoneEditingTags}</span>
+                    </>
+                  ) : (
+                    <IconEdit size={10} />
+                  )}
                 </button>
               )}
             </div>
@@ -730,13 +897,15 @@ export default function QuickCapture() {
                   placeholder={t.qcInputPlaceholders[category]}
                   maxLength={240}
                 />
-                <span
-                  className={`qc-penalty-tag ${addsPenalty ? "penalty" : "parking"}`}
-                >
-                  {addsPenalty
-                    ? t.addsPenaltyBadge(penaltyMins)
-                    : t.noPenaltyParkingBadge}
-                </span>
+                {!isOffSession && (
+                  <span
+                    className={`qc-penalty-tag ${addsPenalty ? "penalty" : "parking"}`}
+                  >
+                    {addsPenalty
+                      ? t.addsPenaltyBadge(penaltyMins)
+                      : t.noPenaltyParkingBadge}
+                  </span>
+                )}
               </div>
 
               {addsPenalty && popularEntries.length > 0 && (

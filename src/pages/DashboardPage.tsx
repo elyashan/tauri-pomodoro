@@ -1,10 +1,9 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   ActiveDayStats,
   AppDistractionGroup,
   CloudAuthState,
   ContextStatItem,
-  ParkingItem,
+  ParkingBucket,
   ParkingLotData,
 } from "../db";
 import type { Translations } from "../i18n";
@@ -48,14 +47,13 @@ export interface DashboardPageProps {
   onSetCloudNameInput: (val: string) => void;
   onSetCloudTokenInput: (val: string) => void;
   onSetCloudServerInput: (val: string) => void;
-  onSyncParkingToDocs: () => void;
-  onSyncSingleItemToDocs: (item: ParkingItem) => void;
   onToggleParkingTask: (id: number, done: boolean) => void;
   onRateParkingIdea: (
     id: number,
     rating: "important" | "unimportant" | "unrated",
   ) => void;
   onDeleteParkingEntry: (id: number) => void;
+  onChangeParkingBucket?: (id: number, bucket: ParkingBucket) => void;
 }
 
 export function DashboardPage({
@@ -87,11 +85,10 @@ export function DashboardPage({
   onSetCloudNameInput,
   onSetCloudTokenInput,
   onSetCloudServerInput,
-  onSyncParkingToDocs,
-  onSyncSingleItemToDocs,
   onToggleParkingTask,
   onRateParkingIdea,
   onDeleteParkingEntry,
+  onChangeParkingBucket,
 }: DashboardPageProps) {
   const nonImportantIdeas = [
     ...summaryParkingData.unratedIdeas,
@@ -168,18 +165,6 @@ export function DashboardPage({
                 {syncStatusMsg && (
                   <span className="docs-status-pill">{syncStatusMsg}</span>
                 )}
-                <button
-                  type="button"
-                  className="docs-sync-btn"
-                  onClick={() => {
-                    const url =
-                      cloudAuth.googleDocUrl || "https://docs.google.com/";
-                    openUrl(url).catch(() => window.open(url, "_blank"));
-                  }}
-                  title={t.googleDocUrlHint}
-                >
-                  {t.openGoogleDocBtn}
-                </button>
                 <button
                   type="button"
                   className="primary-btn"
@@ -314,14 +299,6 @@ export function DashboardPage({
                   ⏳ {t.dashboardUnfinishedTasks} (
                   {summaryParkingData.pendingTasks.length})
                 </span>
-                <button
-                  type="button"
-                  className="docs-sync-btn"
-                  onClick={onSyncParkingToDocs}
-                  title={t.docsSyncAllBtn}
-                >
-                  📄 Docs
-                </button>
               </div>
               <div className="dashboard-list">
                 {summaryParkingData.pendingTasks.length === 0 ? (
@@ -336,8 +313,8 @@ export function DashboardPage({
                       isDone={false}
                       t={t}
                       onToggleTask={onToggleParkingTask}
-                      onSyncSingleToDocs={onSyncSingleItemToDocs}
                       onDeleteEntry={onDeleteParkingEntry}
+                      onChangeBucket={onChangeParkingBucket}
                     />
                   ))
                 )}
@@ -362,8 +339,8 @@ export function DashboardPage({
                       isDone={true}
                       t={t}
                       onToggleTask={onToggleParkingTask}
-                      onSyncSingleToDocs={onSyncSingleItemToDocs}
                       onDeleteEntry={onDeleteParkingEntry}
+                      onChangeBucket={onChangeParkingBucket}
                     />
                   ))
                 )}
@@ -390,8 +367,8 @@ export function DashboardPage({
                       t={t}
                       showUnimportantBtn={false}
                       onRateIdea={onRateParkingIdea}
-                      onSyncSingleToDocs={onSyncSingleItemToDocs}
                       onDeleteEntry={onDeleteParkingEntry}
+                      onChangeBucket={onChangeParkingBucket}
                     />
                   ))
                 )}
@@ -417,8 +394,8 @@ export function DashboardPage({
                       t={t}
                       showUnimportantBtn={false}
                       onRateIdea={onRateParkingIdea}
-                      onSyncSingleToDocs={onSyncSingleItemToDocs}
                       onDeleteEntry={onDeleteParkingEntry}
+                      onChangeBucket={onChangeParkingBucket}
                     />
                   ))
                 )}

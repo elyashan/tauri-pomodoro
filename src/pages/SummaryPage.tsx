@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import type {
   AdhdInsightsData,
+  BioEventType,
+  BioLogItem,
   ClearDataOptions,
-  ParkingItem,
+  MoodLogItem,
+  MoodType,
+  ParkingBucket,
   ParkingLotData,
   SummaryReasonsData,
   TimelineSessionItem,
@@ -13,6 +17,12 @@ import type {
 import { toLocalDateStr, parseLocalDateStr } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
 import {
+  BIO_EVENT_EMOJIS,
+  BIO_EVENT_TYPES,
+  MOOD_EMOJIS,
+  MOOD_TYPES,
+} from "../constants";
+import {
   buildSessionStoryTooltip,
   matchSessionStoryEntries,
   ParkingLotPanel,
@@ -22,6 +32,7 @@ import {
   IconArrowLeft,
   IconChevronLeft,
   IconChevronRight,
+  IconClose,
   IconDashboard,
   IconDownload,
   IconTrash,
@@ -46,6 +57,8 @@ export interface SummaryPageProps {
   selectedDayStats: { totalSec: number; sessionCount: number; avgSec: number };
   summaryParkingData: ParkingLotData;
   workStoryEntries: WorkStoryEntry[];
+  bioLogs: BioLogItem[];
+  moodLogs: MoodLogItem[];
   showResetConfirm: boolean;
   hoveredTimelineItem: TimelineSessionItem | null;
   timelineSessions: TimelineSessionItem[];
@@ -54,7 +67,6 @@ export interface SummaryPageProps {
   hoveredWeekDay: WeekDayStat | null;
   maxWeeklyHours: number;
   adhdInsights: AdhdInsightsData | null;
-  docsStatusMsg: string | null;
   exportDirPath: string;
   exportSavedMsg: string | null;
   expandedTags: Record<string, boolean>;
@@ -68,14 +80,21 @@ export interface SummaryPageProps {
   onResetData: (options: ClearDataOptions) => void;
   onSetHoveredTimelineItem: (item: TimelineSessionItem | null) => void;
   onSetHoveredWeekDay: (day: WeekDayStat | null) => void;
-  onSyncParkingToDocs: () => void;
-  onSyncSingleItemToDocs: (item: ParkingItem) => void;
   onToggleParkingTask: (id: number, done: boolean) => void;
   onRateParkingIdea: (
     id: number,
     rating: "important" | "unimportant" | "unrated",
   ) => void;
   onDeleteParkingEntry: (id: number) => void;
+  onChangeParkingBucket: (id: number, bucket: ParkingBucket) => void;
+  onAddBioLog: (
+    eventType: BioEventType,
+    eventTime?: string,
+    note?: string,
+  ) => Promise<void> | void;
+  onDeleteBioLog: (id: number) => void;
+  onAddMoodCheckin: (mood: MoodType) => void;
+  onDeleteMoodLog: (id: number) => void;
   onOpenLightbox: (
     entry: WorkStoryEntry,
     groupFrames?: WorkStoryEntry[],
@@ -93,6 +112,8 @@ export function SummaryPage({
   selectedDayStats,
   summaryParkingData,
   workStoryEntries,
+  bioLogs,
+  moodLogs,
   showResetConfirm,
   hoveredTimelineItem,
   timelineSessions,
@@ -101,7 +122,6 @@ export function SummaryPage({
   hoveredWeekDay,
   maxWeeklyHours,
   adhdInsights,
-  docsStatusMsg,
   exportDirPath,
   exportSavedMsg,
   expandedTags,
@@ -115,11 +135,14 @@ export function SummaryPage({
   onResetData,
   onSetHoveredTimelineItem,
   onSetHoveredWeekDay,
-  onSyncParkingToDocs,
-  onSyncSingleItemToDocs,
   onToggleParkingTask,
   onRateParkingIdea,
   onDeleteParkingEntry,
+  onChangeParkingBucket,
+  onAddBioLog,
+  onDeleteBioLog,
+  onAddMoodCheckin,
+  onDeleteMoodLog,
   onOpenLightbox,
   onToggleAccordionTag,
   onExportData,
@@ -128,6 +151,13 @@ export function SummaryPage({
     number | null
   >(null);
   const [resetWorkTime, setResetWorkTime] = useState(true);
+  const [bioTypeDraft, setBioTypeDraft] = useState<BioEventType>("coffee");
+  const [bioTimeDraft, setBioTimeDraft] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
+  const [bioNoteDraft, setBioNoteDraft] = useState("");
   const [resetDistractions, setResetDistractions] = useState(true);
 
   useEffect(() => {
@@ -352,13 +382,17 @@ export function SummaryPage({
                         <b>
                           {hoveredTimelineItem.mode === "work"
                             ? t.work
-                            : t.break}
+                            : hoveredTimelineItem.mode === "idle"
+                              ? t.idleTimelineLabel
+                              : t.break}
                         </b>
                         :{" "}
                         {hoveredTimelineItem.tag ||
                           (hoveredTimelineItem.mode === "work"
                             ? t.work
-                            : t.break)}
+                            : hoveredTimelineItem.mode === "idle"
+                              ? t.idleTimelineLabel
+                              : t.break)}
                         {hoveredTimelineItem.reason
                           ? ` (${hoveredTimelineItem.reason})`
                           : ""}
@@ -386,6 +420,7 @@ export function SummaryPage({
                           ((s.endHour - s.startHour) / 24) * 100,
                         );
                         const isWork = s.mode === "work";
+                        const isIdle = s.mode === "idle";
                         const sessionFrames = isWork
                           ? matchSessionStoryEntries(workStoryEntries, s)
                           : [];
@@ -393,9 +428,11 @@ export function SummaryPage({
                           isWork && activeStorySessionId === s.id;
                         const blockClass = isWork
                           ? "work-block"
-                          : s.overtimeSec > 0
-                            ? "overtime-block"
-                            : "break-block";
+                          : isIdle
+                            ? "idle-block"
+                            : s.overtimeSec > 0
+                              ? "overtime-block"
+                              : "break-block";
                         return (
                           <div
                             key={s.id}
@@ -421,9 +458,27 @@ export function SummaryPage({
                                     t,
                                     t.formatDuration(s.durationSec),
                                   )
-                                : `${t.break}: ${s.timeRangeLabel} (${t.formatDuration(s.durationSec)})`
+                                : `${isIdle ? t.idleTimelineLabel : t.break}: ${s.tag || ""} ${s.timeRangeLabel} (${t.formatDuration(s.durationSec)})`
                             }
                           />
+                        );
+                      })}
+                      {bioLogs.map((b) => {
+                        const m = b.event_time.match(/^(\d{1,2}):(\d{2})$/);
+                        if (!m) return null;
+                        const h = Math.min(
+                          23.9,
+                          Math.max(0, Number(m[1]) + Number(m[2]) / 60),
+                        );
+                        return (
+                          <span
+                            key={`bio-${b.id}`}
+                            className="timeline-bio-marker"
+                            style={{ left: `${(h / 24) * 100}%` }}
+                            title={`${b.event_time} ${BIO_EVENT_EMOJIS[b.event_type]} ${t.bioEventLabels[b.event_type]}${b.note ? `: ${b.note}` : ""}`}
+                          >
+                            {BIO_EVENT_EMOJIS[b.event_type]}
+                          </span>
                         );
                       })}
                     </div>
@@ -442,6 +497,7 @@ export function SummaryPage({
                     {timelineSessions.length > 0 ? (
                       timelineSessions.map((s) => {
                         const isWork = s.mode === "work";
+                        const isIdle = s.mode === "idle";
                         const sessionFrames = isWork
                           ? matchSessionStoryEntries(workStoryEntries, s)
                           : [];
@@ -488,8 +544,13 @@ export function SummaryPage({
                                 {s.timeRangeLabel}
                               </span>
                               <span className="timeline-row-tag">
-                                {isWork ? "💼" : "☕"}{" "}
-                                {s.tag || (isWork ? t.work : t.break)}
+                                {isWork ? "💼" : isIdle ? "🛋️" : "☕"}{" "}
+                                {s.tag ||
+                                  (isWork
+                                    ? t.work
+                                    : isIdle
+                                      ? t.idleTimelineLabel
+                                      : t.break)}
                               </span>
                               {s.reason && (
                                 <span
@@ -509,6 +570,28 @@ export function SummaryPage({
                                   {activeLang === "tr" ? "dk" : "m"}
                                 </span>
                               ) : null}
+                              {s.hyperfocusSec > 0 && (
+                                <span className="hyperfocus-timeline-badge">
+                                  {t.hyperfocusSummaryBadge(
+                                    Math.max(
+                                      1,
+                                      Math.round(s.hyperfocusSec / 60),
+                                    ),
+                                  )}
+                                </span>
+                              )}
+                              {(s.moodBefore || s.moodAfter) && (
+                                <span
+                                  className="mood-timeline-badge"
+                                  title={`${s.moodBefore ? t.moodLabels[s.moodBefore] : ""}${s.moodBefore && s.moodAfter ? " → " : ""}${s.moodAfter ? t.moodLabels[s.moodAfter] : ""}`}
+                                >
+                                  {s.moodBefore
+                                    ? MOOD_EMOJIS[s.moodBefore]
+                                    : ""}
+                                  {s.moodBefore && s.moodAfter ? "→" : ""}
+                                  {s.moodAfter ? MOOD_EMOJIS[s.moodAfter] : ""}
+                                </span>
+                              )}
                             </div>
                             <div
                               style={{
@@ -654,36 +737,169 @@ export function SummaryPage({
             )}
           </div>
 
+          {/* KART 2: BİYOLOJİK BAĞLAM & RUH HALİ HİKAYESİ */}
+          <div className="summary-section-card">
+            <div className="summary-section-head">
+              <span>{t.bioSummaryTitle}</span>
+              <span className="summary-section-count">
+                {bioLogs.length + moodLogs.length}
+              </span>
+            </div>
+
+            <div className="bio-summary-add-row">
+              <div className="bio-summary-type-pills">
+                {BIO_EVENT_TYPES.map((ev) => (
+                  <button
+                    key={ev}
+                    type="button"
+                    className={`bio-type-chip ${bioTypeDraft === ev ? "active" : ""}`}
+                    onClick={() => setBioTypeDraft(ev)}
+                    title={t.bioEventLabels[ev]}
+                  >
+                    {BIO_EVENT_EMOJIS[ev]}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="time"
+                className="bio-time-input"
+                value={bioTimeDraft}
+                onChange={(e) => setBioTimeDraft(e.target.value)}
+              />
+              <input
+                type="text"
+                className="bio-note-input"
+                placeholder={t.bioNotePlaceholder}
+                value={bioNoteDraft}
+                onChange={(e) => setBioNoteDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void onAddBioLog(
+                      bioTypeDraft,
+                      bioTimeDraft,
+                      bioNoteDraft.trim() || undefined,
+                    );
+                    setBioNoteDraft("");
+                  }
+                }}
+                maxLength={60}
+              />
+              <button
+                type="button"
+                className="primary-btn bio-save-btn"
+                onClick={() => {
+                  void onAddBioLog(
+                    bioTypeDraft,
+                    bioTimeDraft,
+                    bioNoteDraft.trim() || undefined,
+                  );
+                  setBioNoteDraft("");
+                }}
+              >
+                {t.add}
+              </button>
+            </div>
+
+            {bioLogs.length === 0 ? (
+              <div className="bio-empty-msg">{t.bioEmptyHint}</div>
+            ) : (
+              <div className="bio-log-list">
+                {bioLogs.map((b) => (
+                  <div key={b.id} className="bio-log-row">
+                    <span className="bio-log-time">{b.event_time}</span>
+                    <span className="bio-log-label">
+                      {BIO_EVENT_EMOJIS[b.event_type]}{" "}
+                      {t.bioEventLabels[b.event_type]}
+                    </span>
+                    {b.note && <span className="bio-log-note">{b.note}</span>}
+                    <button
+                      type="button"
+                      className="tag-icon-btn del-btn"
+                      onClick={() => onDeleteBioLog(b.id)}
+                      title={t.cancel}
+                    >
+                      <IconClose size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mood-summary-divider" />
+            <div className="mood-checkin-bar">
+              <span className="mood-strip-label">
+                {t.moodQuickCheckinLabel}
+              </span>
+              <div className="mood-pills-row compact">
+                {MOOD_TYPES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className="mood-pill-btn compact"
+                    onClick={() => onAddMoodCheckin(m)}
+                    title={t.moodLabels[m]}
+                  >
+                    <span>{MOOD_EMOJIS[m]}</span>
+                    <span>{t.moodLabels[m]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {moodLogs.length === 0 ? (
+              <div className="bio-empty-msg">{t.moodEmptyHint}</div>
+            ) : (
+              <div className="mood-stream-list">
+                {moodLogs.map((ml) => {
+                  const dt = new Date(ml.created_at);
+                  const pad = (n: number) => n.toString().padStart(2, "0");
+                  const hm = Number.isNaN(dt.getTime())
+                    ? ""
+                    : `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+                  const phaseTxt =
+                    ml.phase === "start"
+                      ? t.moodPhaseStart
+                      : ml.phase === "end"
+                        ? t.moodPhaseEnd
+                        : t.moodPhaseCheckin;
+                  return (
+                    <span key={ml.id} className="mood-stream-chip">
+                      <span>{hm}</span>
+                      <span>
+                        {MOOD_EMOJIS[ml.mood]} {t.moodLabels[ml.mood]}
+                      </span>
+                      <span className="mood-phase-sub">({phaseTxt})</span>
+                      <button
+                        type="button"
+                        className="tag-icon-btn del-btn"
+                        onClick={() => onDeleteMoodLog(ml.id)}
+                        title={t.cancel}
+                      >
+                        <IconClose size={9} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* KART 3: MOLA & FİKİR OTOPARKI */}
           <div className="summary-section-card">
             <div className="summary-section-head">
               <span>{t.parkingTab}</span>
-              <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                {docsStatusMsg && (
-                  <span className="docs-status-pill">{docsStatusMsg}</span>
-                )}
-                <button
-                  type="button"
-                  className="docs-sync-btn"
-                  onClick={onSyncParkingToDocs}
-                  title={t.docsSyncAllBtn}
-                >
-                  📄 Docs
-                </button>
-                <span className="summary-section-count">{totalParkingCount}</span>
-              </div>
+              <span className="summary-section-count">{totalParkingCount}</span>
             </div>
             <div className="parking-panel summary-parking no-drag">
               <ParkingLotPanel
                 data={summaryParkingData}
                 isBreakView={false}
                 t={t}
-                docsStatusMsg={docsStatusMsg}
-                onSyncAllToDocs={onSyncParkingToDocs}
-                onSyncSingleToDocs={onSyncSingleItemToDocs}
                 onToggleTask={onToggleParkingTask}
                 onRateIdea={onRateParkingIdea}
                 onDeleteEntry={onDeleteParkingEntry}
+                onChangeBucket={onChangeParkingBucket}
                 onOpenLightbox={(e) => onOpenLightbox(e)}
               />
             </div>
@@ -868,6 +1084,14 @@ export function SummaryPage({
                     {t.adhdCompletionDesc(
                       adhdInsights?.completionRatePct ?? 100,
                       adhdInsights?.hyperfocusCount ?? 0,
+                    )}
+                    {(adhdInsights?.hyperfocusTotalMins ?? 0) > 0 && (
+                      <div className="adhd-hf-sub">
+                        🔥 {t.hyperfocusInsightLabel}:{" "}
+                        {t.formatDuration(
+                          (adhdInsights?.hyperfocusTotalMins ?? 0) * 60,
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

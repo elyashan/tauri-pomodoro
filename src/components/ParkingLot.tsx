@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  ParkingBucket,
   ParkingItem,
   ParkingLotData,
   TimelineSessionItem,
@@ -7,11 +8,12 @@ import type {
 } from "../db";
 import type { Translations } from "../i18n";
 import {
-  IconCheck,
+  IconArchive,
   IconChevronLeft,
   IconChevronRight,
+  IconClock,
   IconClose,
-  IconFileText,
+  IconRestore,
 } from "./Icons";
 
 export function renderParkingItemTooltip(item: ParkingItem): string {
@@ -29,23 +31,51 @@ export function renderParkingItemTooltip(item: ParkingItem): string {
   return parts.join(" • ");
 }
 
-export function buildSingleItemParkingData(item: ParkingItem): ParkingLotData {
-  return {
-    totalTasks: item.item_type === "task" ? 1 : 0,
-    totalIdeas: item.item_type === "idea" ? 1 : 0,
-    totalScreenshots: item.item_type === "screenshot" ? 1 : 0,
-    pendingTasks:
-      item.item_type === "task" && item.status !== "done" ? [item] : [],
-    doneTasks:
-      item.item_type === "task" && item.status === "done" ? [item] : [],
-    unratedIdeas:
-      item.item_type === "idea" && item.status === "unrated" ? [item] : [],
-    importantIdeas:
-      item.item_type === "idea" && item.status === "important" ? [item] : [],
-    unimportantIdeas:
-      item.item_type === "idea" && item.status === "unimportant" ? [item] : [],
-    screenshotNotes: item.item_type === "screenshot" ? [item] : [],
-  };
+function ParkingBucketButtons({
+  item,
+  t,
+  onChangeBucket,
+}: {
+  item: ParkingItem;
+  t: Translations;
+  onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
+}) {
+  if (!onChangeBucket) return null;
+  const cur: ParkingBucket = item.bucket || "today";
+  return (
+    <div className="parking-bucket-actions">
+      {cur !== "today" && (
+        <button
+          type="button"
+          className="parking-bucket-icon-btn"
+          onClick={() => onChangeBucket(item.id, "today")}
+          title={t.moveToToday}
+        >
+          <IconRestore size={10} />
+        </button>
+      )}
+      {cur !== "maybe" && (
+        <button
+          type="button"
+          className="parking-bucket-icon-btn"
+          onClick={() => onChangeBucket(item.id, "maybe")}
+          title={t.moveToMaybe}
+        >
+          <IconClock size={10} />
+        </button>
+      )}
+      {cur !== "archived" && (
+        <button
+          type="button"
+          className="parking-bucket-icon-btn"
+          onClick={() => onChangeBucket(item.id, "archived")}
+          title={t.moveToArchive}
+        >
+          <IconArchive size={10} />
+        </button>
+      )}
+    </div>
+  );
 }
 
 export interface ParkingTaskRowProps {
@@ -53,8 +83,8 @@ export interface ParkingTaskRowProps {
   isDone: boolean;
   t: Translations;
   onToggleTask: (id: number, done: boolean) => void;
-  onSyncSingleToDocs: (item: ParkingItem) => void;
   onDeleteEntry: (id: number) => void;
+  onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
 }
 
 export function ParkingTaskRow({
@@ -62,8 +92,8 @@ export function ParkingTaskRow({
   isDone,
   t,
   onToggleTask,
-  onSyncSingleToDocs,
   onDeleteEntry,
+  onChangeBucket,
 }: ParkingTaskRowProps) {
   return (
     <div
@@ -81,18 +111,11 @@ export function ParkingTaskRow({
         </span>
       </label>
       <div className="parking-row-right">
-        <button
-          type="button"
-          className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-          onClick={() => onSyncSingleToDocs(item)}
-          title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-        >
-          {item.keep_synced ? (
-            <IconCheck size={10} />
-          ) : (
-            <IconFileText size={10} />
-          )}
-        </button>
+        <ParkingBucketButtons
+          item={item}
+          t={t}
+          onChangeBucket={onChangeBucket}
+        />
         <button
           type="button"
           className="tag-icon-btn del-btn"
@@ -113,8 +136,8 @@ export interface ParkingIdeaRowProps {
     id: number,
     rating: "important" | "unimportant" | "unrated",
   ) => void;
-  onSyncSingleToDocs: (item: ParkingItem) => void;
   onDeleteEntry: (id: number) => void;
+  onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
   showUnimportantBtn?: boolean;
 }
 
@@ -122,8 +145,8 @@ export function ParkingIdeaRow({
   item,
   t,
   onRateIdea,
-  onSyncSingleToDocs,
   onDeleteEntry,
+  onChangeBucket,
   showUnimportantBtn = true,
 }: ParkingIdeaRowProps) {
   return (
@@ -163,18 +186,11 @@ export function ParkingIdeaRow({
             {t.parkingMarkUnimportant}
           </button>
         )}
-        <button
-          type="button"
-          className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-          onClick={() => onSyncSingleToDocs(item)}
-          title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-        >
-          {item.keep_synced ? (
-            <IconCheck size={10} />
-          ) : (
-            <IconFileText size={10} />
-          )}
-        </button>
+        <ParkingBucketButtons
+          item={item}
+          t={t}
+          onChangeBucket={onChangeBucket}
+        />
         <button
           type="button"
           className="tag-icon-btn del-btn"
@@ -192,16 +208,16 @@ export interface ParkingScreenshotRowProps {
   item: ParkingItem;
   t: Translations;
   onOpenLightbox: (entry: WorkStoryEntry) => void;
-  onSyncSingleToDocs: (item: ParkingItem) => void;
   onDeleteEntry: (id: number) => void;
+  onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
 }
 
 export function ParkingScreenshotRow({
   item,
   t,
   onOpenLightbox,
-  onSyncSingleToDocs,
   onDeleteEntry,
+  onChangeBucket,
 }: ParkingScreenshotRowProps) {
   return (
     <div
@@ -232,18 +248,11 @@ export function ParkingScreenshotRow({
       )}
       <span className="parking-todo-text">{item.content}</span>
       <div className="parking-row-right">
-        <button
-          type="button"
-          className={`docs-chip-btn ${item.keep_synced ? "synced" : ""}`}
-          onClick={() => onSyncSingleToDocs(item)}
-          title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
-        >
-          {item.keep_synced ? (
-            <IconCheck size={10} />
-          ) : (
-            <IconFileText size={10} />
-          )}
-        </button>
+        <ParkingBucketButtons
+          item={item}
+          t={t}
+          onChangeBucket={onChangeBucket}
+        />
         <button
           type="button"
           className="tag-icon-btn del-btn"
@@ -261,9 +270,6 @@ export interface ParkingLotPanelProps {
   data: ParkingLotData;
   isBreakView: boolean;
   t: Translations;
-  docsStatusMsg: string | null;
-  onSyncAllToDocs: () => void;
-  onSyncSingleToDocs: (item: ParkingItem) => void;
   onToggleTask: (id: number, done: boolean) => void;
   onRateIdea: (
     id: number,
@@ -271,6 +277,7 @@ export interface ParkingLotPanelProps {
   ) => void;
   onDeleteEntry: (id: number) => void;
   onOpenLightbox: (entry: WorkStoryEntry) => void;
+  onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
 }
 
 type ParkingSectionKey =
@@ -285,14 +292,13 @@ export function ParkingLotPanel({
   data,
   isBreakView,
   t,
-  docsStatusMsg,
-  onSyncAllToDocs,
-  onSyncSingleToDocs,
   onToggleTask,
   onRateIdea,
   onDeleteEntry,
   onOpenLightbox,
+  onChangeBucket,
 }: ParkingLotPanelProps) {
+  const [activeBucket, setActiveBucket] = useState<ParkingBucket>("today");
   const [openSections, setOpenSections] = useState<
     Record<ParkingSectionKey, boolean>
   >({
@@ -308,8 +314,50 @@ export function ParkingLotPanel({
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const totalAllCount =
+  const todayCount =
     data.totalTasks + data.totalIdeas + data.totalScreenshots;
+  const maybeCount =
+    (data.maybeTasks?.length ?? 0) + (data.maybeIdeas?.length ?? 0);
+  const archivedCount = data.archivedItems?.length ?? 0;
+  const effectiveBucket: ParkingBucket = isBreakView ? "today" : activeBucket;
+
+  const renderGenericItemRow = (it: ParkingItem) => {
+    if (it.item_type === "task") {
+      return (
+        <ParkingTaskRow
+          key={it.id}
+          item={it}
+          isDone={it.status === "done"}
+          t={t}
+          onToggleTask={onToggleTask}
+          onDeleteEntry={onDeleteEntry}
+          onChangeBucket={onChangeBucket}
+        />
+      );
+    }
+    if (it.item_type === "screenshot") {
+      return (
+        <ParkingScreenshotRow
+          key={it.id}
+          item={it}
+          t={t}
+          onOpenLightbox={onOpenLightbox}
+          onDeleteEntry={onDeleteEntry}
+          onChangeBucket={onChangeBucket}
+        />
+      );
+    }
+    return (
+      <ParkingIdeaRow
+        key={it.id}
+        item={it}
+        t={t}
+        onRateIdea={onRateIdea}
+        onDeleteEntry={onDeleteEntry}
+        onChangeBucket={onChangeBucket}
+      />
+    );
+  };
 
   return (
     <>
@@ -318,34 +366,52 @@ export function ParkingLotPanel({
           <div className="parking-banner-title">
             {t.parkingBreakBannerTitle}
           </div>
-          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-            {docsStatusMsg && (
-              <span className="docs-status-pill">{docsStatusMsg}</span>
-            )}
-            <button
-              type="button"
-              className="docs-sync-btn"
-              onClick={onSyncAllToDocs}
-              title={t.docsSyncAllBtn}
-            >
-              <IconFileText size={11} />
-              <span>Docs</span>
-            </button>
-          </div>
         </div>
       )}
 
-      {totalAllCount === 0 ? (
-        <div
-          style={{
-            fontSize: "9.5px",
-            color: "#a1a1aa",
-            padding: "4px 2px",
-            textAlign: "center",
-          }}
-        >
-          {t.parkingEmpty}
+      {!isBreakView && (
+        <div className="parking-bucket-tabs">
+          <button
+            type="button"
+            className={`parking-bucket-tab ${effectiveBucket === "today" ? "active" : ""}`}
+            onClick={() => setActiveBucket("today")}
+          >
+            {t.parkingBucketToday} ({todayCount})
+          </button>
+          <button
+            type="button"
+            className={`parking-bucket-tab ${effectiveBucket === "maybe" ? "active" : ""}`}
+            onClick={() => setActiveBucket("maybe")}
+          >
+            {t.parkingBucketMaybe} ({maybeCount})
+          </button>
+          <button
+            type="button"
+            className={`parking-bucket-tab ${effectiveBucket === "archived" ? "active" : ""}`}
+            onClick={() => setActiveBucket("archived")}
+          >
+            {t.parkingBucketArchived} ({archivedCount})
+          </button>
         </div>
+      )}
+
+      {effectiveBucket === "maybe" ? (
+        maybeCount === 0 ? (
+          <div className="parking-empty-hint">{t.parkingMaybeEmpty}</div>
+        ) : (
+          <>
+            {(data.maybeTasks || []).map(renderGenericItemRow)}
+            {(data.maybeIdeas || []).map(renderGenericItemRow)}
+          </>
+        )
+      ) : effectiveBucket === "archived" ? (
+        archivedCount === 0 ? (
+          <div className="parking-empty-hint">{t.parkingArchivedEmpty}</div>
+        ) : (
+          (data.archivedItems || []).map(renderGenericItemRow)
+        )
+      ) : todayCount === 0 ? (
+        <div className="parking-empty-hint">{t.parkingEmpty}</div>
       ) : (
         <>
           {data.pendingTasks.length > 0 && (
@@ -366,8 +432,8 @@ export function ParkingLotPanel({
                     isDone={false}
                     t={t}
                     onToggleTask={onToggleTask}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>
@@ -391,8 +457,8 @@ export function ParkingLotPanel({
                     isDone={true}
                     t={t}
                     onToggleTask={onToggleTask}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>
@@ -415,8 +481,8 @@ export function ParkingLotPanel({
                     item={it}
                     t={t}
                     onRateIdea={onRateIdea}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>
@@ -439,8 +505,8 @@ export function ParkingLotPanel({
                     item={it}
                     t={t}
                     onRateIdea={onRateIdea}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>
@@ -463,8 +529,8 @@ export function ParkingLotPanel({
                     item={it}
                     t={t}
                     onRateIdea={onRateIdea}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>
@@ -487,8 +553,8 @@ export function ParkingLotPanel({
                     item={it}
                     t={t}
                     onOpenLightbox={onOpenLightbox}
-                    onSyncSingleToDocs={onSyncSingleToDocs}
                     onDeleteEntry={onDeleteEntry}
+                    onChangeBucket={onChangeBucket}
                   />
                 ))}
             </>

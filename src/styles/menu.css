@@ -1,0 +1,566 @@
+/* Homepage / menu counters, session status, plans, bio & mood start */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 2px 0;
+}
+
+.stat-card {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 8px 6px;
+  text-align: center;
+}
+
+.stat-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.stat-lbl {
+  font-size: 10px;
+  color: #a1a1aa;
+  margin-top: 2px;
+}
+
+.menu-footer-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.menu-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 0;
+}
+
+.menu-actions .full-width {
+  grid-column: span 2;
+}
+
+.credits-bar {
+  text-align: center;
+  font-size: 10px;
+  color: #71717a;
+  letter-spacing: 0.3px;
+  padding: 2px 0;
+}
+
+.credits-bar b {
+  color: #a1a1aa;
+}
+
+.light-theme .credits-bar {
+  color: #71717a;
+}
+
+.light-theme .credits-bar b {
+  color: #3f3f46;
+}
+
+/* ÇALIŞMA KONUSU ROZETİ (WORK TOPIC BADGE) */
+.work-topic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e4e4e7;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  line-height: 1.2;
+  cursor: pointer;
+  max-width: 78px;
+  min-width: 0;
+  flex-shrink: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.12s ease;
+}
+
+.work-topic-badge.menu-topic {
+  max-width: 128px;
+}
+
+.work-topic-badge:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+/* Çalışma Planları (Study Plans) & Kısa Mola & Döngü Stilleri */
+.session-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  font-size: 11px;
+  color: #e4e4e7;
+}
+
+.session-status-bar.active-work {
+  background: rgba(16, 185, 129, 0.11);
+  border-color: rgba(52, 211, 153, 0.32);
+}
+
+.session-status-bar.active-break {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.session-status-bar.active-alarm {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.session-status-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.session-status-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #71717a;
+}
+
+.status-dot.work {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+}
+
+.status-dot.break {
+  background: #38bdf8;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.7);
+}
+
+.status-dot.alarm {
+  background: #ef4444;
+  box-shadow: 0 0 7px rgba(239, 68, 68, 0.85);
+}
+
+.status-dot.paused {
+  background: #fbbf24;
+}
+
+.plan-dropdown-wrap {
+  position: relative;
+  width: 100%;
+}
+
+button.plan-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 9px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  color: #f4f4f5;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+
+button.plan-dropdown-trigger:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(96, 165, 250, 0.55);
+}
+
+button.plan-dropdown-trigger.open {
+  border-color: #60a5fa;
+}
+
+.plan-dropdown-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #18181f;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  border-radius: 8px;
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 80;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+
+button.plan-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: transparent;
+  color: #e4e4e7;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+}
+
+button.plan-dropdown-item:hover {
+  background: rgba(59, 130, 246, 0.25);
+  color: #fff;
+}
+
+button.plan-dropdown-item.selected {
+  background: rgba(59, 130, 246, 0.4);
+  color: #fff;
+  font-weight: 600;
+}
+
+button.plan-dropdown-item.selected .plan-item-meta {
+  color: #dbeafe;
+}
+
+.plan-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: nowrap;
+}
+
+.plan-chip {
+  font-size: 9.5px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d4d4d8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.plan-chip.highlight {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.light-theme .session-status-bar {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #18181b;
+}
+
+.light-theme button.plan-dropdown-trigger {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(0, 0, 0, 0.18);
+  color: #18181b;
+}
+
+.light-theme .plan-dropdown-list {
+  background: #f4f4f5;
+  border-color: rgba(59, 130, 246, 0.45);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+.light-theme button.plan-dropdown-item {
+  color: #18181b;
+}
+
+.light-theme button.plan-dropdown-item.selected {
+  color: #1e3a8a;
+}
+
+.light-theme button.plan-dropdown-item.selected .plan-item-meta {
+  color: #1e40af;
+}
+
+.light-theme .plan-chip {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #27272a;
+}
+
+.light-theme .work-topic-badge {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: #18181b;
+}
+
+/* BİYOLOJİK BAĞLAM & RUH HALİ (Menu & Summary) */
+.bio-bar-box,
+.mood-start-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.light-theme .bio-bar-box,
+.light-theme .mood-start-box {
+  background: rgba(0, 0, 0, 0.035);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.bio-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.bio-bar-title,
+.mood-strip-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #d4d4d8;
+}
+
+.light-theme .bio-bar-title,
+.light-theme .mood-strip-label {
+  color: #3f3f46;
+}
+
+.bio-toast {
+  font-size: 8.5px;
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.light-theme .bio-toast {
+  color: #15803d;
+}
+
+.bio-pills-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+button.bio-pill-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 3px 4px;
+  font-size: 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e4e4e7;
+}
+
+.light-theme button.bio-pill-btn {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #27272a;
+}
+
+button.bio-pill-btn.logged {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+button.bio-pill-btn.open {
+  border-color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.bio-pill-time {
+  font-size: 8px;
+  color: #7dd3fc;
+  font-weight: 700;
+}
+
+.light-theme .bio-pill-time {
+  color: #0369a1;
+}
+
+.bio-inline-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.bio-time-input {
+  width: 72px;
+  padding: 3px 4px;
+  font-size: 9.5px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f4f4f5;
+  flex-shrink: 0;
+}
+
+.light-theme .bio-time-input {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.16);
+  color: #18181b;
+}
+
+.bio-note-input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 9.5px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f4f4f5;
+}
+
+.light-theme .bio-note-input {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.16);
+  color: #18181b;
+}
+
+button.bio-save-btn {
+  padding: 3px 8px;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+.mood-pills-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+button.mood-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  font-size: 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+
+button.mood-pill-btn.compact {
+  font-size: 8.5px;
+  padding: 2px 5px;
+}
+
+.light-theme button.mood-pill-btn {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #27272a;
+}
+
+button.mood-pill-btn.selected {
+  background: rgba(251, 191, 36, 0.22);
+  border-color: #fbbf24;
+  color: #fef3c7;
+  font-weight: 700;
+}
+
+.light-theme button.mood-pill-btn.selected {
+  background: rgba(217, 119, 6, 0.16);
+  border-color: #d97706;
+  color: #92400e;
+}
+
+.overtime-badge {
+  color: #f87171;
+  font-weight: 700;
+  margin-left: 3px;
+}
+
+.session-clock-pill {
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+}
+
+.session-state-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+}
+
+.plan-picker-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 7px 9px;
+  position: relative;
+}
+
+.plan-trigger-meta {
+  font-size: 10px;
+  font-weight: 500;
+  color: #93c5fd;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.plan-item-meta {
+  font-size: 9.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.light-theme .session-clock-pill {
+  color: #18181b;
+}
+
+.light-theme .session-state-tag {
+  background: rgba(0, 0, 0, 0.08);
+  color: #3f3f46;
+}
+
+.light-theme .plan-picker-box {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.light-theme .plan-trigger-meta {
+  color: #1d4ed8;
+}

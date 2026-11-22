@@ -281,6 +281,7 @@ export interface Translations {
   popularEntriesLabel: string;
   qcActiveTabLabel: string;
   qcCurrentContextLabel: string;
+  qcOffSessionLabel: string;
   qcContextNone: string;
   qcReminderTitle: string;
   qcReminderCloseHint: string;
@@ -301,11 +302,22 @@ export interface Translations {
   parkingMarkUnimportant: string;
   parkingEmpty: string;
 
-  docsSyncAllBtn: string;
-  docsSyncSingleBtn: string;
-  docsSyncedBadge: string;
-  openGoogleDocBtn: string;
-  googleDocUrlHint: string;
+  qcEditTagsTooltip: string;
+  qcDoneEditingTags: string;
+  tagManagerTitle: string;
+  tagManagerHint: string;
+  tagManagerEmpty: string;
+  tagManagerAddPlaceholder: string;
+  tagManagerKindLabels: Record<
+    | "work"
+    | "distraction_impulsive_task"
+    | "distraction_idea"
+    | "distraction_internal"
+    | "distraction_external"
+    | "ending"
+    | "break_overtime",
+    string
+  >;
 
   workStoryEmpty: string;
   storyFramesCount: (n: number) => string;
@@ -364,6 +376,101 @@ export interface Translations {
   shortcutRecordPressKeys: string;
   shortcutResetBtn: string;
   shortcutTestBtn: string;
+
+  releaseCommandsTitle: string;
+  releaseCommandsHint: string;
+  releasePatchDesc: string;
+  releaseMinorDesc: string;
+  releaseMajorDesc: string;
+  releaseExactDesc: string;
+  releaseDryDesc: string;
+  copiedLabel: string;
+  copyBtn: string;
+
+  bioContextTitle: string;
+  bioSummaryTitle: string;
+  bioEventLabels: Record<"wake" | "coffee" | "meds" | "meal", string>;
+  bioTimePlaceholder: string;
+  bioNotePlaceholder: string;
+  bioSaveBtn: string;
+  bioEmptyHint: string;
+  bioLoggedToast: (label: string, time: string) => string;
+
+  phaseWarmup: string;
+  phaseFocus: string;
+  phaseFinal: string;
+  phaseHyperfocus: string;
+  warmupDoneBanner: string;
+  halfwayBanner: string;
+  finalStretchBanner: (mins: number) => string;
+
+  hyperfocusSectionTitle: string;
+  hyperfocusBtnLabel: (mins: number) => string;
+  hyperfocusActiveBanner: (mins: number) => string;
+  hyperfocusSummaryBadge: (mins: number) => string;
+  hyperfocusInsightLabel: string;
+
+  parkingBucketToday: string;
+  parkingBucketMaybe: string;
+  parkingBucketArchived: string;
+  moveToMaybe: string;
+  moveToArchive: string;
+  moveToToday: string;
+  parkingMaybeEmpty: string;
+  parkingArchivedEmpty: string;
+
+  stuckBtnLabel: string;
+  stuckModalTitle: string;
+  stuckModalSub: string;
+  stuckBreathTitle: string;
+  stuckBreathStart: string;
+  stuckBreathStop: string;
+  stuckBreathIn: string;
+  stuckBreathHold: string;
+  stuckBreathOut: string;
+  stuckResumeBtn: string;
+  stuckTakeShortBreakBtn: string;
+
+  moodLabels: Record<"calm" | "focused" | "tired" | "anxious" | "motivated", string>;
+  moodPromptStart: string;
+  moodPromptEnd: string;
+  moodQuickCheckinLabel: string;
+  moodPhaseStart: string;
+  moodPhaseEnd: string;
+  moodPhaseCheckin: string;
+  moodEmptyHint: string;
+
+  breakChecklistTitle: string;
+  defaultBreakChecklist: string[];
+  breakChecklistSettingsTitle: string;
+  breakChecklistPlaceholder: string;
+
+  timerStyleLabel: string;
+  timerStyleDigital: string;
+  timerStylePie: string;
+  timerStyleCandle: string;
+
+  ambientNoiseTitle: string;
+  ambientSoundLabels: Record<"off" | "brown" | "pink" | "white" | "rain", string>;
+  ambientVolumeLabel: string;
+  ambientOnlyWorkToggle: (onlyWork: boolean) => string;
+
+  idleTimelineLabel: string;
+
+  rescueSettingsTitle: string;
+  rescueExerciseNames: Record<"breathing" | "gaze" | "physical", string>;
+  rescueBreathCycle: (cur: number, total: number) => string;
+  rescueDoneLabel: string;
+  rescueRestartBtn: string;
+  rescueGazeTitle: string;
+  rescueGazeHint: string;
+  rescueGazeStart: string;
+  rescuePhysicalTitle: string;
+  rescuePhysicalSteps: string[];
+  rescuePhysicalStart: string;
+  rescueNoneEnabledHint: string;
+
+  warmupNoPenaltyBadge: string;
 }
 
 const tr: Translations = {
@@ -711,6 +818,7 @@ const tr: Translations = {
   popularEntriesLabel: "Popüler kayıtlar (Tab ile seç):",
   qcActiveTabLabel: "Son Açık Sekme",
   qcCurrentContextLabel: "Aktif Bağlam",
+  qcOffSessionLabel: "🧠 Seans Dışı Braindump",
   qcContextNone: "Belirtilmedi",
   qcReminderTitle: "🎯 Son Kalınan Meşguliyet — Kaldığın Yerden Devam Et:",
   qcReminderCloseHint: "Enter / Space / Esc ile hemen pencereye dön",
@@ -718,6 +826,21 @@ const tr: Translations = {
   qcContextPlaceholder:
     "Şu an odaklandığın spesifik işi yaz ve Enter'a bas (örn: Türev Test 2, API Auth)...",
   qcRecentContextsLabel: "Son bağlamlar (Tab ile seç):",
+  qcEditTagsTooltip: "Etiketleri düzenle / sil",
+  qcDoneEditingTags: "Bitti",
+  tagManagerTitle: "🏷️ Etiket Yönetimi",
+  tagManagerHint: "Yeniden adlandırmak için etikete tıkla, silmek için × kullan.",
+  tagManagerEmpty: "Bu kategoride etiket yok.",
+  tagManagerAddPlaceholder: "Yeni etiket ekle...",
+  tagManagerKindLabels: {
+    work: "💼 Çalışma",
+    distraction_impulsive_task: "⚡ Görev",
+    distraction_idea: "💡 Fikir",
+    distraction_internal: "🧠 İçsel",
+    distraction_external: "🔔 Dışsal",
+    ending: "⏹ Erken Bitirme",
+    break_overtime: "⏰ Gecikme",
+  },
 
   parkingBreakBannerTitle:
     "🅿️ Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
@@ -732,12 +855,6 @@ const tr: Translations = {
   parkingMarkImportant: "⭐ Önemli",
   parkingMarkUnimportant: "💤 Önemsiz",
   parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev, fikir veya ekran notu yok.",
-
-  docsSyncAllBtn: "📄 Google Dokümanlara Aktar",
-  docsSyncSingleBtn: "📄 Docs'a Gönder",
-  docsSyncedBadge: "Docs ✓",
-  openGoogleDocBtn: "📄 Odak Defteri Dokümanını Aç",
-  googleDocUrlHint: "Google Docs ve Drive API ile canlı senkronize edilen dokümanınız",
 
   workStoryEmpty:
     "Henüz çalışma hikayesi kaydı yok. Çalışma sayacı çalışırken her 5 dakikada bir otomatik ekran görüntüsü + açık pencere + context kaydedilir.",
@@ -797,6 +914,137 @@ const tr: Translations = {
   shortcutRecordPressKeys: "Tuş kombinasyonuna basın... (Esc iptal)",
   shortcutResetBtn: "Varsayılan Kısayol",
   shortcutTestBtn: "Test",
+
+  releaseCommandsTitle: "🚀 Sürüm & Yayınlama Komutları",
+  releaseCommandsHint:
+    "Bu komutlar package.json, tauri.conf.json ve Cargo.toml dosyalarını güncelleyip GitHub Actions'ı otomatik tetikler:",
+  releasePatchDesc: "Küçük yama (1.0.3 → 1.0.4)",
+  releaseMinorDesc: "Yeni özellik (1.0.3 → 1.1.0)",
+  releaseMajorDesc: "Büyük sürüm (1.0.3 → 2.0.0)",
+  releaseExactDesc: "Belirli sürüm numarası ver",
+  releaseDryDesc: "Değişiklik yapmadan test et (--dry-run)",
+  copiedLabel: "Kopyalandı ✓",
+  copyBtn: "Kopyala",
+
+  bioContextTitle: "🧬 Biyolojik Bağlam (Bugün)",
+  bioSummaryTitle: "🧬 Günlük Hayat & Ruh Hali Hikayesi",
+  bioEventLabels: {
+    wake: "Uyanma",
+    coffee: "Kahve",
+    meds: "İlaç",
+    meal: "Yemek",
+  },
+  bioTimePlaceholder: "Saat (HH:MM)",
+  bioNotePlaceholder: "Kısa not (örn: 1 espresso, kahvaltı)...",
+  bioSaveBtn: "Kaydet",
+  bioEmptyHint:
+    "Henüz biyolojik bağlam kaydı yok. Yukarıdan uyanma, kahve, ilaç veya yemek saati ekleyebilirsin.",
+  bioLoggedToast: (label, time) => `${label} (${time}) kaydedildi`,
+
+  phaseWarmup: "🌱 Isınma",
+  phaseFocus: "🎯 Odak",
+  phaseFinal: "🏁 Son Dakikalar",
+  phaseHyperfocus: "🔥 Hiperodak",
+  warmupDoneBanner: "🌱 Isınma bitti — şimdi tam akışa geçtin!",
+  halfwayBanner: "🌗 Yarı yola geldin — harika gidiyorsun!",
+  finalStretchBanner: (mins) => `🏁 Son ${mins} dakika — toparlama zamanı`,
+
+  hyperfocusSectionTitle: "🔥 Hiperodak Modu (Devam Et)",
+  hyperfocusBtnLabel: (mins) => `+${mins} dk Hiperodak`,
+  hyperfocusActiveBanner: (mins) => `🔥 Hiperodak aktif (+${mins} dk eklendi)`,
+  hyperfocusSummaryBadge: (mins) => `🔥 +${mins} dk Hiperodak`,
+  hyperfocusInsightLabel: "Toplam Hiperodak",
+
+  parkingBucketToday: "📌 Bugün",
+  parkingBucketMaybe: "🤔 Belki",
+  parkingBucketArchived: "📦 Arşiv",
+  moveToMaybe: "Belki",
+  moveToArchive: "Arşiv",
+  moveToToday: "Bugün",
+  parkingMaybeEmpty: "Henüz 'Belki' listesinde öğe yok.",
+  parkingArchivedEmpty: "Arşivlenmiş öğe yok.",
+
+  stuckBtnLabel: "🧭 Başlayamıyorum",
+  stuckModalTitle: "🧭 Başlamakta Zorlanıyor musun?",
+  stuckModalSub:
+    "Sorun değil — beynin ilk adımı büyütüyor olabilir. Birlikte küçültelim:",
+  stuckBreathTitle: "🌬️ 4-4-4 Nefes Egzersizi",
+  stuckBreathStart: "Nefesi Başlat",
+  stuckBreathStop: "Durdur",
+  stuckBreathIn: "Nefes Al...",
+  stuckBreathHold: "Tut...",
+  stuckBreathOut: "Yavaşça Ver...",
+  stuckResumeBtn: "▶ Hazırım, Devam Et",
+  stuckTakeShortBreakBtn: "☕ 2 dk Kısa Nefes Molası",
+
+  moodLabels: {
+    calm: "Sakin",
+    focused: "Odaklı",
+    tired: "Yorgun",
+    anxious: "Gergin",
+    motivated: "İstekli",
+  },
+  moodPromptStart: "Seansa nasıl hissederek başlıyorsun? (isteğe bağlı)",
+  moodPromptEnd: "Tur sonunda nasıl hissediyorsun? (isteğe bağlı)",
+  moodQuickCheckinLabel: "Ruh Hali Ekle:",
+  moodPhaseStart: "Başlangıç",
+  moodPhaseEnd: "Tur Sonu",
+  moodPhaseCheckin: "Ara Kontrol",
+  moodEmptyHint: "Henüz ruh hali kaydı yok.",
+
+  breakChecklistTitle: "🌿 Mola Hatırlatıcıları",
+  defaultBreakChecklist: [
+    "💧 Su iç",
+    "🚻 Tuvalet",
+    "👀 20sn uzağa bak",
+    "🧘 Esne",
+  ],
+  breakChecklistSettingsTitle: "🌿 Mola Hatırlatıcı Notları",
+  breakChecklistPlaceholder: "Mola hatırlatıcısı ekle (örn: Esneme, Su)...",
+
+  timerStyleLabel: "Sayaç Görünümü",
+  timerStyleDigital: "Dijital",
+  timerStylePie: "Pasta",
+  timerStyleCandle: "Eriyen Mum",
+
+  ambientNoiseTitle: "🎧 Arka Plan Odak Sesi",
+  ambientSoundLabels: {
+    off: "Kapalı",
+    brown: "Brown Noise",
+    pink: "Pink Noise",
+    white: "White Noise",
+    rain: "Hafif Yağmur",
+  },
+  ambientVolumeLabel: "Ses Seviyesi",
+  ambientOnlyWorkToggle: (onlyWork) =>
+    onlyWork ? "Sadece çalışmada çal: Açık" : "Sadece çalışmada çal: Kapalı",
+
+  idleTimelineLabel: "Çalışma Dışı",
+
+  rescueSettingsTitle: "🧭 Başlayamıyorum Egzersizleri",
+  rescueExerciseNames: {
+    breathing: "4-4-4 Nefes",
+    gaze: "60sn Göz Kilidi",
+    physical: "30sn Fiziksel Reset",
+  },
+  rescueBreathCycle: (cur, total) => `Tur ${cur}/${total}`,
+  rescueDoneLabel: "✓ Tamamlandı — şimdi küçük bir başlangıç yapabilirsin",
+  rescueRestartBtn: "Tekrarla",
+  rescueGazeTitle: "👁️ 60sn Ekran Dışı Göz Kilidi",
+  rescueGazeHint:
+    "Ekrandan uzağa duvar veya nesnede tek bir noktaya 60 saniye sakinçe odaklan — bitince zil çalacak.",
+  rescueGazeStart: "60sn Başlat",
+  rescuePhysicalTitle: "🧍 30sn Fiziksel Reset",
+  rescuePhysicalSteps: [
+    "Ayağa kalk ve omurganı dikleştir.",
+    "Omuzlarını geriye çevir ve çeneni serbest bırak.",
+    "Derin bir nefes alıp bir yudum su iç.",
+  ],
+  rescuePhysicalStart: "30sn Başlat",
+  rescueNoneEnabledHint:
+    "Ayarlar'dan Başlayamıyorum egzersizlerini tekrar açabilirsin.",
+
+  warmupNoPenaltyBadge: "🌱 Isınma — ceza eklenmez",
 };
 
 const en: Translations = {
@@ -1144,6 +1392,7 @@ const en: Translations = {
   popularEntriesLabel: "Popular entries (Tab to select):",
   qcActiveTabLabel: "Last Open Tab",
   qcCurrentContextLabel: "Active Context",
+  qcOffSessionLabel: "🧠 Off-Session Braindump",
   qcContextNone: "Not set",
   qcReminderTitle: "🎯 Last Active Context — Resume Right Here:",
   qcReminderCloseHint: "Press Enter / Space / Esc to return immediately",
@@ -1151,6 +1400,21 @@ const en: Translations = {
   qcContextPlaceholder:
     "Type what you're actively working on & press Enter (e.g. Calc Problem 4, Auth API)...",
   qcRecentContextsLabel: "Recent contexts (Tab to select):",
+  qcEditTagsTooltip: "Edit / delete tags",
+  qcDoneEditingTags: "Done",
+  tagManagerTitle: "🏷️ Tag Management",
+  tagManagerHint: "Click a tag to rename, or × to delete.",
+  tagManagerEmpty: "No tags in this category.",
+  tagManagerAddPlaceholder: "Add new tag...",
+  tagManagerKindLabels: {
+    work: "💼 Work",
+    distraction_impulsive_task: "⚡ Task",
+    distraction_idea: "💡 Idea",
+    distraction_internal: "🧠 Internal",
+    distraction_external: "🔔 External",
+    ending: "⏹ Early Stop",
+    break_overtime: "⏰ Overtime",
+  },
 
   parkingBreakBannerTitle:
     "🅿️ These popped into your head while working — check them now:",
@@ -1165,12 +1429,6 @@ const en: Translations = {
   parkingMarkImportant: "⭐ Important",
   parkingMarkUnimportant: "💤 Minor",
   parkingEmpty: "No impulsive tasks, ideas, or screenshot notes in your parking lot yet.",
-
-  docsSyncAllBtn: "📄 Sync to Google Docs",
-  docsSyncSingleBtn: "📄 Send to Docs",
-  docsSyncedBadge: "Docs ✓",
-  openGoogleDocBtn: "📄 Open Focus Notebook Doc",
-  googleDocUrlHint: "Your living Google Doc synchronized via Google Docs & Drive API",
 
   workStoryEmpty:
     "No work story snapshots yet. While the work timer is running, a snapshot + active window + context is captured every 5 minutes.",
@@ -1229,6 +1487,137 @@ const en: Translations = {
   shortcutRecordPressKeys: "Press shortcut keys... (Esc cancel)",
   shortcutResetBtn: "Default Shortcut",
   shortcutTestBtn: "Test",
+
+  releaseCommandsTitle: "🚀 Release & Publish Commands",
+  releaseCommandsHint:
+    "These commands bump package.json, tauri.conf.json & Cargo.toml and trigger GitHub Actions automatically:",
+  releasePatchDesc: "Patch bump (1.0.3 → 1.0.4)",
+  releaseMinorDesc: "Minor feature (1.0.3 → 1.1.0)",
+  releaseMajorDesc: "Major release (1.0.3 → 2.0.0)",
+  releaseExactDesc: "Set an explicit version",
+  releaseDryDesc: "Preview without modifying files (--dry-run)",
+  copiedLabel: "Copied ✓",
+  copyBtn: "Copy",
+
+  bioContextTitle: "🧬 Biological Context (Today)",
+  bioSummaryTitle: "🧬 Daily Life & Mood Story",
+  bioEventLabels: {
+    wake: "Wake up",
+    coffee: "Coffee",
+    meds: "Meds",
+    meal: "Meal",
+  },
+  bioTimePlaceholder: "Time (HH:MM)",
+  bioNotePlaceholder: "Short note (e.g. 1 espresso, breakfast)...",
+  bioSaveBtn: "Save",
+  bioEmptyHint:
+    "No bio context entries yet. Log wake-up, coffee, meds or meals above.",
+  bioLoggedToast: (label, time) => `Logged ${label} (${time})`,
+
+  phaseWarmup: "🌱 Warm-up",
+  phaseFocus: "🎯 Focus",
+  phaseFinal: "🏁 Final Stretch",
+  phaseHyperfocus: "🔥 Hyperfocus",
+  warmupDoneBanner: "🌱 Warm-up done — you're in the flow now!",
+  halfwayBanner: "🌗 Halfway there — keep going!",
+  finalStretchBanner: (mins) => `🏁 Final ${mins} min — time to wrap up`,
+
+  hyperfocusSectionTitle: "🔥 Hyperfocus Mode (Keep Going)",
+  hyperfocusBtnLabel: (mins) => `+${mins}m Hyperfocus`,
+  hyperfocusActiveBanner: (mins) => `🔥 Hyperfocus active (+${mins}m added)`,
+  hyperfocusSummaryBadge: (mins) => `🔥 +${mins}m Hyperfocus`,
+  hyperfocusInsightLabel: "Total Hyperfocus",
+
+  parkingBucketToday: "📌 Today",
+  parkingBucketMaybe: "🤔 Maybe",
+  parkingBucketArchived: "📦 Archive",
+  moveToMaybe: "Maybe",
+  moveToArchive: "Archive",
+  moveToToday: "Today",
+  parkingMaybeEmpty: "Nothing in 'Maybe' yet.",
+  parkingArchivedEmpty: "No archived items.",
+
+  stuckBtnLabel: "🧭 I'm Stuck",
+  stuckModalTitle: "🧭 Having Trouble Starting?",
+  stuckModalSub:
+    "It's okay — your brain is just making step 1 feel huge. Let's shrink it:",
+  stuckBreathTitle: "🌬️ 4-4-4 Breathing Reset",
+  stuckBreathStart: "Start Breathing",
+  stuckBreathStop: "Stop",
+  stuckBreathIn: "Breathe In...",
+  stuckBreathHold: "Hold...",
+  stuckBreathOut: "Breathe Out...",
+  stuckResumeBtn: "▶ I'm Ready, Resume",
+  stuckTakeShortBreakBtn: "☕ Take 2m Short Break",
+
+  moodLabels: {
+    calm: "Calm",
+    focused: "Focused",
+    tired: "Tired",
+    anxious: "Anxious",
+    motivated: "Motivated",
+  },
+  moodPromptStart: "How are you feeling starting? (optional)",
+  moodPromptEnd: "How do you feel after this round? (optional)",
+  moodQuickCheckinLabel: "Log Mood:",
+  moodPhaseStart: "Start",
+  moodPhaseEnd: "Round End",
+  moodPhaseCheckin: "Check-in",
+  moodEmptyHint: "No mood entries yet.",
+
+  breakChecklistTitle: "🌿 Break Reminders",
+  defaultBreakChecklist: [
+    "💧 Drink water",
+    "🚻 Restroom",
+    "👀 Rest eyes 20s",
+    "🧘 Stretch",
+  ],
+  breakChecklistSettingsTitle: "🌿 Break Reminder Notes",
+  breakChecklistPlaceholder: "Add break reminder (e.g. Stretch, Water)...",
+
+  timerStyleLabel: "Timer Display",
+  timerStyleDigital: "Digital",
+  timerStylePie: "Pie",
+  timerStyleCandle: "Melting Candle",
+
+  ambientNoiseTitle: "🎧 Background Focus Sound",
+  ambientSoundLabels: {
+    off: "Off",
+    brown: "Brown Noise",
+    pink: "Pink Noise",
+    white: "White Noise",
+    rain: "Soft Rain",
+  },
+  ambientVolumeLabel: "Volume",
+  ambientOnlyWorkToggle: (onlyWork) =>
+    onlyWork ? "Play only during work: On" : "Play only during work: Off",
+
+  idleTimelineLabel: "Off-Session",
+
+  rescueSettingsTitle: "🧭 'I'm Stuck' Rescue Exercises",
+  rescueExerciseNames: {
+    breathing: "4-4-4 Breathing",
+    gaze: "60s Gaze Lock",
+    physical: "30s Physical Reset",
+  },
+  rescueBreathCycle: (cur, total) => `Cycle ${cur}/${total}`,
+  rescueDoneLabel: "✓ Complete — ready for a gentle start",
+  rescueRestartBtn: "Restart",
+  rescueGazeTitle: "👁️ 60s Off-Screen Gaze Lock",
+  rescueGazeHint:
+    "Rest your eyes on one stationary point away from the screen for 60s — a gentle chime plays when done.",
+  rescueGazeStart: "Start 60s",
+  rescuePhysicalTitle: "🧍 30s Physical Reset",
+  rescuePhysicalSteps: [
+    "Stand up and lengthen your spine.",
+    "Roll your shoulders back and unclench your jaw.",
+    "Take one deep breath and sip some water.",
+  ],
+  rescuePhysicalStart: "Start 30s",
+  rescueNoneEnabledHint:
+    "Re-enable Stuck Rescue exercises in Settings anytime.",
+
+  warmupNoPenaltyBadge: "🌱 Warm-up — no penalty added",
 };
 
 export const translations: Record<ActiveLang, Translations> = { tr, en };
