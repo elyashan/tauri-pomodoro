@@ -9,6 +9,15 @@ import type {
 import type { ActiveLang, Translations } from "../i18n";
 import { formatClock } from "../constants";
 import { ParkingLotPanel } from "../components/ParkingLot";
+import {
+  IconClose,
+  IconCoffee,
+  IconMenu,
+  IconMinimize,
+  IconPlay,
+  IconStop,
+  IconZap,
+} from "../components/Icons";
 
 export interface TimerPageProps {
   t: Translations;
@@ -191,7 +200,7 @@ export function TimerPage({
                 : t.menu
             }
           >
-            ☰
+            <IconMenu size={13} />
             {updateAvailable && <span className="update-dot" />}
           </button>
           <button
@@ -199,23 +208,28 @@ export function TimerPage({
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
           >
-            −
+            <IconMinimize size={13} />
           </button>
           <button
             className="icon-btn"
             title={t.hideToTrayOnlyTooltip}
             onClick={onHideToTray}
           >
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
       </div>
 
       <div className="timer-wrap">
         {isBreakAlarm ? (
-          <div className="timer-display alarm-timer">
-            -{formatClock(breakOverdueSec)}
-          </div>
+          <>
+            <div className="timer-display alarm-timer">
+              -{formatClock(breakOverdueSec)}
+            </div>
+            <div className="alarm-badge">
+              {t.breakOverdueBadge(formatClock(breakOverdueSec))}
+            </div>
+          </>
         ) : (
           <div
             className="timer-display clickable-timer"
@@ -275,7 +289,7 @@ export function TimerPage({
               onClick={onDismissReminderBanner}
               title={t.cancel}
             >
-              ✕
+              <IconClose size={10} />
             </button>
           </div>
         )}
@@ -310,7 +324,8 @@ export function TimerPage({
               onClick={onToggleRunning}
               title={t.timerResumeTooltip}
             >
-              {t.resumeWorkBtn}
+              <IconPlay size={11} />
+              <span>{t.resumeWorkBtn}</span>
             </button>
           )}
           <button
@@ -318,9 +333,12 @@ export function TimerPage({
             onClick={onStartWorkFromBreak}
             title={breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn}
           >
-            {breakKind === "short"
-              ? t.returnToWorkCompact
-              : t.startWorkCompact}
+            <IconPlay size={11} />
+            <span>
+              {breakKind === "short"
+                ? t.returnToWorkCompact
+                : t.startWorkCompact}
+            </span>
           </button>
         </div>
       ) : (
@@ -331,7 +349,8 @@ export function TimerPage({
               onClick={onToggleRunning}
               title={t.timerResumeTooltip}
             >
-              {t.resumeWorkBtn}
+              <IconPlay size={11} />
+              <span>{t.resumeWorkBtn}</span>
             </button>
           )}
           <button
@@ -339,17 +358,22 @@ export function TimerPage({
             onClick={onTakeShortBreak}
             title={t.shortBreakBtnTooltip(currentPlan.shortBreakMins)}
           >
-            {t.shortBreakBtn(currentPlan.shortBreakMins)}
+            <IconCoffee size={12} />
+            <span>{t.shortBreakBtn(currentPlan.shortBreakMins)}</span>
           </button>
           <button onClick={onStopSession} title={t.stopBtnTooltip}>
-            {t.stop}
+            <IconStop size={11} />
+            <span>{t.stop}</span>
           </button>
           <button
             className="warn-btn"
             onClick={onDistractedClick}
             title={t.distractedBtnTooltip(distractPenaltyMins)}
           >
-            {t.distractedBtnCompact(distractPenaltyMins)}
+            <IconZap size={12} />
+            {t.distractedBtnCompact(distractPenaltyMins) ? (
+              <span>{t.distractedBtnCompact(distractPenaltyMins)}</span>
+            ) : null}
           </button>
         </div>
       )}

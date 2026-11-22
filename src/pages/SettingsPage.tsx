@@ -18,6 +18,7 @@ import {
   UI_SCALE_OPTIONS,
 } from "../constants";
 import { formatKeyCombo } from "../lib/keyCombo";
+import { IconArrowLeft } from "../components/Icons";
 
 export interface SettingsPageProps {
   t: Translations;
@@ -127,7 +128,8 @@ export function SettingsPage({
       <div className="top-bar">
         <span className="badge">{t.settingsTitle}</span>
         <button className="ghost-btn" onClick={onOpenMenu}>
-          ← {t.home}
+          <IconArrowLeft size={12} />
+          <span>{t.home}</span>
         </button>
       </div>
 

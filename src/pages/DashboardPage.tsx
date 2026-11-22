@@ -12,6 +12,12 @@ import {
   ParkingIdeaRow,
   ParkingTaskRow,
 } from "../components/ParkingLot";
+import {
+  IconArrowLeft,
+  IconChart,
+  IconClose,
+  IconMinimize,
+} from "../components/Icons";
 
 export interface DashboardPageProps {
   t: Translations;
@@ -112,24 +118,26 @@ export function DashboardPage({
             onClick={onOpenSummary}
             title={t.summaryTitle}
           >
-            📈 {t.summary}
+            <IconChart size={12} />
+            <span>{t.summary}</span>
           </button>
           <button className="ghost-btn" onClick={onOpenMenu}>
-            ← {t.home}
+            <IconArrowLeft size={12} />
+            <span>{t.home}</span>
           </button>
           <button
             className="icon-btn"
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
           >
-            −
+            <IconMinimize size={13} />
           </button>
           <button
             className="icon-btn"
             title={t.hideToTrayOnlyTooltip}
             onClick={onHideToTray}
           >
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
       </div>

@@ -13,6 +13,7 @@ import {
 import { ActiveLang, translations } from "./i18n";
 import { DISTRACT_CATEGORIES } from "./constants";
 import { isLightColor } from "./lib/color";
+import { IconCheck, IconClose } from "./components/Icons";
 
 interface FrontendContextSnapshot {
   currentContext: string;
@@ -114,13 +115,20 @@ export default function QuickCapture() {
     invoke("close_capture_and_restore_focus").catch(() => {});
   };
 
-  const resizeForStage = (nextStage: CaptureStage, scalePct?: number) => {
+  const resizeForStage = (
+    nextStage: CaptureStage,
+    scalePct?: number,
+    hasSuggestions?: boolean,
+    entryCount = 0,
+  ) => {
     const mult = Math.max(1, (scalePct ?? 100) / 100);
     const dims =
       nextStage === "reminder"
         ? { w: 540, h: 205 }
         : nextStage === "input"
-          ? { w: 580, h: 395 }
+          ? hasSuggestions && entryCount > 0
+            ? { w: 580, h: 252 + Math.min(5, entryCount) * 34 }
+            : { w: 580, h: 248 }
           : nextStage === "context"
             ? { w: 580, h: 325 }
             : { w: 580, h: 280 };
@@ -197,8 +205,13 @@ export default function QuickCapture() {
   }, []);
 
   useEffect(() => {
-    resizeForStage(stage, payload?.snapshot?.uiScale);
-  }, [stage, payload?.snapshot?.uiScale]);
+    resizeForStage(
+      stage,
+      payload?.snapshot?.uiScale,
+      doesCategoryAddPenalty(category),
+      popularEntries.length,
+    );
+  }, [stage, category, popularEntries.length, payload?.snapshot?.uiScale]);
 
   useEffect(() => {
     document.documentElement.style.zoom = "";
@@ -219,6 +232,7 @@ export default function QuickCapture() {
     setSelectedTag("");
     setAddingTag(false);
     setNewTagInput("");
+    setPopularEntries([]);
     setStage("tag");
     loadTagsForCategory(targetCat, lang).catch(() => {});
     requestAnimationFrame(() => {
@@ -230,8 +244,14 @@ export default function QuickCapture() {
     setSelectedTag(tagValue);
     setFocusedEntryIdx(-1);
     setStage("input");
-    const entries = await getTopCategoryReasons(category, tagValue, 5);
-    setPopularEntries(entries);
+    if (doesCategoryAddPenalty(category)) {
+      const entries = await getTopCategoryReasons(category, tagValue, 5).catch(
+        () => [],
+      );
+      setPopularEntries(entries.slice(0, 5));
+    } else {
+      setPopularEntries([]);
+    }
     requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
@@ -539,7 +559,9 @@ export default function QuickCapture() {
       : stage === "tag"
         ? t.qcStepTagHint
         : stage === "input"
-          ? t.qcStepInputHint
+          ? addsPenalty && popularEntries.length > 0
+            ? t.qcStepInputHint
+            : t.qcStepInputNoSuggestionsHint
           : t.qcStepContextHint;
 
   const handleShellMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -654,7 +676,7 @@ export default function QuickCapture() {
                     className="qc-tag-inline-btn save"
                     onClick={() => handleSaveNewTag().catch(() => {})}
                   >
-                    ✓
+                    <IconCheck size={10} />
                   </button>
                   <button
                     type="button"
@@ -665,7 +687,7 @@ export default function QuickCapture() {
                       requestAnimationFrame(() => shellRef.current?.focus());
                     }}
                   >
-                    ✕
+                    <IconClose size={10} />
                   </button>
                 </div>
               ) : (
@@ -717,7 +739,7 @@ export default function QuickCapture() {
                 </span>
               </div>
 
-              {popularEntries.length > 0 && (
+              {addsPenalty && popularEntries.length > 0 && (
                 <div className="qc-entries-box">
                   <div className="qc-entries-header">
                     {t.popularEntriesLabel}
@@ -735,6 +757,7 @@ export default function QuickCapture() {
                           tabIndex={-1}
                           className={`qc-entry-row ${isFocused ? "selected" : ""}`}
                           onClick={() => advanceFromInput(entry).catch(() => {})}
+                          title={entry}
                         >
                           <span className="qc-entry-idx">
                             {isFocused ? "▶" : `${idx + 1}.`}
@@ -782,7 +805,7 @@ export default function QuickCapture() {
                     ).catch(() => {})
                   }
                 >
-                  ✓
+                  <IconCheck size={13} />
                 </button>
               </div>
               {recentContexts.length > 0 && (
@@ -820,7 +843,8 @@ export default function QuickCapture() {
               className="qc-close-btn"
               onClick={closeAndRestore}
             >
-              Esc ✕
+              <span>Esc</span>
+              <IconClose size={10} />
             </button>
           </div>
         </>

@@ -65,7 +65,8 @@ import {
   saveSessionCycleStats,
   recordDistraction,
   getWeeklySummary,
-  clearAllData,
+  ClearDataOptions,
+  clearSelectedData,
   getTags,
   addTag,
   updateTag,
@@ -135,6 +136,7 @@ import {
 } from "./lib/audio";
 import { hexToRgba, isLightColor } from "./lib/color";
 import { buildSingleItemParkingData } from "./components/ParkingLot";
+import { IconClose } from "./components/Icons";
 import { MiniDock } from "./components/MiniDock";
 import {
   BreakOverdueModal,
@@ -554,6 +556,8 @@ export default function App() {
   activeLangRef.current = activeLang;
   const freqOnlyTodayRef = useRef(freqOnlyToday);
   freqOnlyTodayRef.current = freqOnlyToday;
+  const isRunningRef = useRef<boolean>(false);
+  isRunningRef.current = isRunning;
 
   useEffect(() => {
     (async () => {
@@ -650,15 +654,7 @@ export default function App() {
             ) {
               setWorkPauseStartedAtMs(savedRuntime.workPauseStartedAt);
             }
-            const normalizedPage: NavPage =
-              saved.page === "timer" ||
-              saved.page === "work" ||
-              saved.page === "break"
-                ? "timer"
-                : saved.page === "summary" || saved.page === "settings"
-                  ? saved.page
-                  : "menu";
-            setPage(normalizedPage);
+            setPage("timer");
           } else {
             setWorkSecondsLeft(validPlan.workMins * 60);
             setWorkElapsedSec(0);
@@ -687,13 +683,7 @@ export default function App() {
                 validPlan.standardBreakMins * 60,
               ),
             );
-            setPage(
-              saved.page === "work" ||
-                saved.page === "break" ||
-                saved.page === "timer"
-                ? "timer"
-                : saved.page,
-            );
+            setPage("timer");
           } else {
             setSessionActive(false);
             setTimerMode("work");
@@ -763,6 +753,9 @@ export default function App() {
         console.error("Otomatik başlatma ayarlanamadı:", err);
       }
 
+      const startWin = getCurrentWindow();
+      await startWin.show().catch(() => {});
+      await startWin.unminimize().catch(() => {});
       setLoaded(true);
     })();
   }, []);
@@ -1103,17 +1096,38 @@ export default function App() {
     }
   };
 
+  const revealExpandedWindow = async () => {
+    try {
+      if (isMiniDockRef.current) {
+        await exitMiniDock();
+      } else {
+        const win = getCurrentWindow();
+        await win.show().catch(() => {});
+        await win.unminimize().catch(() => {});
+      }
+      if (runtimeStateRef.current.sessionActive) {
+        setPage("timer");
+      }
+    } catch {
+      // ignore
+    }
+  };
+  const revealExpandedWindowRef =
+    useRef<() => Promise<void>>(revealExpandedWindow);
+  revealExpandedWindowRef.current = revealExpandedWindow;
+
   // Mini-Dock modundayken dikkat dağılırsa veya context güncellenirse sağ altta kısa süreli göster
   useEffect(() => {
     if (!loaded || !isMiniDock || !reminderBanner) return;
     triggerMiniDockContextToast(reminderBanner.text);
   }, [reminderBanner, isMiniDock, loaded]);
 
-  // Sistem tepsisi (Tray) ve pencere kapatma olaylarını dinle
+  // Sistem tepsisi (Tray), OS uyanma ve pencere kapatma olaylarını dinle
   useEffect(() => {
     if (!loaded) return;
     let unlistenMini: (() => void) | null = null;
     let unlistenRestore: (() => void) | null = null;
+    let unlistenOsResumed: (() => void) | null = null;
     let unlistenResize: (() => void) | null = null;
 
     (async () => {
@@ -1122,6 +1136,17 @@ export default function App() {
       });
       unlistenRestore = await listen("tray-restore", () => {
         exitMiniDock();
+      });
+      unlistenOsResumed = await listen("os-resumed", () => {
+        const rt = runtimeStateRef.current;
+        if (rt.sessionActive && rt.mode === "work" && isRunningRef.current) {
+          if (!workPauseStartedAtRef.current) {
+            setWorkPauseStartedAtMs(lastTickRef.current || Date.now());
+          }
+          lastTickRef.current = Date.now();
+          setIsRunning(false);
+        }
+        void revealExpandedWindowRef.current();
       });
       const win = getCurrentWindow();
       unlistenResize = await win.onResized(async () => {
@@ -1142,6 +1167,7 @@ export default function App() {
     return () => {
       if (unlistenMini) unlistenMini();
       if (unlistenRestore) unlistenRestore();
+      if (unlistenOsResumed) unlistenOsResumed();
       if (unlistenResize) unlistenResize();
     };
   }, [loaded, isMiniDock, theme.uiScale]);
@@ -1156,6 +1182,8 @@ export default function App() {
   const hasWorkElapsed = workElapsedSec > 0;
   const hasWorkPauseStart = workPauseStartedAtMs !== null;
   const hasReminderBanner = Boolean(reminderBanner);
+  const isBreakAlarm =
+    sessionActive && timerMode === "break" && breakOverdueSec > 0;
 
   // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
   useEffect(() => {
@@ -1170,8 +1198,8 @@ export default function App() {
       let modalW = 325;
       let modalH = 340;
       if (showDistractBox) {
-        modalW = 350;
-        modalH = 420;
+        modalW = 370;
+        modalH = 490;
       } else if (showShortBreakPrompt || showContextEditBox) {
         const hasChips = Boolean(currentContext || recentContexts.length > 0);
         modalW = 325;
@@ -1211,7 +1239,8 @@ export default function App() {
     const timerMinH =
       (timerMode === "work" ? DEFAULT_WINDOW_SIZES.timer.height : 138) +
       (hasPausedHint ? 20 : 0) +
-      (hasTimerReminder ? 28 : 0);
+      (hasTimerReminder ? 28 : 0) +
+      (isBreakAlarm ? 24 : 0);
 
     if (custom) {
       const w = hasBreakParking
@@ -1220,7 +1249,7 @@ export default function App() {
           ? Math.max(custom.width, timerMinW)
           : custom.width;
       const h = hasBreakParking
-        ? Math.max(custom.height, 365)
+        ? Math.max(custom.height, isBreakAlarm ? 392 : 365)
         : targetPage === "timer"
           ? Math.max(custom.height, timerMinH)
           : custom.height;
@@ -1250,7 +1279,7 @@ export default function App() {
       );
     } else {
       const w = hasBreakParking ? 345 : timerMinW;
-      const h = hasBreakParking ? 365 : timerMinH;
+      const h = hasBreakParking ? (isBreakAlarm ? 392 : 365) : timerMinH;
       applyScaledSize(w, h);
     }
   }, [
@@ -1273,6 +1302,7 @@ export default function App() {
     hasWorkElapsed,
     hasWorkPauseStart,
     hasReminderBanner,
+    isBreakAlarm,
     timerMode,
     showBreakParking,
     breakParkingData.pendingTasks.length,
@@ -1459,6 +1489,7 @@ export default function App() {
           }
           lastTickRef.current = Date.now();
           setIsRunning(false);
+          void revealExpandedWindowRef.current();
           return;
         }
         const latestNow = Date.now();
@@ -1512,6 +1543,7 @@ export default function App() {
           setWorkPauseStartedAtMs(Date.now() - rewindSec * 1000);
         }
         setIsRunning(false);
+        void revealExpandedWindowRef.current();
       }
     }, 10000);
     return () => clearInterval(pollIdle);
@@ -3001,54 +3033,62 @@ export default function App() {
     setExpandedTags((prev) => ({ ...prev, [tagName]: !prev[tagName] }));
   };
 
-  const handleResetAllData = async () => {
-    setIsRunning(false);
+  const handleResetData = async (options: ClearDataOptions) => {
+    if (!options.workTime && !options.distractions) return;
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
-    await clearAllData(locale);
-    const freshStats = await getActiveDayStats(locale);
-    const freshWeekly = await getWeeklySummary(locale);
-    const freshReasons = await getSummaryReasonsData(freqOnlyToday);
-    const freshTimeline = await getTimelineSessions(freshStats.dayId);
+    if (options.workTime) {
+      setIsRunning(false);
+    }
+    await clearSelectedData(options, locale);
 
-    setSessionActive(false);
-    setTimerMode("work");
-    setWorkSecondsLeft(currentPlan.workMins * 60);
-    setWorkElapsedSec(0);
-    setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
-    setBreakTotalSec(currentPlan.standardBreakMins * 60);
-    setBreakElapsedSec(0);
-    setBreakOverdueSec(0);
-    setBreakOvertimeAccumSec(0);
-    setWorkPauseStartedAtMs(null);
-    setWorkPausedLiveSec(0);
-    setPendingWorkPauseSec(0);
-    setPendingWorkPauseStartIso(null);
-    setBreakOverdueSource("break");
-    setCurrentSessionDistractions(0);
-    setCompletedWorkCount(0);
-    setSessionShortBreakCount(0);
-    setCurrentContext("");
-    setActiveContextLogId(null);
-    setContextStartedAtElapsedSec(0);
-    setReminderBanner(null);
-    setBreakParkingData(EMPTY_PARKING);
-    setSummaryParkingData(EMPTY_PARKING);
-    setContextStats([]);
-    setAppDistractions([]);
-    setRecentContexts([]);
-    workStartedAtRef.current = null;
-    breakStartedAtRef.current = null;
+    if (options.workTime) {
+      const freshStats = await getActiveDayStats(locale);
+      setSessionActive(false);
+      setTimerMode("work");
+      setWorkSecondsLeft(currentPlan.workMins * 60);
+      setWorkElapsedSec(0);
+      setSavedWorkSecondsLeft(currentPlan.workMins * 60);
+      setSavedWorkElapsedSec(0);
+      setBreakKind("standard");
+      setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
+      setBreakTotalSec(currentPlan.standardBreakMins * 60);
+      setBreakElapsedSec(0);
+      setBreakOverdueSec(0);
+      setBreakOvertimeAccumSec(0);
+      setWorkPauseStartedAtMs(null);
+      setWorkPausedLiveSec(0);
+      setPendingWorkPauseSec(0);
+      setPendingWorkPauseStartIso(null);
+      setBreakOverdueSource("break");
+      setCompletedWorkCount(0);
+      setSessionShortBreakCount(0);
+      setCurrentContext("");
+      setActiveContextLogId(null);
+      setContextStartedAtElapsedSec(0);
+      setReminderBanner(null);
+      setContextStats([]);
+      setRecentContexts([]);
+      workStartedAtRef.current = null;
+      breakStartedAtRef.current = null;
+      setDayStats(freshStats);
+      setSelectedDayStats({ totalSec: 0, sessionCount: 0, avgSec: 0 });
+      setWorkStoryEntries([]);
+      setHoveredWeekDay(null);
+      setHoveredTimelineItem(null);
+    }
 
-    setDayStats(freshStats);
-    setSelectedSummaryDate(toLocalDateStr());
-    setSelectedDayStats({ totalSec: 0, sessionCount: 0, avgSec: 0 });
-    setWorkStoryEntries([]);
-    setWeeklySummary(freshWeekly);
-    setSummaryReasonsData(freshReasons);
-    setTimelineSessions(freshTimeline);
-    setAdhdInsights(null);
-    setHoveredWeekDay(null);
-    setHoveredTimelineItem(null);
+    if (options.distractions) {
+      setCurrentSessionDistractions(0);
+      setBreakParkingData(EMPTY_PARKING);
+      setSummaryParkingData(EMPTY_PARKING);
+      setAppDistractions([]);
+    }
+
+    const nextDate = options.workTime ? toLocalDateStr() : selectedSummaryDate;
+    if (options.workTime) {
+      setSelectedSummaryDate(nextDate);
+    }
+    await loadSummaryForScope(summaryTab, nextDate, activeLang);
     setShowResetConfirm(false);
   };
 
@@ -3096,7 +3136,7 @@ export default function App() {
         <div className="top-bar">
           <span className="badge">⠿ Error</span>
           <button className="icon-btn" onClick={hideToTray}>
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
         <div
@@ -3112,8 +3152,6 @@ export default function App() {
     );
   }
 
-  const isBreakAlarm =
-    sessionActive && timerMode === "break" && breakOverdueSec > 0;
   const isTimerAlarmView = page === "timer" && isBreakAlarm;
 
   const progressPct = !sessionActive
@@ -3205,6 +3243,7 @@ export default function App() {
         modeClass={modeClass}
         isBreakAlarm={isBreakAlarm}
         isCelebrating={isCelebrating}
+        isRunning={isRunning}
         miniDockContextToast={miniDockContextToast}
         shellStyle={shellStyle}
         sessionActive={sessionActive}
@@ -3213,7 +3252,10 @@ export default function App() {
         liveClockStr={liveClockStr}
         progressPct={progressPct}
         t={t}
-        onMouseDown={handleMouseDown}
+        onStartDrag={() => {
+          miniDockUserDraggedRef.current = true;
+          getCurrentWindow().startDragging().catch(() => {});
+        }}
         onExitMiniDock={exitMiniDock}
         onHideToTray={hideToTray}
       />
@@ -3259,12 +3301,6 @@ export default function App() {
           />
           <div className="celebration-badge">{t.sessionCompleted}</div>
         </>
-      )}
-
-      {isTimerAlarmView && (
-        <div className="alarm-badge">
-          {t.breakOverdueBadge(formatClock(breakOverdueSec))}
-        </div>
       )}
 
       {/* İnce Yuvarlatılmış İlerleme Çizgisi (Yalnızca sayaç ekranında) */}
@@ -3555,7 +3591,7 @@ export default function App() {
               onOpenDashboard={openDashboard}
               onOpenMenu={openMenu}
               onSetShowResetConfirm={setShowResetConfirm}
-              onResetAllData={handleResetAllData}
+              onResetData={handleResetData}
               onSetHoveredTimelineItem={setHoveredTimelineItem}
               onSetHoveredWeekDay={setHoveredWeekDay}
               onSyncParkingToDocs={handleSyncParkingToDocs}

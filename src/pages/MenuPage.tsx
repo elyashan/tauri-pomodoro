@@ -6,6 +6,15 @@ import type {
 } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
 import type { UpdateStatus } from "../updater";
+import {
+  IconChart,
+  IconClose,
+  IconDashboard,
+  IconMinimize,
+  IconPlay,
+  IconSettings,
+  IconStop,
+} from "../components/Icons";
 
 export interface MenuPageProps {
   t: Translations;
@@ -86,21 +95,23 @@ export function MenuPage({
             title={t.dashboardBtn}
             onClick={onOpenDashboard}
           >
-            📊 {t.dashboardBtn}
+            <IconDashboard size={12} />
+            <span>{t.dashboardBtn}</span>
           </button>
           <button
             className="ghost-btn"
             title={t.summaryTitle}
             onClick={onOpenSummary}
           >
-            📈 {t.summary}
+            <IconChart size={12} />
+            <span>{t.summary}</span>
           </button>
           <button
             className="icon-btn"
             title={t.settings}
             onClick={onOpenSettings}
           >
-            ⚙
+            <IconSettings size={13} />
             {updateAvailable && <span className="update-dot" />}
           </button>
           <button
@@ -108,14 +119,14 @@ export function MenuPage({
             title={t.miniDockTooltip}
             onClick={onEnterMiniDock}
           >
-            −
+            <IconMinimize size={13} />
           </button>
           <button
             className="icon-btn"
             title={t.hideToTrayOnlyTooltip}
             onClick={onHideToTray}
           >
-            ✕
+            <IconClose size={12} />
           </button>
         </div>
       </div>
@@ -337,16 +348,20 @@ export function MenuPage({
           {sessionActive ? (
             <>
               <button className="primary-btn" onClick={onReturnToTimer}>
-                {timerMode === "work"
-                  ? t.returnToWorkMenuBtn
-                  : t.returnToBreakMenuBtn}
+                <IconPlay size={11} />
+                <span>
+                  {timerMode === "work"
+                    ? t.returnToWorkMenuBtn
+                    : t.returnToBreakMenuBtn}
+                </span>
               </button>
               <button
                 className="warn-btn"
                 onClick={onFinishSession}
                 title={t.finishSessionTooltip}
               >
-                {t.finishSessionBtn}
+                <IconStop size={11} />
+                <span>{t.finishSessionBtn}</span>
               </button>
             </>
           ) : (
@@ -355,7 +370,8 @@ export function MenuPage({
               onClick={onStartSession}
               title={t.startSessionTooltip}
             >
-              {t.startSessionBtn}
+              <IconPlay size={11} />
+              <span>{t.startSessionBtn}</span>
             </button>
           )}
         </div>

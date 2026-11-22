@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   AdhdInsightsData,
+  ClearDataOptions,
   ParkingItem,
   ParkingLotData,
   SummaryReasonsData,
@@ -17,6 +18,14 @@ import {
   ParkingLotPanel,
   SessionStorySlideshow,
 } from "../components/ParkingLot";
+import {
+  IconArrowLeft,
+  IconChevronLeft,
+  IconChevronRight,
+  IconDashboard,
+  IconDownload,
+  IconTrash,
+} from "../components/Icons";
 
 export type SummaryTabType = "timeline" | "weekly";
 
@@ -56,7 +65,7 @@ export interface SummaryPageProps {
   onOpenDashboard: () => void;
   onOpenMenu: () => void;
   onSetShowResetConfirm: (show: boolean) => void;
-  onResetAllData: () => void;
+  onResetData: (options: ClearDataOptions) => void;
   onSetHoveredTimelineItem: (item: TimelineSessionItem | null) => void;
   onSetHoveredWeekDay: (day: WeekDayStat | null) => void;
   onSyncParkingToDocs: () => void;
@@ -103,7 +112,7 @@ export function SummaryPage({
   onOpenDashboard,
   onOpenMenu,
   onSetShowResetConfirm,
-  onResetAllData,
+  onResetData,
   onSetHoveredTimelineItem,
   onSetHoveredWeekDay,
   onSyncParkingToDocs,
@@ -118,6 +127,15 @@ export function SummaryPage({
   const [activeStorySessionId, setActiveStorySessionId] = useState<
     number | null
   >(null);
+  const [resetWorkTime, setResetWorkTime] = useState(true);
+  const [resetDistractions, setResetDistractions] = useState(true);
+
+  useEffect(() => {
+    if (showResetConfirm) {
+      setResetWorkTime(true);
+      setResetDistractions(true);
+    }
+  }, [showResetConfirm]);
   const activeStorySession =
     summaryTab === "timeline"
       ? (timelineSessions.find(
@@ -165,21 +183,64 @@ export function SummaryPage({
             onClick={onOpenDashboard}
             title={t.dashboardBtn}
           >
-            📊 {t.dashboardBtn}
+            <IconDashboard size={12} />
+            <span>{t.dashboardBtn}</span>
           </button>
           <button className="ghost-btn" onClick={onOpenMenu}>
-            ← {t.home}
+            <IconArrowLeft size={12} />
+            <span>{t.home}</span>
           </button>
         </div>
       </div>
 
       {showResetConfirm ? (
-        <div className="reset-confirm-box">
+        <div className="reset-confirm-box no-drag">
           <div className="reset-confirm-title">{t.resetConfirmTitle}</div>
           <div className="reset-confirm-desc">{t.resetConfirmDesc}</div>
+          <div className="reset-options-list">
+            <label className="reset-option-row">
+              <input
+                type="checkbox"
+                checked={resetWorkTime}
+                onChange={(e) => setResetWorkTime(e.target.checked)}
+              />
+              <div className="reset-option-copy">
+                <div className="reset-option-title">
+                  {t.resetOptionWorkTitle}
+                </div>
+                <div className="reset-option-desc">{t.resetOptionWorkDesc}</div>
+              </div>
+            </label>
+            <label className="reset-option-row">
+              <input
+                type="checkbox"
+                checked={resetDistractions}
+                onChange={(e) => setResetDistractions(e.target.checked)}
+              />
+              <div className="reset-option-copy">
+                <div className="reset-option-title">
+                  {t.resetOptionDistractionsTitle}
+                </div>
+                <div className="reset-option-desc">
+                  {t.resetOptionDistractionsDesc}
+                </div>
+              </div>
+            </label>
+          </div>
           <div className="btn-row" style={{ marginTop: "8px" }}>
-            <button className="warn-btn" onClick={onResetAllData}>
-              {t.resetConfirmYes}
+            <button
+              className="warn-btn"
+              disabled={!resetWorkTime && !resetDistractions}
+              onClick={() =>
+                onResetData({
+                  workTime: resetWorkTime,
+                  distractions: resetDistractions,
+                })
+              }
+            >
+              {resetWorkTime && resetDistractions
+                ? t.resetConfirmYes
+                : t.resetConfirmSelected}
             </button>
             <button onClick={() => onSetShowResetConfirm(false)}>
               {t.cancel}
@@ -197,7 +258,7 @@ export function SummaryPage({
                   className="ghost-btn"
                   onClick={() => onShiftDate(summaryTab === "weekly" ? -7 : -1)}
                 >
-                  ◀
+                  <IconChevronLeft size={12} />
                 </button>
                 <span className="summary-date-label">{dateDisplayLabel}</span>
                 <button
@@ -205,7 +266,7 @@ export function SummaryPage({
                   className="ghost-btn"
                   onClick={() => onShiftDate(summaryTab === "weekly" ? 7 : 1)}
                 >
-                  ▶
+                  <IconChevronRight size={12} />
                 </button>
               </div>
               <div className="summary-date-actions">
@@ -844,7 +905,8 @@ export function SummaryPage({
                 onClick={onExportData}
                 title={t.exportDataTooltip(exportDirPath || "Downloads")}
               >
-                {t.exportDataBtn}
+                <IconDownload size={12} />
+                <span>{t.exportDataBtn}</span>
               </button>
               {exportSavedMsg && (
                 <span className="summary-export-saved" title={exportSavedMsg}>
@@ -856,7 +918,8 @@ export function SummaryPage({
               className="ghost-btn reset-data-btn"
               onClick={() => onSetShowResetConfirm(true)}
             >
-              🗑 {t.resetAllData}
+              <IconTrash size={12} />
+              <span>{t.resetAllData}</span>
             </button>
           </div>
         </div>

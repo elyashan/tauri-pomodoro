@@ -1214,27 +1214,70 @@ export async function getWeeklySummary(
 // Verileri Sıfırlama
 // ---------------------------------------------------------------------------
 
-export async function clearAllData(locale = "tr-TR"): Promise<void> {
+export interface ClearDataOptions {
+  workTime: boolean;
+  distractions: boolean;
+}
+
+export async function clearSelectedData(
+  options: ClearDataOptions,
+  locale = "tr-TR",
+): Promise<void> {
+  if (!options.workTime && !options.distractions) return;
   const db = await getDb();
-  for (const table of [
-    "sessions",
-    "distractions",
-    "parking_items",
-    "context_logs",
-    "work_story_entries",
-    "sync_queue",
-    "study_days",
-  ]) {
-    await db.execute(`DELETE FROM ${table}`);
+
+  if (options.workTime && options.distractions) {
+    for (const table of [
+      "sessions",
+      "distractions",
+      "parking_items",
+      "context_logs",
+      "work_story_entries",
+      "sync_queue",
+      "study_days",
+    ]) {
+      await db.execute(`DELETE FROM ${table}`);
+    }
+    await db.execute(
+      "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
+    );
+    await db.execute(
+      "UPDATE app_state SET page = 'menu', work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
+      [DEFAULT_WORK_SEC, DEFAULT_BREAK_SEC],
+    );
+    await getOrCreateActiveDay(db, locale);
+    return;
   }
-  await db.execute(
-    "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
-  );
-  await db.execute(
-    "UPDATE app_state SET page = 'menu', work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
-    [DEFAULT_WORK_SEC, DEFAULT_BREAK_SEC],
-  );
-  await getOrCreateActiveDay(db, locale);
+
+  if (options.workTime) {
+    for (const table of ["sessions", "work_story_entries", "context_logs"]) {
+      await db.execute(`DELETE FROM ${table}`);
+    }
+    await db.execute(
+      "DELETE FROM sync_queue WHERE entity_type IN ('session', 'work_story_entry', 'work_story_delete', 'context_log_start', 'context_log_finalize')",
+    );
+    await db.execute(
+      "DELETE FROM settings WHERE key IN ('completedWorkCount', 'sessionShortBreakCount', 'runtimeState')",
+    );
+    await db.execute(
+      "UPDATE app_state SET page = 'menu', work_seconds_left = $1, work_elapsed_sec = 0, break_seconds_left = $2 WHERE id = 1",
+      [DEFAULT_WORK_SEC, DEFAULT_BREAK_SEC],
+    );
+    await getOrCreateActiveDay(db, locale);
+  }
+
+  if (options.distractions) {
+    await db.execute("DELETE FROM distractions");
+    await db.execute("DELETE FROM parking_items");
+    await db.execute("UPDATE context_logs SET distraction_count = 0");
+    await db.execute(
+      "DELETE FROM sync_queue WHERE entity_type IN ('distraction', 'parking_item', 'parking_item_add', 'parking_item_update', 'parking_item_delete', 'parking_update', 'parking_delete')",
+    );
+  }
+}
+
+export async function clearAllData(locale = "tr-TR"): Promise<void> {
+  await clearSelectedData({ workTime: true, distractions: true }, locale);
 }
 
 // ---------------------------------------------------------------------------

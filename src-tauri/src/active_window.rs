@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{lock_state, SharedCaptureState};
 
@@ -129,6 +129,11 @@ pub fn spawn_foreground_watcher(app: &AppHandle) {
             let now = current_epoch_ms();
             if prev_ms > 0 && now.saturating_sub(prev_ms) > SLEEP_GAP_THRESHOLD_MS {
                 LAST_OS_SLEEP_AT_MS.store(now, Ordering::Relaxed);
+                if let Some(win) = handle.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.emit("os-resumed", now);
+                }
             }
             LAST_AWAKE_BEAT_MS.store(now, Ordering::Relaxed);
             prev_ms = now;

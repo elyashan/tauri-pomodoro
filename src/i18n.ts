@@ -90,6 +90,11 @@ export interface Translations {
   resetConfirmTitle: string;
   resetConfirmDesc: string;
   resetConfirmYes: string;
+  resetOptionWorkTitle: string;
+  resetOptionWorkDesc: string;
+  resetOptionDistractionsTitle: string;
+  resetOptionDistractionsDesc: string;
+  resetConfirmSelected: string;
   avgDistractionsPerSession: string;
   distractionReasonsTab: string;
   endingReasonsTab: string;
@@ -271,6 +276,7 @@ export interface Translations {
   qcStepCategoryHint: string;
   qcStepTagHint: string;
   qcStepInputHint: string;
+  qcStepInputNoSuggestionsHint: string;
   qcStepContextHint: string;
   popularEntriesLabel: string;
   qcActiveTabLabel: string;
@@ -444,8 +450,14 @@ const tr: Translations = {
   resetAllData: "Verileri Sıfırla",
   resetConfirmTitle: "Veriler Sıfırlansın mı?",
   resetConfirmDesc:
-    "Tüm geçmiş çalışma seansları, günler ve dikkat dağılma kayıtları tamamen silinecektir. Bu işlem geri alınamaz.",
+    "Sıfırlamak istediğin veri türlerini seç. Bu işlem geri alınamaz.",
   resetConfirmYes: "Evet, Tümünü Sıfırla",
+  resetOptionWorkTitle: "Çalışma Süresi & Seanslar",
+  resetOptionWorkDesc: "Seans geçmişi, zaman çizelgesi ve çalışma hikayesi",
+  resetOptionDistractionsTitle: "Dikkat Dağılmaları & Otopark",
+  resetOptionDistractionsDesc:
+    "Dağılma kayıtları, farkındalık verileri ve otopark öğeleri",
+  resetConfirmSelected: "Seçilenleri Sıfırla",
   avgDistractionsPerSession: "Tur Başı Ort. Dikkat",
   distractionReasonsTab: "Dikkat Dağılmaları",
   endingReasonsTab: "Erken Bitirmeler",
@@ -456,7 +468,7 @@ const tr: Translations = {
   sessionCompleted: "Çalışma Turu Tamamlandı! 🎉",
 
   // Export & Break
-  exportDataBtn: "📥 Verileri İndir (JSON)",
+  exportDataBtn: "Verileri İndir (JSON)",
   exportDataTooltip: (dirPath) =>
     `Tek JSON yedeği İndirilenler klasörüne kaydedilir (resimsiz & stories hariç):\n${dirPath}\\pomodoro-backup.json`,
   exportSavedMsg: (filePath) => `✓ Kaydedildi: ${filePath}`,
@@ -506,11 +518,11 @@ const tr: Translations = {
   planStandardBreakMins: "Standart Mola (dk)",
   planLongBreakMins: "Uzun Mola (dk)",
   planLongBreakInterval: "Uzun Mola Döngüsü",
-  shortBreakBtn: (m: number) => `☕ ${m}dk`,
+  shortBreakBtn: (m: number) => `${m}dk`,
   shortBreakBtnTooltip: (m: number) =>
     `Kısa Mola (${m} dk) — Mevcut çalışma süreniz korunur`,
   shortBreaksCountBadge: (n: number) => `Bu oturumda ${n} kısa mola verildi`,
-  distractedBtnCompact: (mins: number) => (mins > 0 ? `⚡ +${mins}dk` : "⚡"),
+  distractedBtnCompact: (mins: number) => (mins > 0 ? `+${mins}dk` : ""),
   distractedBtnTooltip: (mins: number) =>
     mins > 0
       ? `Dikkatim dağıldı (+${mins} dk ekle ve neden kaydet)`
@@ -529,17 +541,17 @@ const tr: Translations = {
   breakModeStdLabel: "Mola",
   breakModeLongLabel: "Uzun Mola",
   returnToWorkBtn: "Çalışmaya Dön",
-  startWorkCompact: "▶ Çalışma",
-  returnToWorkCompact: "▶ Dön",
-  resumeWorkBtn: "▶ Devam",
+  startWorkCompact: "Çalışma",
+  returnToWorkCompact: "Dön",
+  resumeWorkBtn: "Devam",
   timerPauseTooltip: "Duraklatmak için tıklayın",
   timerResumeTooltip: "Devam etmek için tıklayın",
-  startSessionBtn: "▶ Oturumu Başlat",
+  startSessionBtn: "Oturumu Başlat",
   startSessionTooltip: "Seçili planla yeni çalışma oturumu başlatır ve sayacı açar",
-  finishSessionBtn: "⏹ Oturumu Bitir",
+  finishSessionBtn: "Oturumu Bitir",
   finishSessionTooltip: "Aktif oturumu sonlandırır ve ilerlemeyi kaydeder",
-  returnToWorkMenuBtn: "▶ Çalışmaya Dön",
-  returnToBreakMenuBtn: "▶ Molaya Dön",
+  returnToWorkMenuBtn: "Çalışmaya Dön",
+  returnToBreakMenuBtn: "Molaya Dön",
   sessionIdleLabel: "Aktif oturum yok",
   sessionIdleTooltip:
     "Sayaç başlatmak için aşağıdan plan seçip 'Oturumu Başlat'a tıklayın",
@@ -581,7 +593,7 @@ const tr: Translations = {
 
   miniDockTooltip: "Sağ alt mini sayaç moduna küçült",
   restoreWindowTooltip: "Normal pencere boyutuna geri dön",
-  miniDockDragTooltip: "Sürükle • Büyütmek için çift tıkla",
+  miniDockDragTooltip: "Büyütmek için tıkla • Taşımak için sürükle",
   hideToTrayOnlyTooltip: "Tamamen sistem tepsisine (tray) gizle",
 
   adhdTab: "🧠 Farkındalık",
@@ -694,6 +706,7 @@ const tr: Translations = {
   qcStepCategoryHint: "Tab: Kategori • Enter: Seç • 1-4: Hızlı Seç • Esc: Kapat",
   qcStepTagHint: "Tab: Tag Seç • Enter: Onayla • Esc: Geri",
   qcStepInputHint: "Tab: Popüler Kayıtlar • Enter: Kaydet • Esc: Geri",
+  qcStepInputNoSuggestionsHint: "Enter: Kaydet • Esc: Geri",
   qcStepContextHint: "Tab: Son Bağlamlar • Enter: Onayla • Esc: Geç",
   popularEntriesLabel: "Popüler kayıtlar (Tab ile seç):",
   qcActiveTabLabel: "Son Açık Sekme",
@@ -870,8 +883,14 @@ const en: Translations = {
   resetAllData: "Reset All Data",
   resetConfirmTitle: "Reset all data?",
   resetConfirmDesc:
-    "All session history, days, and distraction records will be permanently erased. This cannot be undone.",
+    "Choose which data categories to erase. This cannot be undone.",
   resetConfirmYes: "Yes, Reset All",
+  resetOptionWorkTitle: "Work Time & Sessions",
+  resetOptionWorkDesc: "Session history, timeline, and work stories",
+  resetOptionDistractionsTitle: "Distractions & Parking Lot",
+  resetOptionDistractionsDesc:
+    "Distraction logs, insights data, and parked tasks/ideas",
+  resetConfirmSelected: "Reset Selected",
   avgDistractionsPerSession: "Avg Distractions/Round",
   distractionReasonsTab: "Distractions",
   endingReasonsTab: "Early Stops",
@@ -882,7 +901,7 @@ const en: Translations = {
   sessionCompleted: "Work Round Completed! 🎉",
 
   // Export & Break
-  exportDataBtn: "📥 Export Data (JSON)",
+  exportDataBtn: "Export Data (JSON)",
   exportDataTooltip: (dirPath) =>
     `Single JSON backup saved to Downloads (no images or stories):\n${dirPath}\\pomodoro-backup.json`,
   exportSavedMsg: (filePath) => `✓ Saved: ${filePath}`,
@@ -932,11 +951,11 @@ const en: Translations = {
   planStandardBreakMins: "Standard Break (min)",
   planLongBreakMins: "Long Break (min)",
   planLongBreakInterval: "Long Break Cycle",
-  shortBreakBtn: (m: number) => `☕ ${m}m`,
+  shortBreakBtn: (m: number) => `${m}m`,
   shortBreakBtnTooltip: (m: number) =>
     `Take Short Break (${m} min) — keeps your current work timer`,
   shortBreaksCountBadge: (n: number) => `${n} short break(s) taken in this session`,
-  distractedBtnCompact: (mins: number) => (mins > 0 ? `⚡ +${mins}m` : "⚡"),
+  distractedBtnCompact: (mins: number) => (mins > 0 ? `+${mins}m` : ""),
   distractedBtnTooltip: (mins: number) =>
     mins > 0
       ? `Distracted (+${mins} min & log reason)`
@@ -955,18 +974,18 @@ const en: Translations = {
   breakModeStdLabel: "Break",
   breakModeLongLabel: "Long Break",
   returnToWorkBtn: "Return to Work",
-  startWorkCompact: "▶ Work",
-  returnToWorkCompact: "▶ Resume",
-  resumeWorkBtn: "▶ Resume",
+  startWorkCompact: "Work",
+  returnToWorkCompact: "Resume",
+  resumeWorkBtn: "Resume",
   timerPauseTooltip: "Click to pause",
   timerResumeTooltip: "Click to resume",
-  startSessionBtn: "▶ Start Session",
+  startSessionBtn: "Start Session",
   startSessionTooltip:
     "Start a new work session (set of Pomodoro rounds) with the selected plan",
-  finishSessionBtn: "⏹ Finish Session",
+  finishSessionBtn: "Finish Session",
   finishSessionTooltip: "End the active session and save your stats",
-  returnToWorkMenuBtn: "▶ Back to Work",
-  returnToBreakMenuBtn: "▶ Back to Break",
+  returnToWorkMenuBtn: "Back to Work",
+  returnToBreakMenuBtn: "Back to Break",
   sessionIdleLabel: "No active session",
   sessionIdleTooltip: "Pick a plan below and click 'Start Session' to begin",
   sessionActiveTooltip: (modeLabel, topic, shortBreaks) =>
@@ -1007,7 +1026,7 @@ const en: Translations = {
 
   miniDockTooltip: "Minimize to bottom-right mini counter widget",
   restoreWindowTooltip: "Restore normal window size",
-  miniDockDragTooltip: "Drag to move • Double-click to restore",
+  miniDockDragTooltip: "Click to restore • Drag to move",
   hideToTrayOnlyTooltip: "Hide completely to system tray",
 
   adhdTab: "🧠 Insights",
@@ -1120,6 +1139,7 @@ const en: Translations = {
   qcStepCategoryHint: "Tab: Category • Enter: Select • 1-4: Quick Pick • Esc: Close",
   qcStepTagHint: "Tab: Select Tag • Enter: Confirm • Esc: Back",
   qcStepInputHint: "Tab: Popular Entries • Enter: Save • Esc: Back",
+  qcStepInputNoSuggestionsHint: "Enter: Save • Esc: Back",
   qcStepContextHint: "Tab: Recent Contexts • Enter: Confirm • Esc: Skip",
   popularEntriesLabel: "Popular entries (Tab to select):",
   qcActiveTabLabel: "Last Open Tab",

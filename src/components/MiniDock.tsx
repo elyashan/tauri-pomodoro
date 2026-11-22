@@ -1,12 +1,24 @@
 import type React from "react";
+import { useEffect, useRef } from "react";
 import type { BreakKind, TimerMode } from "../db";
 import type { Translations } from "../i18n";
+import {
+  IconBellAlert,
+  IconBriefcase,
+  IconCoffee,
+  IconExpand,
+  IconGrip,
+  IconPause,
+  IconSparkles,
+  IconTrayHide,
+} from "./Icons";
 
 export interface MiniDockProps {
   isLight: boolean;
   modeClass: string;
   isBreakAlarm: boolean;
   isCelebrating: boolean;
+  isRunning: boolean;
   miniDockContextToast: string | null;
   shellStyle: React.CSSProperties;
   sessionActive: boolean;
@@ -15,16 +27,19 @@ export interface MiniDockProps {
   liveClockStr: string;
   progressPct: number;
   t: Translations;
-  onMouseDown: (e: React.MouseEvent) => void;
+  onStartDrag: () => void;
   onExitMiniDock: () => void;
   onHideToTray: () => void;
 }
+
+const DRAG_THRESHOLD_PX = 5;
 
 export function MiniDock({
   isLight,
   modeClass,
   isBreakAlarm,
   isCelebrating,
+  isRunning,
   miniDockContextToast,
   shellStyle,
   sessionActive,
@@ -33,10 +48,62 @@ export function MiniDock({
   liveClockStr,
   progressPct,
   t,
-  onMouseDown,
+  onStartDrag,
   onExitMiniDock,
   onHideToTray,
 }: MiniDockProps) {
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+    };
+  }, []);
+
+  const handleShellMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("button, .no-drag")) return;
+
+    cleanupRef.current?.();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let settled = false;
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      if (cleanupRef.current === cleanup) {
+        cleanupRef.current = null;
+      }
+    };
+
+    const handleMove = (mv: MouseEvent) => {
+      if (settled) return;
+      const dist = Math.hypot(mv.clientX - startX, mv.clientY - startY);
+      if (dist >= DRAG_THRESHOLD_PX) {
+        settled = true;
+        cleanup();
+        onStartDrag();
+      }
+    };
+
+    const handleUp = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      onExitMiniDock();
+    };
+
+    cleanupRef.current = cleanup;
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  };
+
+  const isPaused = sessionActive && !isRunning && !isBreakAlarm;
+
   return (
     <div
       className={`widget-shell mini-dock-shell ${
@@ -45,8 +112,7 @@ export function MiniDock({
         isCelebrating ? "celebrating-shell" : ""
       } ${miniDockContextToast ? "has-toast" : ""}`}
       style={shellStyle}
-      onMouseDown={onMouseDown}
-      onDoubleClick={onExitMiniDock}
+      onMouseDown={handleShellMouseDown}
     >
       {miniDockContextToast && (
         <div
@@ -58,20 +124,23 @@ export function MiniDock({
       )}
 
       <div className="mini-dock-row">
-        <div
-          className="mini-dock-left"
-          title={t.miniDockDragTooltip}
-        >
-          <span className="mini-dock-icon">
-            {!sessionActive
-              ? "⠿"
-              : isBreakAlarm
-                ? "🚨"
-                : timerMode === "work"
-                  ? "💼"
-                  : breakKind === "long"
-                    ? "🎉"
-                    : "☕"}
+        <div className="mini-dock-left" title={t.miniDockDragTooltip}>
+          <span
+            className={`mini-dock-icon ${isBreakAlarm ? "alarm" : isPaused ? "paused" : ""}`}
+          >
+            {!sessionActive ? (
+              <IconGrip size={13} />
+            ) : isBreakAlarm ? (
+              <IconBellAlert size={13} />
+            ) : !isRunning ? (
+              <IconPause size={13} />
+            ) : timerMode === "work" ? (
+              <IconBriefcase size={13} />
+            ) : breakKind === "long" ? (
+              <IconSparkles size={13} />
+            ) : (
+              <IconCoffee size={13} />
+            )}
           </span>
           <span className={`mini-dock-clock ${isBreakAlarm ? "alarm" : ""}`}>
             {liveClockStr}
@@ -84,14 +153,14 @@ export function MiniDock({
             onClick={onExitMiniDock}
             title={t.restoreWindowTooltip}
           >
-            ↗
+            <IconExpand size={12} />
           </button>
           <button
             className="mini-dock-btn"
             onClick={onHideToTray}
             title={t.hideToTrayOnlyTooltip}
           >
-            ▾
+            <IconTrayHide size={12} />
           </button>
         </div>
       </div>

@@ -16,6 +16,13 @@ import {
   PreviousReasonsChips,
   TagChipsSelector,
 } from "./InlineTagForm";
+import {
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconClose,
+  IconTrash,
+} from "./Icons";
 
 export interface TagManagementHandlers {
   tagForm: TagFormState | null;
@@ -300,6 +307,7 @@ export function DistractModal({
     setSelectedTag("");
     setAddingTag(false);
     setNewTagInput("");
+    setPopularEntries([]);
     setStage("tag");
     requestAnimationFrame(() => boxRef.current?.focus());
   };
@@ -310,10 +318,14 @@ export function DistractModal({
     setSelectedTag(chosen);
     setFocusedEntryIdx(-1);
     setStage("input");
-    const entries = await getTopCategoryReasons(category, chosen, 5).catch(
-      () => [],
-    );
-    setPopularEntries(entries);
+    if (doesCategoryAddPenalty(category)) {
+      const entries = await getTopCategoryReasons(category, chosen, 5).catch(
+        () => [],
+      );
+      setPopularEntries(entries.slice(0, 5));
+    } else {
+      setPopularEntries([]);
+    }
     requestAnimationFrame(() => noteInputRef.current?.focus());
   };
 
@@ -547,7 +559,7 @@ export function DistractModal({
       <div className="stop-box-header">
         <span className="stop-box-title">⠿ {t.distractionTitle}</span>
         <button className="ghost-btn" onClick={onCancel}>
-          ✕
+          <IconClose size={11} />
         </button>
       </div>
 
@@ -644,7 +656,7 @@ export function DistractModal({
                 className="qc-tag-inline-btn save"
                 onClick={() => handleSaveNewTag().catch(() => {})}
               >
-                ✓
+                <IconCheck size={10} />
               </button>
               <button
                 type="button"
@@ -655,7 +667,7 @@ export function DistractModal({
                   requestAnimationFrame(() => boxRef.current?.focus());
                 }}
               >
-                ✕
+                <IconClose size={10} />
               </button>
             </div>
           ) : (
@@ -708,7 +720,7 @@ export function DistractModal({
                 : t.feedbackSaveBtn}
             </button>
           </div>
-          {popularEntries.length > 0 && (
+          {doesCategoryAddPenalty(category) && popularEntries.length > 0 && (
             <div className="qc-entries-box">
               <div className="qc-entries-header">{t.popularEntriesLabel}</div>
               <div className="qc-entries-list">
@@ -724,6 +736,7 @@ export function DistractModal({
                       tabIndex={-1}
                       className={`qc-entry-row ${isFocused ? "selected" : ""}`}
                       onClick={() => advanceFromInput(entry)}
+                      title={entry}
                     >
                       <span className="qc-entry-idx">
                         {isFocused ? "▶" : `${idx + 1}.`}
@@ -771,7 +784,7 @@ export function DistractModal({
                 })
               }
             >
-              ✓
+              <IconCheck size={12} />
             </button>
           </div>
           {topContexts.length > 0 && (
@@ -811,7 +824,9 @@ export function DistractModal({
             : stage === "tag"
               ? t.qcStepTagHint
               : stage === "input"
-                ? t.qcStepInputHint
+                ? doesCategoryAddPenalty(category) && popularEntries.length > 0
+                  ? t.qcStepInputHint
+                  : t.qcStepInputNoSuggestionsHint
                 : t.qcStepContextHint}
         </span>
         <button type="button" onClick={onCancel}>
@@ -1107,7 +1122,7 @@ export function LightboxModal({
                     );
                   }}
                 >
-                  ◀
+                  <IconChevronLeft size={12} />
                 </button>
                 <button
                   type="button"
@@ -1124,7 +1139,7 @@ export function LightboxModal({
                     onSelectEntry(groupList[(curIdx + 1) % groupList.length]);
                   }}
                 >
-                  ▶
+                  <IconChevronRight size={12} />
                 </button>
               </>
             )}
@@ -1134,10 +1149,10 @@ export function LightboxModal({
               onClick={() => onDelete(entry.id)}
               title={t.cancel}
             >
-              🗑
+              <IconTrash size={12} />
             </button>
             <button type="button" className="tag-icon-btn" onClick={onClose}>
-              ✕
+              <IconClose size={12} />
             </button>
           </div>
         </div>

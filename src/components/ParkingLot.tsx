@@ -6,6 +6,13 @@ import type {
   WorkStoryEntry,
 } from "../db";
 import type { Translations } from "../i18n";
+import {
+  IconCheck,
+  IconChevronLeft,
+  IconChevronRight,
+  IconClose,
+  IconFileText,
+} from "./Icons";
 
 export function renderParkingItemTooltip(item: ParkingItem): string {
   const parts: string[] = [];
@@ -80,7 +87,11 @@ export function ParkingTaskRow({
           onClick={() => onSyncSingleToDocs(item)}
           title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
         >
-          {item.keep_synced ? "✓" : "📄"}
+          {item.keep_synced ? (
+            <IconCheck size={10} />
+          ) : (
+            <IconFileText size={10} />
+          )}
         </button>
         <button
           type="button"
@@ -88,7 +99,7 @@ export function ParkingTaskRow({
           onClick={() => onDeleteEntry(item.id)}
           title={t.cancel}
         >
-          ✕
+          <IconClose size={10} />
         </button>
       </div>
     </div>
@@ -158,7 +169,11 @@ export function ParkingIdeaRow({
           onClick={() => onSyncSingleToDocs(item)}
           title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
         >
-          {item.keep_synced ? "✓" : "📄"}
+          {item.keep_synced ? (
+            <IconCheck size={10} />
+          ) : (
+            <IconFileText size={10} />
+          )}
         </button>
         <button
           type="button"
@@ -166,7 +181,7 @@ export function ParkingIdeaRow({
           onClick={() => onDeleteEntry(item.id)}
           title={t.cancel}
         >
-          ✕
+          <IconClose size={10} />
         </button>
       </div>
     </div>
@@ -223,7 +238,11 @@ export function ParkingScreenshotRow({
           onClick={() => onSyncSingleToDocs(item)}
           title={item.keep_synced ? t.docsSyncedBadge : t.docsSyncSingleBtn}
         >
-          {item.keep_synced ? "✓" : "📄"}
+          {item.keep_synced ? (
+            <IconCheck size={10} />
+          ) : (
+            <IconFileText size={10} />
+          )}
         </button>
         <button
           type="button"
@@ -231,7 +250,7 @@ export function ParkingScreenshotRow({
           onClick={() => onDeleteEntry(item.id)}
           title={t.cancel}
         >
-          ✕
+          <IconClose size={10} />
         </button>
       </div>
     </div>
@@ -309,7 +328,8 @@ export function ParkingLotPanel({
               onClick={onSyncAllToDocs}
               title={t.docsSyncAllBtn}
             >
-              📄 Docs
+              <IconFileText size={11} />
+              <span>Docs</span>
             </button>
           </div>
         </div>
@@ -605,7 +625,7 @@ export function SessionStorySlideshow({
         <div className="story-slideshow-top">
           <span className="story-slideshow-title">🎬 {title}</span>
           <button type="button" className="tag-icon-btn" onClick={onClose}>
-            ✕
+            <IconClose size={11} />
           </button>
         </div>
         <div
@@ -649,7 +669,7 @@ export function SessionStorySlideshow({
             {t.storyFullscreenBtn}
           </button>
           <button type="button" className="tag-icon-btn" onClick={onClose}>
-            ✕
+            <IconClose size={11} />
           </button>
         </div>
       </div>
@@ -664,7 +684,7 @@ export function SessionStorySlideshow({
               setFrameIdx((safeIdx - 1 + frames.length) % frames.length);
             }}
           >
-            ◀
+            <IconChevronLeft size={13} />
           </button>
         )}
         <img
@@ -682,7 +702,7 @@ export function SessionStorySlideshow({
               setFrameIdx((safeIdx + 1) % frames.length);
             }}
           >
-            ▶
+            <IconChevronRight size={13} />
           </button>
         )}
         <span className="story-slide-counter">
