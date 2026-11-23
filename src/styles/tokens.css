@@ -1,129 +1,221 @@
 /* ============================================================================
-   DESIGN TOKENS — Categorized Visual Language (Typography, Surfaces, Colors,
-   Accents, Spacing, Radii, Transitions)
-   Change values here to update appearance consistently across all views.
+   LINEAR-INSPIRED DESIGN TOKENS
+   True Neutral Charcoal Dark + Paper Light · Active-vs-Dimmed Depth
+   Red-Green Colorblind-Safe Timeline & Status Hues
    ============================================================================ */
 
 :root {
+  color-scheme: dark;
+
   /* ------------------------------------------------------------------------
      1. TYPOGRAPHY
      ------------------------------------------------------------------------ */
-  --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, "JetBrains Mono", "Cascadia Code", Consolas, monospace;
 
-  --text-2xs: 8.5px;
-  --text-xs: 9px;
-  --text-sm: 9.5px;
-  --text-md: 10px;
-  --text-base: 11px;
-  --text-lg: 12px;
-  --text-xl: 15px;
-  --text-clock-mini: 18px;
+  --text-2xs: 9px;
+  --text-xs: 10px;
+  --text-sm: 10.5px;
+  --text-md: 11px;
+  --text-base: 11.5px;
+  --text-lg: 12.5px;
+  --text-xl: 14px;
+  --text-clock-mini: 16px;
   --text-clock-visual: 28px;
-  --text-clock-main: 38px;
+  --text-clock-main: 40px;
 
+  --weight-regular: 400;
   --weight-normal: 500;
   --weight-semibold: 600;
   --weight-bold: 700;
-  --weight-extrabold: 800;
 
   /* ------------------------------------------------------------------------
-     2. SURFACES & BORDERS (Dark Glass Default)
+     2. SURFACES & BORDERS (Pure Neutral Linear Charcoal — zero navy wash)
      ------------------------------------------------------------------------ */
-  --surface-shell: rgba(26, 24, 20, 0.82);
-  --surface-shell-solid: rgba(20, 20, 26, 0.93);
-  --surface-card: rgba(255, 255, 255, 0.05);
-  --surface-card-strong: rgba(0, 0, 0, 0.25);
-  --surface-pill: rgba(255, 255, 255, 0.08);
-  --surface-pill-hover: rgba(255, 255, 255, 0.16);
-  --surface-btn: rgba(255, 255, 255, 0.11);
-  --surface-btn-hover: rgba(255, 255, 255, 0.22);
-  --surface-input: rgba(0, 0, 0, 0.35);
+  --surface-shell: #0c0d0e;
+  --surface-shell-solid: #0d0e10;
+  --surface-recessed: #090a0b;
+  --surface-panel: #141517;
+  --surface-card: rgba(255, 255, 255, 0.025);
+  --surface-card-strong: #1e2024;
+  --surface-elevated: #26282d;
+  --surface-selected: #282a30;
+  --surface-hover: rgba(255, 255, 255, 0.065);
+  --surface-active: rgba(255, 255, 255, 0.11);
+  --surface-pill: rgba(255, 255, 255, 0.045);
+  --surface-pill-hover: rgba(255, 255, 255, 0.095);
+  --surface-btn: rgba(255, 255, 255, 0.065);
+  --surface-btn-hover: rgba(255, 255, 255, 0.12);
+  --surface-input: #0a0b0d;
 
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-default: rgba(255, 255, 255, 0.14);
-  --border-strong: rgba(255, 255, 255, 0.22);
+  --border-hairline: rgba(255, 255, 255, 0.07);
+  --border-subtle: rgba(255, 255, 255, 0.11);
+  --border-default: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.25);
 
   /* ------------------------------------------------------------------------
      3. TEXT COLORS
      ------------------------------------------------------------------------ */
-  --text-primary: #f4f4f5;
-  --text-secondary: #d4d4d8;
-  --text-muted: #a1a1aa;
-  --text-dim: #71717a;
+  --text-primary: #f7f8f8;
+  --text-secondary: #c5c8ce;
+  --text-muted: #848891;
+  --text-dim: #62666f;
 
   /* ------------------------------------------------------------------------
-     4. SEMANTIC ACCENTS & STATUS COLORS
+     4. COLORBLIND-SAFE SEMANTIC HUES & CTA ACCENT
+     (Cobalt Blue Work · Neutral Slate Break · Vivid Amber-Gold Overtime)
      ------------------------------------------------------------------------ */
-  --accent-primary: #3b82f6;
-  --accent-primary-soft: rgba(59, 130, 246, 0.35);
-  --accent-primary-border: rgba(96, 165, 250, 0.5);
-  --accent-primary-text: #dbeafe;
+  --accent-primary: #5e6ad2;
+  --accent-primary-hover: #6c78df;
+  --accent-primary-soft: rgba(94, 106, 210, 0.14);
+  --accent-primary-border: rgba(94, 106, 210, 0.4);
+  --accent-primary-text: #d6daff;
 
-  --accent-work: #fbbf24;
-  --accent-work-soft: rgba(251, 191, 36, 0.2);
+  --accent-work: #3b82f6;
+  --accent-work-soft: rgba(59, 130, 246, 0.14);
+  --accent-work-border: rgba(59, 130, 246, 0.38);
 
-  --accent-break: #38bdf8;
-  --accent-break-soft: rgba(56, 189, 248, 0.14);
-  --accent-break-text: #bae6fd;
+  --accent-amber: #f5a623;
+  --accent-amber-soft: rgba(245, 166, 35, 0.16);
+  --accent-amber-border: rgba(245, 166, 35, 0.42);
+
+  --accent-break: #78808f;
+  --accent-break-soft: rgba(120, 128, 143, 0.14);
+  --accent-break-text: #d0d5df;
 
   --accent-long-break: #a78bfa;
-  --accent-warmup: #34d399;
-  --accent-hyperfocus: #f97316;
+  --accent-warmup: #38bdf8;
+  --accent-hyperfocus: #f5a623;
 
-  --accent-danger: #ef4444;
-  --accent-danger-soft: rgba(239, 68, 68, 0.25);
+  --accent-danger: #f87171;
+  --accent-danger-soft: rgba(248, 113, 113, 0.15);
+  --accent-danger-border: rgba(248, 113, 113, 0.42);
   --accent-danger-text: #fecaca;
 
-  --accent-success: #4ade80;
-  --accent-success-soft: rgba(74, 222, 128, 0.16);
+  --accent-success: #22c55e;
+  --accent-success-soft: rgba(34, 197, 94, 0.15);
 
   /* ------------------------------------------------------------------------
-     5. SPACING SCALE
+     5. JEWEL-TONE MICRO-COLORS (Colorblind-Safe Bio, Insights & Tag Dots)
      ------------------------------------------------------------------------ */
-  --space-1: 3px;
-  --space-2: 5px;
-  --space-3: 8px;
-  --space-4: 11px;
-  --space-5: 14px;
+  --bio-wake: #facc15;
+  --bio-coffee: #c88a55;
+  --bio-meds: #a78bfa;
+  --bio-meal: #38bdf8;
+
+  --insight-threshold: #3b82f6;
+  --insight-trigger: #a78bfa;
+  --insight-friction: #f5a623;
+  --insight-hyperfocus: #facc15;
+  --insight-chrono: #38bdf8;
+
+  --tag-work: #3b82f6;
+  --tag-task: #38bdf8;
+  --tag-idea: #facc15;
+  --tag-internal: #a78bfa;
+  --tag-external: #f5a623;
+  --tag-ending: #f06548;
+  --tag-overtime: #e879a9;
 
   /* ------------------------------------------------------------------------
-     6. BORDER RADII
+     6. SPACING SCALE, RADII & TRANSITIONS
      ------------------------------------------------------------------------ */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
+
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 11px;
-  --radius-shell: 14px;
+  --radius-lg: 10px;
+  --radius-shell: 12px;
   --radius-pill: 999px;
 
-  /* ------------------------------------------------------------------------
-     7. TRANSITIONS
-     ------------------------------------------------------------------------ */
-  --ease-fast: 0.14s ease;
-  --ease-base: 0.18s ease;
+  --ease-fast: 0.12s cubic-bezier(0.2, 0, 0, 1);
+  --ease-base: 0.16s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* Neutral Paper Light Theme */
 .light-theme,
 .qc-shell.light-theme {
-  --surface-card: rgba(0, 0, 0, 0.045);
-  --surface-card-strong: rgba(0, 0, 0, 0.06);
-  --surface-pill: rgba(0, 0, 0, 0.06);
-  --surface-pill-hover: rgba(0, 0, 0, 0.12);
-  --surface-btn: rgba(0, 0, 0, 0.07);
-  --surface-btn-hover: rgba(0, 0, 0, 0.14);
-  --surface-input: rgba(255, 255, 255, 0.78);
+  color-scheme: light;
 
-  --border-subtle: rgba(0, 0, 0, 0.09);
-  --border-default: rgba(0, 0, 0, 0.14);
-  --border-strong: rgba(0, 0, 0, 0.22);
+  --surface-shell: #efefef;
+  --surface-shell-solid: #f1f2f4;
+  --surface-recessed: #e6e7ea;
+  --surface-panel: #ffffff;
+  --surface-card: rgba(15, 17, 21, 0.03);
+  --surface-card-strong: #ffffff;
+  --surface-elevated: #e5e6ea;
+  --surface-selected: #eaecf1;
+  --surface-hover: rgba(15, 17, 21, 0.05);
+  --surface-active: rgba(15, 17, 21, 0.085);
+  --surface-pill: rgba(15, 17, 21, 0.045);
+  --surface-pill-hover: rgba(15, 17, 21, 0.09);
+  --surface-btn: rgba(15, 17, 21, 0.06);
+  --surface-btn-hover: rgba(15, 17, 21, 0.11);
+  --surface-input: #ffffff;
 
-  --text-primary: #18181b;
-  --text-secondary: #3f3f46;
-  --text-muted: #52525b;
-  --text-dim: #71717a;
+  --border-hairline: rgba(15, 17, 21, 0.08);
+  --border-subtle: rgba(15, 17, 21, 0.12);
+  --border-default: rgba(15, 17, 21, 0.18);
+  --border-strong: rgba(15, 17, 21, 0.28);
 
-  --accent-primary-text: #1e40af;
-  --accent-break-text: #0369a1;
-  --accent-danger-text: #991b1b;
+  --text-primary: #121316;
+  --text-secondary: #3f424a;
+  --text-muted: #6c707a;
+  --text-dim: #8c909b;
+
+  --accent-primary: #4f5cd1;
+  --accent-primary-hover: #424ec2;
+  --accent-primary-soft: rgba(79, 92, 209, 0.12);
+  --accent-primary-border: rgba(79, 92, 209, 0.4);
+  --accent-primary-text: #3a46b8;
+
+  --accent-work: #2563eb;
+  --accent-work-soft: rgba(37, 99, 235, 0.12);
+  --accent-work-border: rgba(37, 99, 235, 0.36);
+
+  --accent-amber: #b45309;
+  --accent-amber-soft: rgba(180, 83, 9, 0.12);
+  --accent-amber-border: rgba(180, 83, 9, 0.36);
+
+  --accent-break: #525a69;
+  --accent-break-soft: rgba(82, 90, 105, 0.12);
+  --accent-break-text: #3f4654;
+
+  --accent-long-break: #6d28d9;
+  --accent-warmup: #0284c7;
+  --accent-hyperfocus: #b45309;
+
+  --accent-danger: #dc2626;
+  --accent-danger-soft: rgba(220, 38, 38, 0.11);
+  --accent-danger-border: rgba(220, 38, 38, 0.36);
+  --accent-danger-text: #b91c1c;
+
+  --accent-success: #16a34a;
+  --accent-success-soft: rgba(22, 163, 74, 0.12);
+
+  --bio-wake: #b45309;
+  --bio-coffee: #8c5426;
+  --bio-meds: #6d28d9;
+  --bio-meal: #0284c7;
+
+  --insight-threshold: #2563eb;
+  --insight-trigger: #6d28d9;
+  --insight-friction: #b45309;
+  --insight-hyperfocus: #a16207;
+  --insight-chrono: #0284c7;
+
+  --tag-work: #2563eb;
+  --tag-task: #0284c7;
+  --tag-idea: #b45309;
+  --tag-internal: #6d28d9;
+  --tag-external: #d97706;
+  --tag-ending: #c84127;
+  --tag-overtime: #be185d;
 }

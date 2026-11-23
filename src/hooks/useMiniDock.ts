@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type React from "react";
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
@@ -14,36 +14,27 @@ export interface UseMiniDockOptions {
   onRevealTimerPage: () => void;
 }
 
-export function useMiniDock({
-  loaded,
-  uiScale,
-  reminderBanner,
-  runtimeStateRef,
-  contextFallbackLabel,
-  onRevealTimerPage,
-}: UseMiniDockOptions) {
+export function useMiniDock(options: UseMiniDockOptions) {
+  const { uiScale, runtimeStateRef, onRevealTimerPage } = options;
   const [isMiniDock, setIsMiniDock] = useState(false);
   const isMiniDockRef = useRef<boolean>(false);
   isMiniDockRef.current = isMiniDock;
   const miniDockUserDraggedRef = useRef<boolean>(false);
-  const [miniDockContextToast, setMiniDockContextToast] = useState<
-    string | null
-  >(null);
-  const miniDockToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
   const savedNormalPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const positionMiniDockWindow = async (withToast: boolean) => {
+  const positionMiniDockWindow = async () => {
     try {
       bumpWindowResizeSeq();
       const win = getCurrentWindow();
       const scale = await win.scaleFactor();
+      if (!isMiniDockRef.current) return;
       const uiMult = Math.max(1, (uiScale || 100) / 100);
-      const miniW = Math.round((withToast ? 236 : 152) * uiMult);
-      const miniH = Math.round((withToast ? 66 : 44) * uiMult);
+      const miniW = Math.round(112 * uiMult);
+      const miniH = Math.round(38 * uiMult);
       await win.setSize(new LogicalSize(miniW, miniH));
+      if (!isMiniDockRef.current) return;
       const mon = await currentMonitor();
+      if (!isMiniDockRef.current) return;
       if (mon) {
         const physW = Math.round(miniW * scale);
         const physH = Math.round(miniH * scale);
@@ -55,6 +46,7 @@ export function useMiniDock({
           await win.setPosition(new PhysicalPosition(targetX, targetY));
         } else {
           const pos = await win.outerPosition();
+          if (!isMiniDockRef.current) return;
           const minX = mon.position.x;
           const minY = mon.position.y;
           const maxX = Math.max(minX, mon.position.x + mon.size.width - physW);
@@ -69,42 +61,28 @@ export function useMiniDock({
           }
         }
       }
+      if (!isMiniDockRef.current) return;
       await win.show();
     } catch (err) {
       console.error("Mini widget konumlandırılamadı:", err);
     }
   };
 
-  const triggerMiniDockContextToast = (customText?: string) => {
-    const rt = runtimeStateRef.current;
-    const ctxText =
-      customText?.trim() ||
-      rt.currentContext.trim() ||
-      (rt.workTag
-        ? `${rt.workTag}${rt.workReason ? `: ${rt.workReason}` : ""}`
-        : "");
-    const displayToast = ctxText || contextFallbackLabel;
-    setMiniDockContextToast(displayToast);
-    if (miniDockToastTimerRef.current) {
-      clearTimeout(miniDockToastTimerRef.current);
-    }
-    void positionMiniDockWindow(true);
-    miniDockToastTimerRef.current = setTimeout(() => {
-      setMiniDockContextToast(null);
-      void positionMiniDockWindow(false);
-    }, 6500);
+  const triggerMiniDockContextToast = (_customText?: string) => {
+    // Mini-dock intentionally displays only the minimal timer pill without toast popups.
   };
 
   const enterMiniDock = async () => {
     try {
       const win = getCurrentWindow();
-      if (!isMiniDock) {
+      if (!isMiniDockRef.current) {
         const pos = await win.outerPosition();
         savedNormalPosRef.current = { x: pos.x, y: pos.y };
       }
       miniDockUserDraggedRef.current = false;
+      isMiniDockRef.current = true;
       setIsMiniDock(true);
-      triggerMiniDockContextToast();
+      void positionMiniDockWindow();
     } catch (err) {
       console.error("Mini widget konumlandırılamadı:", err);
     }
@@ -112,12 +90,9 @@ export function useMiniDock({
 
   const exitMiniDock = async () => {
     try {
-      if (miniDockToastTimerRef.current) {
-        clearTimeout(miniDockToastTimerRef.current);
-        miniDockToastTimerRef.current = null;
-      }
-      setMiniDockContextToast(null);
+      bumpWindowResizeSeq();
       miniDockUserDraggedRef.current = false;
+      isMiniDockRef.current = false;
       const win = getCurrentWindow();
       setIsMiniDock(false);
       await win.show();
@@ -157,17 +132,11 @@ export function useMiniDock({
     useRef<() => Promise<void>>(revealExpandedWindow);
   revealExpandedWindowRef.current = revealExpandedWindow;
 
-  useEffect(() => {
-    if (!loaded || !isMiniDock || !reminderBanner) return;
-    triggerMiniDockContextToast(reminderBanner.text);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reminderBanner, isMiniDock, loaded]);
-
   return {
     isMiniDock,
     isMiniDockRef,
     miniDockUserDraggedRef,
-    miniDockContextToast,
+    miniDockContextToast: null as string | null,
     triggerMiniDockContextToast,
     enterMiniDock,
     exitMiniDock,

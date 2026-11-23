@@ -1,3 +1,9 @@
+// @llm-index Translations dictionary
+// Lines ~25-510   : Translations interface (strict contract for tr & en)
+// Lines ~512-1110 : Turkish dictionary (tr)
+// Lines ~1112-1710: English dictionary (en)
+// Bottom          : translations map & resolveLanguage(pref)
+
 export type LangCode = "auto" | "tr" | "en";
 export type ActiveLang = "tr" | "en";
 
@@ -237,6 +243,13 @@ export interface Translations {
   adhdTransitionDesc: (avgMins: number, ratePct: number) => string;
   adhdCompletionTitle: string;
   adhdCompletionDesc: (pct: number, hyperCnt: number) => string;
+  adhdMoodTitle: string;
+  adhdMoodDesc: (
+    startLabel: string | null,
+    endLabel: string | null,
+    count: number,
+  ) => string;
+  lightboxNoteLabel: string;
   adhdDynamicTip: (
     thresholdMins: number | null,
     intPct: number,
@@ -283,6 +296,7 @@ export interface Translations {
   qcCurrentContextLabel: string;
   qcOffSessionLabel: string;
   qcContextNone: string;
+  timerContextAddBtn: string;
   qcReminderTitle: string;
   qcReminderCloseHint: string;
   qcContextHeader: string;
@@ -395,6 +409,7 @@ export interface Translations {
   bioSaveBtn: string;
   bioEmptyHint: string;
   bioLoggedToast: (label: string, time: string) => string;
+  bioSleepLabel: string;
 
   phaseWarmup: string;
   phaseFocus: string;
@@ -431,7 +446,16 @@ export interface Translations {
   stuckResumeBtn: string;
   stuckTakeShortBreakBtn: string;
 
-  moodLabels: Record<"calm" | "focused" | "tired" | "anxious" | "motivated", string>;
+  moodLabels: Record<
+    | "calm"
+    | "focused"
+    | "tired"
+    | "scattered"
+    | "overwhelmed"
+    | "anxious"
+    | "motivated",
+    string
+  >;
   moodPromptStart: string;
   moodPromptEnd: string;
   moodQuickCheckinLabel: string;
@@ -471,6 +495,23 @@ export interface Translations {
   rescueNoneEnabledHint: string;
 
   warmupNoPenaltyBadge: string;
+
+  themeModeLabel: string;
+  themeDarkLabel: string;
+  themeLightLabel: string;
+  accentColorLabel: string;
+  accentLabels: Record<
+    "indigo" | "sky" | "emerald" | "amber" | "violet" | "rose",
+    string
+  >;
+  settingsTabGeneral: string;
+  settingsTabFocus: string;
+  settingsTabTags: string;
+  settingsTabAppearance: string;
+  settingsTabDev: string;
+  summarySectionOverview: string;
+  summarySectionParking: string;
+  summarySectionInsights: string;
 }
 
 const tr: Translations = {
@@ -492,13 +533,13 @@ const tr: Translations = {
   totalWork: "Toplam Çalışma",
   sessions: "Tur",
   average: "Ortalama",
-  summaryTitle: "⠿ Çalışma ve Odak Özeti",
+  summaryTitle: "Çalışma ve Odak Özeti",
   summaryHoverHint: "Detay görmek için gün çubuklarının üzerine gel",
   filterToday: "Filtre: Bugün",
   filterAll: "Filtre: Genel",
   noDistractions: "Henüz kayıtlı dikkat dağılma nedeni yok.",
   timesCount: (count, pct) => `${count} kez (%${pct})`,
-  settingsTitle: "⠿ Ayarlar",
+  settingsTitle: "Ayarlar",
   langLabel: "Uygulama Dili",
   langAuto: "Otomatik (Sistem)",
   langTr: "Türkçe",
@@ -508,7 +549,7 @@ const tr: Translations = {
   opacityLabel: "Opaklık",
   timerColorLabel: "Sayaç rengi",
   autoStartOnBoot: (on) => `Açılışta başlat: ${on ? "Açık" : "Kapalı"}`,
-  resetDefaultColors: "Varsayılan renkler",
+  resetDefaultColors: "Varsayılan görünüm",
   versionLabel: (v) => `Sürüm v${v || "?"}`,
   checkUpdates: "Güncellemeleri denetle",
   checkingUpdates: "Denetleniyor...",
@@ -543,7 +584,7 @@ const tr: Translations = {
   // Dikkat Dağılması pop-up & Ek süre
   distractionTitle: "Dikkat Dağılması Kaydet",
   selectTagHint: "Tag seç (isteğe bağlı):",
-  previousReasons: "Önceki açıklamalar:",
+  previousReasons: "En sık 5 neden:",
   distractExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
   endingExplanationPlaceholder: "Açıklama yaz (veya yukarıdan seç)...",
   saveAndAddMin: (mins) => (mins > 0 ? `Kaydet (+${mins}dk)` : "Kaydet"),
@@ -648,9 +689,9 @@ const tr: Translations = {
   breakModeStdLabel: "Mola",
   breakModeLongLabel: "Uzun Mola",
   returnToWorkBtn: "Çalışmaya Dön",
-  startWorkCompact: "Çalışma",
-  returnToWorkCompact: "Dön",
-  resumeWorkBtn: "Devam",
+  startWorkCompact: "Çalışmaya Başla",
+  returnToWorkCompact: "Çalışmaya Dön",
+  resumeWorkBtn: "Devam Et",
   timerPauseTooltip: "Duraklatmak için tıklayın",
   timerResumeTooltip: "Devam etmek için tıklayın",
   startSessionBtn: "Oturumu Başlat",
@@ -678,80 +719,91 @@ const tr: Translations = {
   filterAllShort: "Tümü",
 
   // Geri Bildirim (Feedback), Pencere Boyutu, Mini Widget & ADHD Öz-Farkındalık
-  feedbackSectionTitle: "💬 Geri Bildirim & Notlarım",
+  feedbackSectionTitle: "Geri Bildirim & Notlarım",
   feedbackPlaceholder:
     "Uygulama hakkındaki hata, fikir veya tasarım notlarını buraya yaz (birden fazla satır yazabilirsin)...",
-  feedbackCatBug: "🐛 Hata",
-  feedbackCatFeature: "💡 Özellik",
-  feedbackCatUi: "🎨 Tasarım",
+  feedbackCatBug: "Hata",
+  feedbackCatFeature: "Özellik",
+  feedbackCatUi: "Tasarım",
   feedbackSaveBtn: "Kaydet",
-  feedbackCopyAllBtn: "📋 Tümünü Kopyala",
-  feedbackCopiedMsg: "Kopyalandı ✓",
-  feedbackGithubBtn: "🐙 GitHub Issue",
+  feedbackCopyAllBtn: "Tümünü Kopyala",
+  feedbackCopiedMsg: "Kopyalandı",
+  feedbackGithubBtn: "GitHub Issue",
   feedbackEmpty: "Henüz kayıtlı geri bildirim yok.",
 
-  windowSizeTitle: "📐 Pencere Boyutu",
-  uiScaleLabel: "🔍 Ekran Ölçeği (UI Boyutu)",
+  windowSizeTitle: "Pencere Boyutu",
+  uiScaleLabel: "Ekran Ölçeği (UI Boyutu)",
   windowSizeHint: (w, h) =>
     `Pencereyi kenarlarından sürükleyip büyütebilir/küçültebilirsin (Şu an: ${w}×${h}px)`,
-  saveCurrentSizeBtn: "💾 Mevcut Boyutu Kaydet",
-  resetStandardSizeBtn: "↺ Standart Boyuta Dön",
-  sizeSavedBadge: "Boyut kaydedildi ✓",
+  saveCurrentSizeBtn: "Mevcut Boyutu Kaydet",
+  resetStandardSizeBtn: "Standart Boyuta Dön",
+  sizeSavedBadge: "Boyut kaydedildi",
 
   miniDockTooltip: "Sağ alt mini sayaç moduna küçült",
   restoreWindowTooltip: "Normal pencere boyutuna geri dön",
   miniDockDragTooltip: "Büyütmek için tıkla • Taşımak için sürükle",
   hideToTrayOnlyTooltip: "Tamamen sistem tepsisine (tray) gizle",
 
-  adhdTab: "🧠 Farkındalık",
-  adhdFocusThresholdTitle: "⏱ Doğal Odak Eşiğin",
+  adhdTab: "Farkındalık",
+  adhdFocusThresholdTitle: "Doğal Odak Eşiğin",
   adhdFocusThresholdDesc: (mins) =>
     mins !== null
       ? `Ortalama ${mins}. dakikada dikkatin dağılıyor`
       : "Veri için birkaç dağılma kaydı gerekiyor",
-  adhdTriggerRatioTitle: "🧠 İçsel vs 🔔 Dışsal Bölünme",
+  adhdTriggerRatioTitle: "İçsel vs Dışsal Bölünme",
   adhdTriggerRatioDesc: (intPct, intCnt, extCnt) =>
-    `%${intPct} İçsel (${intCnt}) • %${100 - intPct} Dışsal (${extCnt})`,
-  adhdChronoTitle: "☀️ Biyolojik Odak Saatlerin",
+    intCnt + extCnt === 0
+      ? "Henüz dikkat dağınıklığı kaydedilmedi."
+      : `%${intPct} İçsel (${intCnt}) • %${100 - intPct} Dışsal (${extCnt})`,
+  adhdChronoTitle: "Biyolojik Odak Saatlerin",
   adhdChronoDesc: (peak, worst) =>
     `Zirve: ${peak || "—"} • En Dağınık: ${worst || "—"}`,
-  adhdTransitionTitle: "☕ Moladan Dönüş Direnci",
+  adhdTransitionTitle: "Moladan Dönüş Direnci",
   adhdTransitionDesc: (avgMins, ratePct) =>
     ratePct > 0
       ? `Molaların %${ratePct}'i sarkıyor (Ort. +${avgMins} dk)`
-      : "Molalardan zamanında dönüyorsun ✓",
-  adhdCompletionTitle: "🎯 Tamamlama & Hiperodak",
+      : "Molalardan zamanında dönüyorsun",
+  adhdCompletionTitle: "Tamamlama & Hiperodak",
   adhdCompletionDesc: (pct, hyperCnt) =>
-    `%${pct} tamamlama • ${hyperCnt} hiperodak (35+ dk)`,
+    `%${pct} tamamlama • ${hyperCnt} hiperodak`,
+  adhdMoodTitle: "Ruh Hali Akışı",
+  adhdMoodDesc: (startLabel, endLabel, count) => {
+    if (count === 0) return "Seans başı/sonu seçildiğinde burada özetlenir.";
+    if (startLabel && endLabel) {
+      return `Genelde ${startLabel} → ${endLabel} (${count} kayıt)`;
+    }
+    return `En sık: ${startLabel || endLabel || "—"} (${count} kayıt)`;
+  },
+  lightboxNoteLabel: "Not:",
   adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
     const safeTopTag = sanitizeInsightTopTag(topTag);
     const parts: string[] = [];
     if (thresholdMins !== null && thresholdMins < 25) {
       parts.push(
-        `💡 Dikkatin genelde ${thresholdMins}. dakikada dağılıyor; çalışma süreni ${Math.max(15, thresholdMins + 2)} dk yapıp döngüyü sıklaştırmak ADHD odak eşiğinle daha uyumlu olabilir.`,
+        `Dikkatin genelde ${thresholdMins}. dakikada dağılıyor; çalışma süreni ${Math.max(15, thresholdMins + 2)} dk yapıp döngüyü sıklaştırmak ADHD odak eşiğinle daha uyumlu olabilir.`,
       );
     } else if (thresholdMins !== null) {
       parts.push(
-        `✨ Doğal odak eşiğin ${thresholdMins} dakika civarında — derin odak (Geliştirici) ritmine oldukça uygunsun.`,
+        `Doğal odak eşiğin ${thresholdMins} dakika civarında — derin odak (Geliştirici) ritmine oldukça uygunsun.`,
       );
     }
     if (intPct >= 65) {
       parts.push(
-        `🧠 Bölünmelerinin %${intPct}'i içsel dürtü kaynaklı${safeTopTag ? ` (en sık: ${safeTopTag})` : ""}. Aklına gelen şeyi "sonra bakılacaklar" notuna yazıp sayaca dönmeyi dene.`,
+        `Bölünmelerinin %${intPct}'i içsel dürtü kaynaklı${safeTopTag ? ` (en sık: ${safeTopTag})` : ""}. Aklına gelen şeyi "sonra bakılacaklar" notuna yazıp sayaca dönmeyi dene.`,
       );
     } else if (intPct > 0 && intPct <= 35) {
       parts.push(
-        `🔔 Bölünmelerinin çoğu dışsal uyaranlardan geliyor${safeTopTag ? ` (${safeTopTag})` : ""}. Seans başında bildirimleri sessize almak odak süreni ciddi artıracaktır.`,
+        `Bölünmelerinin çoğu dışsal uyaranlardan geliyor${safeTopTag ? ` (${safeTopTag})` : ""}. Seans başında bildirimleri sessize almak odak süreni ciddi artıracaktır.`,
       );
     }
     if (overtimeRate >= 40) {
       parts.push(
-        `⏰ Moladan çalışmaya geçişte "başlatma direnci" yaşıyorsun (%${overtimeRate} sarkma). Molada ekrana/sosyal medyaya girmek yerine hareket etmeyi dene.`,
+        `Moladan çalışmaya geçişte "başlatma direnci" yaşıyorsun (%${overtimeRate} sarkma). Molada ekrana/sosyal medyaya girmek yerine hareket etmeyi dene.`,
       );
     }
     return parts.length > 0
       ? parts.join("\n\n")
-      : "🌱 Seansların ve dikkat dağılma kayıtların biriktikçe burada senin ADHD odak profiline özel kişisel çıkarımlar belirecek.";
+      : "Seansların ve dikkat dağılma kayıtların biriktikçe burada senin ADHD odak profiline özel kişisel çıkarımlar belirecek.";
   },
 
   defaultCategoryTags: {
@@ -804,9 +856,8 @@ const tr: Translations = {
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}dk eklenir` : "+0dk"),
 
   qcInputPlaceholders: {
-    impulsive_task:
-      "Molada yapılacak dürtüsel görevi yaz ve Enter'a bas (ek süre eklenmez)...",
-    idea: "Aklına gelen fikri yaz ve Enter'a bas (ek süre eklenmez)...",
+    impulsive_task: "Molada yapılacak görevi yaz ve Enter'a bas...",
+    idea: "Fikrini yaz ve Enter'a bas...",
     internal: "İçsel tetikleyiciyi / düşünceyi yaz ve Enter'a bas...",
     external: "Dışsal uyaranı (bildirim, ses vb.) yaz ve Enter'a bas...",
   },
@@ -820,7 +871,8 @@ const tr: Translations = {
   qcCurrentContextLabel: "Aktif Bağlam",
   qcOffSessionLabel: "🧠 Seans Dışı Braindump",
   qcContextNone: "Belirtilmedi",
-  qcReminderTitle: "🎯 Son Kalınan Meşguliyet — Kaldığın Yerden Devam Et:",
+  timerContextAddBtn: "+ Bağlam",
+  qcReminderTitle: "Son Kalınan Meşguliyet — Kaldığın Yerden Devam Et",
   qcReminderCloseHint: "Enter / Space / Esc ile hemen pencereye dön",
   qcContextHeader: "Bağlam (Context)",
   qcContextPlaceholder:
@@ -828,32 +880,32 @@ const tr: Translations = {
   qcRecentContextsLabel: "Son bağlamlar (Tab ile seç):",
   qcEditTagsTooltip: "Etiketleri düzenle / sil",
   qcDoneEditingTags: "Bitti",
-  tagManagerTitle: "🏷️ Etiket Yönetimi",
+  tagManagerTitle: "Etiket Yönetimi",
   tagManagerHint: "Yeniden adlandırmak için etikete tıkla, silmek için × kullan.",
   tagManagerEmpty: "Bu kategoride etiket yok.",
   tagManagerAddPlaceholder: "Yeni etiket ekle...",
   tagManagerKindLabels: {
-    work: "💼 Çalışma",
-    distraction_impulsive_task: "⚡ Görev",
-    distraction_idea: "💡 Fikir",
-    distraction_internal: "🧠 İçsel",
-    distraction_external: "🔔 Dışsal",
-    ending: "⏹ Erken Bitirme",
-    break_overtime: "⏰ Gecikme",
+    work: "Çalışma",
+    distraction_impulsive_task: "Görev",
+    distraction_idea: "Fikir",
+    distraction_internal: "İçsel",
+    distraction_external: "Dışsal",
+    ending: "Erken Bitirme",
+    break_overtime: "Gecikme",
   },
 
   parkingBreakBannerTitle:
-    "🅿️ Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
-  parkingToggleBtn: (cnt) => `🅿️ Otopark (${cnt})`,
-  parkingTab: "🅿️ Otopark",
-  parkingPendingTasks: "⏳ Yapılmayan Görevler",
-  parkingDoneTasks: "✅ Yapılan Görevler",
-  parkingUnratedIdeas: "💡 Bekleyen Fikirler",
-  parkingImportantIdeas: "⭐ Önemli Fikirler",
-  parkingUnimportantIdeas: "💤 Önemsiz Fikirler",
-  parkingScreenshotNotes: "📸 Ekran Görüntüsü Notları (SS)",
-  parkingMarkImportant: "⭐ Önemli",
-  parkingMarkUnimportant: "💤 Önemsiz",
+    "Çalışırken aklına şunlar takılmıştı, şimdi bakabilirsin:",
+  parkingToggleBtn: (cnt) => `Otopark (${cnt})`,
+  parkingTab: "Otopark",
+  parkingPendingTasks: "Yapılmayan Görevler",
+  parkingDoneTasks: "Yapılan Görevler",
+  parkingUnratedIdeas: "Bekleyen Fikirler",
+  parkingImportantIdeas: "Önemli Fikirler",
+  parkingUnimportantIdeas: "Önemsiz Fikirler",
+  parkingScreenshotNotes: "Ekran Görüntüsü Notları (SS)",
+  parkingMarkImportant: "Önemli",
+  parkingMarkUnimportant: "Önemsiz",
   parkingEmpty: "Otoparkta henüz kayıtlı dürtüsel görev, fikir veya ekran notu yok.",
 
   workStoryEmpty:
@@ -897,8 +949,8 @@ const tr: Translations = {
     "Kısa molaya girmeden önce aktif meşguliyetini belirle; mola bitince kaldığın yeri hatırlatalım:",
   shortBreakPromptPlaceholder:
     "Şu an odaklandığın spesifik işi yaz (örn: Türev Test 2, API Auth)...",
-  shortBreakStartBtn: "☕ Molaya Geç",
-  contextReminderPrefix: "🎯 Son Meşguliyet:",
+  shortBreakStartBtn: "Molaya Geç",
+  contextReminderPrefix: "Son Meşguliyet:",
 
   contextShortTab: "Bağlam",
   contextFullTab: "Meşguliyet (Context) Çalışma İstatistikleri",
@@ -909,13 +961,13 @@ const tr: Translations = {
   noAppDistractions:
     "Henüz açık uygulama veya sekme bilgisi içeren dağılma kaydı yok.",
 
-  shortcutsSectionTitle: "⌨️ Global Kısayollar (Ekran Ortasında Hızlı Input)",
-  shortcutDistractLabel: "⚡ Dikkat / Görev / Fikir Yakala",
+  shortcutsSectionTitle: "Global Kısayollar (Ekran Ortasında Hızlı Input)",
+  shortcutDistractLabel: "Dikkat / Görev / Fikir Yakala",
   shortcutRecordPressKeys: "Tuş kombinasyonuna basın... (Esc iptal)",
   shortcutResetBtn: "Varsayılan Kısayol",
   shortcutTestBtn: "Test",
 
-  releaseCommandsTitle: "🚀 Sürüm & Yayınlama Komutları",
+  releaseCommandsTitle: "Sürüm & Yayınlama Komutları",
   releaseCommandsHint:
     "Bu komutlar package.json, tauri.conf.json ve Cargo.toml dosyalarını güncelleyip GitHub Actions'ı otomatik tetikler:",
   releasePatchDesc: "Küçük yama (1.0.3 → 1.0.4)",
@@ -926,8 +978,8 @@ const tr: Translations = {
   copiedLabel: "Kopyalandı ✓",
   copyBtn: "Kopyala",
 
-  bioContextTitle: "🧬 Biyolojik Bağlam (Bugün)",
-  bioSummaryTitle: "🧬 Günlük Hayat & Ruh Hali Hikayesi",
+  bioContextTitle: "Biyolojik Bağlam (Bugün)",
+  bioSummaryTitle: "Günlük Hayat & Ruh Hali Hikayesi",
   bioEventLabels: {
     wake: "Uyanma",
     coffee: "Kahve",
@@ -940,47 +992,50 @@ const tr: Translations = {
   bioEmptyHint:
     "Henüz biyolojik bağlam kaydı yok. Yukarıdan uyanma, kahve, ilaç veya yemek saati ekleyebilirsin.",
   bioLoggedToast: (label, time) => `${label} (${time}) kaydedildi`,
+  bioSleepLabel: "Uyku",
 
-  phaseWarmup: "🌱 Isınma",
-  phaseFocus: "🎯 Odak",
-  phaseFinal: "🏁 Son Dakikalar",
-  phaseHyperfocus: "🔥 Hiperodak",
-  warmupDoneBanner: "🌱 Isınma bitti — şimdi tam akışa geçtin!",
-  halfwayBanner: "🌗 Yarı yola geldin — harika gidiyorsun!",
-  finalStretchBanner: (mins) => `🏁 Son ${mins} dakika — toparlama zamanı`,
+  phaseWarmup: "Isınma",
+  phaseFocus: "Odak",
+  phaseFinal: "Son Dakikalar",
+  phaseHyperfocus: "Hiperodak",
+  warmupDoneBanner: "Isınma bitti — şimdi tam akışa geçtin!",
+  halfwayBanner: "Yarı yola geldin — harika gidiyorsun!",
+  finalStretchBanner: (mins) => `Son ${mins} dakika — toparlama zamanı`,
 
-  hyperfocusSectionTitle: "🔥 Hiperodak Modu (Devam Et)",
+  hyperfocusSectionTitle: "Hiperodak Modu (Devam Et)",
   hyperfocusBtnLabel: (mins) => `+${mins} dk Hiperodak`,
-  hyperfocusActiveBanner: (mins) => `🔥 Hiperodak aktif (+${mins} dk eklendi)`,
-  hyperfocusSummaryBadge: (mins) => `🔥 +${mins} dk Hiperodak`,
+  hyperfocusActiveBanner: (mins) => `Hiperodak aktif (+${mins} dk eklendi)`,
+  hyperfocusSummaryBadge: (mins) => `+${mins} dk Hiperodak`,
   hyperfocusInsightLabel: "Toplam Hiperodak",
 
-  parkingBucketToday: "📌 Bugün",
-  parkingBucketMaybe: "🤔 Belki",
-  parkingBucketArchived: "📦 Arşiv",
+  parkingBucketToday: "Bugün",
+  parkingBucketMaybe: "Belki",
+  parkingBucketArchived: "Arşiv",
   moveToMaybe: "Belki",
   moveToArchive: "Arşiv",
   moveToToday: "Bugün",
   parkingMaybeEmpty: "Henüz 'Belki' listesinde öğe yok.",
   parkingArchivedEmpty: "Arşivlenmiş öğe yok.",
 
-  stuckBtnLabel: "🧭 Başlayamıyorum",
-  stuckModalTitle: "🧭 Başlamakta Zorlanıyor musun?",
+  stuckBtnLabel: "Başlayamıyorum",
+  stuckModalTitle: "Başlamakta Zorlanıyor musun?",
   stuckModalSub:
     "Sorun değil — beynin ilk adımı büyütüyor olabilir. Birlikte küçültelim:",
-  stuckBreathTitle: "🌬️ 4-4-4 Nefes Egzersizi",
+  stuckBreathTitle: "4-4-4 Nefes Egzersizi",
   stuckBreathStart: "Nefesi Başlat",
   stuckBreathStop: "Durdur",
   stuckBreathIn: "Nefes Al...",
   stuckBreathHold: "Tut...",
   stuckBreathOut: "Yavaşça Ver...",
-  stuckResumeBtn: "▶ Hazırım, Devam Et",
-  stuckTakeShortBreakBtn: "☕ 2 dk Kısa Nefes Molası",
+  stuckResumeBtn: "Hazırım, Devam Et",
+  stuckTakeShortBreakBtn: "2 dk Kısa Mola",
 
   moodLabels: {
     calm: "Sakin",
     focused: "Odaklı",
     tired: "Yorgun",
+    scattered: "Dağınık",
+    overwhelmed: "Bunalmış",
     anxious: "Gergin",
     motivated: "İstekli",
   },
@@ -992,14 +1047,14 @@ const tr: Translations = {
   moodPhaseCheckin: "Ara Kontrol",
   moodEmptyHint: "Henüz ruh hali kaydı yok.",
 
-  breakChecklistTitle: "🌿 Mola Hatırlatıcıları",
+  breakChecklistTitle: "Mola Hatırlatıcıları",
   defaultBreakChecklist: [
-    "💧 Su iç",
-    "🚻 Tuvalet",
-    "👀 20sn uzağa bak",
-    "🧘 Esne",
+    "Su iç",
+    "Tuvalet",
+    "20sn uzağa bak",
+    "Esne",
   ],
-  breakChecklistSettingsTitle: "🌿 Mola Hatırlatıcı Notları",
+  breakChecklistSettingsTitle: "Mola Hatırlatıcı Notları",
   breakChecklistPlaceholder: "Mola hatırlatıcısı ekle (örn: Esneme, Su)...",
 
   timerStyleLabel: "Sayaç Görünümü",
@@ -1007,7 +1062,7 @@ const tr: Translations = {
   timerStylePie: "Pasta",
   timerStyleCandle: "Eriyen Mum",
 
-  ambientNoiseTitle: "🎧 Arka Plan Odak Sesi",
+  ambientNoiseTitle: "Arka Plan Odak Sesi",
   ambientSoundLabels: {
     off: "Kapalı",
     brown: "Brown Noise",
@@ -1021,20 +1076,20 @@ const tr: Translations = {
 
   idleTimelineLabel: "Çalışma Dışı",
 
-  rescueSettingsTitle: "🧭 Başlayamıyorum Egzersizleri",
+  rescueSettingsTitle: "Başlayamıyorum Egzersizleri",
   rescueExerciseNames: {
     breathing: "4-4-4 Nefes",
     gaze: "60sn Göz Kilidi",
     physical: "30sn Fiziksel Reset",
   },
   rescueBreathCycle: (cur, total) => `Tur ${cur}/${total}`,
-  rescueDoneLabel: "✓ Tamamlandı — şimdi küçük bir başlangıç yapabilirsin",
+  rescueDoneLabel: "Tamamlandı — şimdi küçük bir başlangıç yapabilirsin",
   rescueRestartBtn: "Tekrarla",
-  rescueGazeTitle: "👁️ 60sn Ekran Dışı Göz Kilidi",
+  rescueGazeTitle: "60sn Ekran Dışı Göz Kilidi",
   rescueGazeHint:
     "Ekrandan uzağa duvar veya nesnede tek bir noktaya 60 saniye sakinçe odaklan — bitince zil çalacak.",
   rescueGazeStart: "60sn Başlat",
-  rescuePhysicalTitle: "🧍 30sn Fiziksel Reset",
+  rescuePhysicalTitle: "30sn Fiziksel Reset",
   rescuePhysicalSteps: [
     "Ayağa kalk ve omurganı dikleştir.",
     "Omuzlarını geriye çevir ve çeneni serbest bırak.",
@@ -1044,7 +1099,28 @@ const tr: Translations = {
   rescueNoneEnabledHint:
     "Ayarlar'dan Başlayamıyorum egzersizlerini tekrar açabilirsin.",
 
-  warmupNoPenaltyBadge: "🌱 Isınma — ceza eklenmez",
+  warmupNoPenaltyBadge: "Isınma — ceza eklenmez",
+
+  themeModeLabel: "Tema",
+  themeDarkLabel: "Koyu",
+  themeLightLabel: "Açık",
+  accentColorLabel: "Vurgu Rengi",
+  accentLabels: {
+    indigo: "İndigo",
+    sky: "Gökyüzü",
+    emerald: "Zümrüt",
+    amber: "Kehribar",
+    violet: "Mor",
+    rose: "Gül",
+  },
+  settingsTabGeneral: "Genel",
+  settingsTabFocus: "Odak",
+  settingsTabTags: "Etiketler",
+  settingsTabAppearance: "Görünüm",
+  settingsTabDev: "Geliştirici",
+  summarySectionOverview: "Çizelge",
+  summarySectionParking: "Otopark",
+  summarySectionInsights: "Analiz",
 };
 
 const en: Translations = {
@@ -1066,13 +1142,13 @@ const en: Translations = {
   totalWork: "Total Work",
   sessions: "Rounds",
   average: "Average",
-  summaryTitle: "⠿ Work & Focus Summary",
+  summaryTitle: "Work & Focus Summary",
   summaryHoverHint: "Hover over day bars to view details",
   filterToday: "Filter: Today",
   filterAll: "Filter: All-Time",
   noDistractions: "No distractions recorded yet.",
-  timesCount: (count, pct) => `${count} times (${pct}%)`,
-  settingsTitle: "⠿ Settings",
+  timesCount: (count, pct) => `${count} ${count === 1 ? "time" : "times"} (${pct}%)`,
+  settingsTitle: "Settings",
   langLabel: "Language",
   langAuto: "Auto (System)",
   langTr: "Türkçe",
@@ -1082,7 +1158,7 @@ const en: Translations = {
   opacityLabel: "Opacity",
   timerColorLabel: "Timer Color",
   autoStartOnBoot: (on) => `Launch on startup: ${on ? "On" : "Off"}`,
-  resetDefaultColors: "Default colors",
+  resetDefaultColors: "Reset appearance",
   versionLabel: (v) => `Version v${v || "?"}`,
   checkUpdates: "Check for updates",
   checkingUpdates: "Checking...",
@@ -1117,7 +1193,7 @@ const en: Translations = {
   // Dikkat Dağılması pop-up & Ek süre
   distractionTitle: "Record Distraction",
   selectTagHint: "Select Tag (Optional):",
-  previousReasons: "Recent explanations:",
+  previousReasons: "Top 5 reasons:",
   distractExplanationPlaceholder: "Type explanation (or select above)...",
   endingExplanationPlaceholder: "Type explanation (or select above)...",
   saveAndAddMin: (mins) => (mins > 0 ? `Save (+${mins}m)` : "Save"),
@@ -1222,8 +1298,8 @@ const en: Translations = {
   breakModeStdLabel: "Break",
   breakModeLongLabel: "Long Break",
   returnToWorkBtn: "Return to Work",
-  startWorkCompact: "Work",
-  returnToWorkCompact: "Resume",
+  startWorkCompact: "Start Work",
+  returnToWorkCompact: "Back to Work",
   resumeWorkBtn: "Resume",
   timerPauseTooltip: "Click to pause",
   timerResumeTooltip: "Click to resume",
@@ -1252,80 +1328,91 @@ const en: Translations = {
   filterAllShort: "All",
 
   // Feedback, Window Size, Mini Widget & ADHD Self-Realization
-  feedbackSectionTitle: "💬 Feedback & My Notes",
+  feedbackSectionTitle: "Feedback & My Notes",
   feedbackPlaceholder:
     "Write your bug reports, feature ideas, or UI notes here (multi-line supported)...",
-  feedbackCatBug: "🐛 Bug",
-  feedbackCatFeature: "💡 Feature",
-  feedbackCatUi: "🎨 UI/Design",
+  feedbackCatBug: "Bug",
+  feedbackCatFeature: "Feature",
+  feedbackCatUi: "UI/Design",
   feedbackSaveBtn: "Save",
-  feedbackCopyAllBtn: "📋 Copy All",
-  feedbackCopiedMsg: "Copied ✓",
-  feedbackGithubBtn: "🐙 GitHub Issue",
+  feedbackCopyAllBtn: "Copy All",
+  feedbackCopiedMsg: "Copied",
+  feedbackGithubBtn: "GitHub Issue",
   feedbackEmpty: "No feedback notes saved yet.",
 
-  windowSizeTitle: "📐 Window Size",
-  uiScaleLabel: "🔍 Display Scale (UI Size)",
+  windowSizeTitle: "Window Size",
+  uiScaleLabel: "Display Scale (UI Size)",
   windowSizeHint: (w, h) =>
     `Drag window edges to resize freely (Current: ${w}×${h}px)`,
-  saveCurrentSizeBtn: "💾 Save Current Size",
-  resetStandardSizeBtn: "↺ Reset Standard Size",
-  sizeSavedBadge: "Size saved ✓",
+  saveCurrentSizeBtn: "Save Current Size",
+  resetStandardSizeBtn: "Reset Standard Size",
+  sizeSavedBadge: "Size saved",
 
   miniDockTooltip: "Minimize to bottom-right mini counter widget",
   restoreWindowTooltip: "Restore normal window size",
   miniDockDragTooltip: "Click to restore • Drag to move",
   hideToTrayOnlyTooltip: "Hide completely to system tray",
 
-  adhdTab: "🧠 Insights",
-  adhdFocusThresholdTitle: "⏱ Natural Focus Threshold",
+  adhdTab: "Insights",
+  adhdFocusThresholdTitle: "Natural Focus Threshold",
   adhdFocusThresholdDesc: (mins) =>
     mins !== null
       ? `You typically get distracted around minute ${mins}`
       : "Log a few distractions to discover your threshold",
-  adhdTriggerRatioTitle: "🧠 Internal vs 🔔 External",
+  adhdTriggerRatioTitle: "Internal vs External",
   adhdTriggerRatioDesc: (intPct, intCnt, extCnt) =>
-    `${intPct}% Internal (${intCnt}) • ${100 - intPct}% External (${extCnt})`,
-  adhdChronoTitle: "☀️ Peak Focus vs Distraction Hours",
+    intCnt + extCnt === 0
+      ? "No distractions recorded yet."
+      : `${intPct}% Internal (${intCnt}) • ${100 - intPct}% External (${extCnt})`,
+  adhdChronoTitle: "Peak Focus vs Distraction Hours",
   adhdChronoDesc: (peak, worst) =>
     `Peak: ${peak || "—"} • Most Distracted: ${worst || "—"}`,
-  adhdTransitionTitle: "☕ Break-to-Work Friction",
+  adhdTransitionTitle: "Break-to-Work Friction",
   adhdTransitionDesc: (avgMins, ratePct) =>
     ratePct > 0
       ? `${ratePct}% of breaks run overtime (Avg +${avgMins} min)`
-      : "Returning from breaks on time ✓",
-  adhdCompletionTitle: "🎯 Completion & Hyperfocus",
+      : "Returning from breaks on time",
+  adhdCompletionTitle: "Completion & Hyperfocus",
   adhdCompletionDesc: (pct, hyperCnt) =>
-    `${pct}% completed • ${hyperCnt} hyperfocus (35+ min)`,
+    `${pct}% completed • ${hyperCnt} hyperfocus`,
+  adhdMoodTitle: "Mood Flow",
+  adhdMoodDesc: (startLabel, endLabel, count) => {
+    if (count === 0) return "Select start/end moods to see your mood shifts.";
+    if (startLabel && endLabel) {
+      return `Mostly ${startLabel} → ${endLabel} (${count} logged)`;
+    }
+    return `Most common: ${startLabel || endLabel || "—"} (${count} logged)`;
+  },
+  lightboxNoteLabel: "Note:",
   adhdDynamicTip: (thresholdMins, intPct, overtimeRate, topTag) => {
     const safeTopTag = sanitizeInsightTopTag(topTag);
     const parts: string[] = [];
     if (thresholdMins !== null && thresholdMins < 25) {
       parts.push(
-        `💡 Your attention usually drifts around minute ${thresholdMins}. Setting work intervals to ~${Math.max(15, thresholdMins + 2)} min can help you finish cycles before focus drops.`,
+        `Your attention usually drifts around minute ${thresholdMins}. Setting work intervals to ~${Math.max(15, thresholdMins + 2)} min can help you finish cycles before focus drops.`,
       );
     } else if (thresholdMins !== null) {
       parts.push(
-        `✨ Your natural focus threshold is ~${thresholdMins} min — well suited for deep focus blocks.`,
+        `Your natural focus threshold is ~${thresholdMins} min — well suited for deep focus blocks.`,
       );
     }
     if (intPct >= 65) {
       parts.push(
-        `🧠 ${intPct}% of your distractions are internal impulses${safeTopTag ? ` (top: ${safeTopTag})` : ""}. Keep a quick "parking lot" scratchpad for sudden thoughts.`,
+        `${intPct}% of your distractions are internal impulses${safeTopTag ? ` (top: ${safeTopTag})` : ""}. Keep a quick "parking lot" scratchpad for sudden thoughts.`,
       );
     } else if (intPct > 0 && intPct <= 35) {
       parts.push(
-        `🔔 Most distractions are external triggers${safeTopTag ? ` (${safeTopTag})` : ""}. Silencing notifications before starting will protect your flow.`,
+        `Most distractions are external triggers${safeTopTag ? ` (${safeTopTag})` : ""}. Silencing notifications before starting will protect your flow.`,
       );
     }
     if (overtimeRate >= 40) {
       parts.push(
-        `⏰ You experience transition friction returning from breaks (${overtimeRate}% overtime). Avoid dopamine traps (scrolling) during short breaks.`,
+        `You experience transition friction returning from breaks (${overtimeRate}% overtime). Avoid dopamine traps (scrolling) during short breaks.`,
       );
     }
     return parts.length > 0
       ? parts.join("\n\n")
-      : "🌱 As you complete sessions and log distractions, personalized ADHD self-realization insights will appear here.";
+      : "As you complete sessions and log distractions, personalized ADHD self-realization insights will appear here.";
   },
 
   defaultCategoryTags: {
@@ -1378,9 +1465,8 @@ const en: Translations = {
   addsPenaltyBadge: (mins) => (mins > 0 ? `+${mins}m added` : "+0m"),
 
   qcInputPlaceholders: {
-    impulsive_task:
-      "Type impulsive task for your break & press Enter (no time added)...",
-    idea: "Type your idea & press Enter (no time added)...",
+    impulsive_task: "Type impulsive task & press Enter (no penalty)...",
+    idea: "Type your idea & press Enter...",
     internal: "Type internal thought / urge & press Enter...",
     external: "Type external trigger (notification, noise...) & press Enter...",
   },
@@ -1394,7 +1480,8 @@ const en: Translations = {
   qcCurrentContextLabel: "Active Context",
   qcOffSessionLabel: "🧠 Off-Session Braindump",
   qcContextNone: "Not set",
-  qcReminderTitle: "🎯 Last Active Context — Resume Right Here:",
+  timerContextAddBtn: "+ Context",
+  qcReminderTitle: "Last Active Context — Resume Right Here",
   qcReminderCloseHint: "Press Enter / Space / Esc to return immediately",
   qcContextHeader: "Active Context",
   qcContextPlaceholder:
@@ -1402,32 +1489,32 @@ const en: Translations = {
   qcRecentContextsLabel: "Recent contexts (Tab to select):",
   qcEditTagsTooltip: "Edit / delete tags",
   qcDoneEditingTags: "Done",
-  tagManagerTitle: "🏷️ Tag Management",
+  tagManagerTitle: "Tag Management",
   tagManagerHint: "Click a tag to rename, or × to delete.",
   tagManagerEmpty: "No tags in this category.",
   tagManagerAddPlaceholder: "Add new tag...",
   tagManagerKindLabels: {
-    work: "💼 Work",
-    distraction_impulsive_task: "⚡ Task",
-    distraction_idea: "💡 Idea",
-    distraction_internal: "🧠 Internal",
-    distraction_external: "🔔 External",
-    ending: "⏹ Early Stop",
-    break_overtime: "⏰ Overtime",
+    work: "Work",
+    distraction_impulsive_task: "Task",
+    distraction_idea: "Idea",
+    distraction_internal: "Internal",
+    distraction_external: "External",
+    ending: "Early Stop",
+    break_overtime: "Overtime",
   },
 
   parkingBreakBannerTitle:
-    "🅿️ These popped into your head while working — check them now:",
-  parkingToggleBtn: (cnt) => `🅿️ Parking (${cnt})`,
-  parkingTab: "🅿️ Parking",
-  parkingPendingTasks: "⏳ Unfinished Tasks",
-  parkingDoneTasks: "✅ Completed Tasks",
-  parkingUnratedIdeas: "💡 Unrated Ideas",
-  parkingImportantIdeas: "⭐ Important Ideas",
-  parkingUnimportantIdeas: "💤 Unimportant Ideas",
-  parkingScreenshotNotes: "📸 Screenshot Notes (SS)",
-  parkingMarkImportant: "⭐ Important",
-  parkingMarkUnimportant: "💤 Minor",
+    "These popped into your head while working — check them now:",
+  parkingToggleBtn: (cnt) => `Parking (${cnt})`,
+  parkingTab: "Parking",
+  parkingPendingTasks: "Unfinished Tasks",
+  parkingDoneTasks: "Completed Tasks",
+  parkingUnratedIdeas: "Unrated Ideas",
+  parkingImportantIdeas: "Important Ideas",
+  parkingUnimportantIdeas: "Unimportant Ideas",
+  parkingScreenshotNotes: "Screenshot Notes (SS)",
+  parkingMarkImportant: "Important",
+  parkingMarkUnimportant: "Minor",
   parkingEmpty: "No impulsive tasks, ideas, or screenshot notes in your parking lot yet.",
 
   workStoryEmpty:
@@ -1471,8 +1558,8 @@ const en: Translations = {
     "Set your active context before taking a short break; we'll remind you where you left off:",
   shortBreakPromptPlaceholder:
     "Type what you're actively working on (e.g. Calc Problem 4, Auth API)...",
-  shortBreakStartBtn: "☕ Start Short Break",
-  contextReminderPrefix: "🎯 Last Context:",
+  shortBreakStartBtn: "Start Short Break",
+  contextReminderPrefix: "Last Context:",
 
   contextShortTab: "Context",
   contextFullTab: "Context Study Statistics",
@@ -1482,13 +1569,13 @@ const en: Translations = {
     "No context entries yet. Set it from the Work Topic modal or after an internal/external distraction.",
   noAppDistractions: "No app/tab distraction records logged yet.",
 
-  shortcutsSectionTitle: "⌨️ Global Shortcuts (Centered Spotlight Input)",
-  shortcutDistractLabel: "⚡ Capture Distraction / Task / Idea",
+  shortcutsSectionTitle: "Global Shortcuts (Centered Spotlight Input)",
+  shortcutDistractLabel: "Capture Distraction / Task / Idea",
   shortcutRecordPressKeys: "Press shortcut keys... (Esc cancel)",
   shortcutResetBtn: "Default Shortcut",
   shortcutTestBtn: "Test",
 
-  releaseCommandsTitle: "🚀 Release & Publish Commands",
+  releaseCommandsTitle: "Release & Publish Commands",
   releaseCommandsHint:
     "These commands bump package.json, tauri.conf.json & Cargo.toml and trigger GitHub Actions automatically:",
   releasePatchDesc: "Patch bump (1.0.3 → 1.0.4)",
@@ -1499,8 +1586,8 @@ const en: Translations = {
   copiedLabel: "Copied ✓",
   copyBtn: "Copy",
 
-  bioContextTitle: "🧬 Biological Context (Today)",
-  bioSummaryTitle: "🧬 Daily Life & Mood Story",
+  bioContextTitle: "Biological Context (Today)",
+  bioSummaryTitle: "Daily Life & Mood Story",
   bioEventLabels: {
     wake: "Wake up",
     coffee: "Coffee",
@@ -1513,47 +1600,50 @@ const en: Translations = {
   bioEmptyHint:
     "No bio context entries yet. Log wake-up, coffee, meds or meals above.",
   bioLoggedToast: (label, time) => `Logged ${label} (${time})`,
+  bioSleepLabel: "Sleep",
 
-  phaseWarmup: "🌱 Warm-up",
-  phaseFocus: "🎯 Focus",
-  phaseFinal: "🏁 Final Stretch",
-  phaseHyperfocus: "🔥 Hyperfocus",
-  warmupDoneBanner: "🌱 Warm-up done — you're in the flow now!",
-  halfwayBanner: "🌗 Halfway there — keep going!",
-  finalStretchBanner: (mins) => `🏁 Final ${mins} min — time to wrap up`,
+  phaseWarmup: "Warm-up",
+  phaseFocus: "Focus",
+  phaseFinal: "Final Stretch",
+  phaseHyperfocus: "Hyperfocus",
+  warmupDoneBanner: "Warm-up done — you're in the flow now!",
+  halfwayBanner: "Halfway there — keep going!",
+  finalStretchBanner: (mins) => `Final ${mins} min — time to wrap up`,
 
-  hyperfocusSectionTitle: "🔥 Hyperfocus Mode (Keep Going)",
+  hyperfocusSectionTitle: "Hyperfocus Mode (Keep Going)",
   hyperfocusBtnLabel: (mins) => `+${mins}m Hyperfocus`,
-  hyperfocusActiveBanner: (mins) => `🔥 Hyperfocus active (+${mins}m added)`,
-  hyperfocusSummaryBadge: (mins) => `🔥 +${mins}m Hyperfocus`,
+  hyperfocusActiveBanner: (mins) => `Hyperfocus active (+${mins}m added)`,
+  hyperfocusSummaryBadge: (mins) => `+${mins}m Hyperfocus`,
   hyperfocusInsightLabel: "Total Hyperfocus",
 
-  parkingBucketToday: "📌 Today",
-  parkingBucketMaybe: "🤔 Maybe",
-  parkingBucketArchived: "📦 Archive",
+  parkingBucketToday: "Today",
+  parkingBucketMaybe: "Maybe",
+  parkingBucketArchived: "Archive",
   moveToMaybe: "Maybe",
   moveToArchive: "Archive",
   moveToToday: "Today",
   parkingMaybeEmpty: "Nothing in 'Maybe' yet.",
   parkingArchivedEmpty: "No archived items.",
 
-  stuckBtnLabel: "🧭 I'm Stuck",
-  stuckModalTitle: "🧭 Having Trouble Starting?",
+  stuckBtnLabel: "I'm Stuck",
+  stuckModalTitle: "Having Trouble Starting?",
   stuckModalSub:
     "It's okay — your brain is just making step 1 feel huge. Let's shrink it:",
-  stuckBreathTitle: "🌬️ 4-4-4 Breathing Reset",
+  stuckBreathTitle: "4-4-4 Breathing Reset",
   stuckBreathStart: "Start Breathing",
   stuckBreathStop: "Stop",
   stuckBreathIn: "Breathe In...",
   stuckBreathHold: "Hold...",
   stuckBreathOut: "Breathe Out...",
-  stuckResumeBtn: "▶ I'm Ready, Resume",
-  stuckTakeShortBreakBtn: "☕ Take 2m Short Break",
+  stuckResumeBtn: "I'm Ready, Resume",
+  stuckTakeShortBreakBtn: "Take 2m Short Break",
 
   moodLabels: {
     calm: "Calm",
     focused: "Focused",
     tired: "Tired",
+    scattered: "Scattered",
+    overwhelmed: "Overwhelmed",
     anxious: "Anxious",
     motivated: "Motivated",
   },
@@ -1565,14 +1655,14 @@ const en: Translations = {
   moodPhaseCheckin: "Check-in",
   moodEmptyHint: "No mood entries yet.",
 
-  breakChecklistTitle: "🌿 Break Reminders",
+  breakChecklistTitle: "Break Reminders",
   defaultBreakChecklist: [
-    "💧 Drink water",
-    "🚻 Restroom",
-    "👀 Rest eyes 20s",
-    "🧘 Stretch",
+    "Drink water",
+    "Restroom",
+    "Rest eyes 20s",
+    "Stretch",
   ],
-  breakChecklistSettingsTitle: "🌿 Break Reminder Notes",
+  breakChecklistSettingsTitle: "Break Reminder Notes",
   breakChecklistPlaceholder: "Add break reminder (e.g. Stretch, Water)...",
 
   timerStyleLabel: "Timer Display",
@@ -1580,7 +1670,7 @@ const en: Translations = {
   timerStylePie: "Pie",
   timerStyleCandle: "Melting Candle",
 
-  ambientNoiseTitle: "🎧 Background Focus Sound",
+  ambientNoiseTitle: "Background Focus Sound",
   ambientSoundLabels: {
     off: "Off",
     brown: "Brown Noise",
@@ -1594,20 +1684,20 @@ const en: Translations = {
 
   idleTimelineLabel: "Off-Session",
 
-  rescueSettingsTitle: "🧭 'I'm Stuck' Rescue Exercises",
+  rescueSettingsTitle: "'I'm Stuck' Rescue Exercises",
   rescueExerciseNames: {
     breathing: "4-4-4 Breathing",
     gaze: "60s Gaze Lock",
     physical: "30s Physical Reset",
   },
   rescueBreathCycle: (cur, total) => `Cycle ${cur}/${total}`,
-  rescueDoneLabel: "✓ Complete — ready for a gentle start",
+  rescueDoneLabel: "Complete — ready for a gentle start",
   rescueRestartBtn: "Restart",
-  rescueGazeTitle: "👁️ 60s Off-Screen Gaze Lock",
+  rescueGazeTitle: "60s Off-Screen Gaze Lock",
   rescueGazeHint:
     "Rest your eyes on one stationary point away from the screen for 60s — a gentle chime plays when done.",
   rescueGazeStart: "Start 60s",
-  rescuePhysicalTitle: "🧍 30s Physical Reset",
+  rescuePhysicalTitle: "30s Physical Reset",
   rescuePhysicalSteps: [
     "Stand up and lengthen your spine.",
     "Roll your shoulders back and unclench your jaw.",
@@ -1617,7 +1707,28 @@ const en: Translations = {
   rescueNoneEnabledHint:
     "Re-enable Stuck Rescue exercises in Settings anytime.",
 
-  warmupNoPenaltyBadge: "🌱 Warm-up — no penalty added",
+  warmupNoPenaltyBadge: "Warm-up — no penalty added",
+
+  themeModeLabel: "Theme",
+  themeDarkLabel: "Dark",
+  themeLightLabel: "Light",
+  accentColorLabel: "Accent Color",
+  accentLabels: {
+    indigo: "Indigo",
+    sky: "Sky",
+    emerald: "Emerald",
+    amber: "Amber",
+    violet: "Violet",
+    rose: "Rose",
+  },
+  settingsTabGeneral: "General",
+  settingsTabFocus: "Focus",
+  settingsTabTags: "Tags",
+  settingsTabAppearance: "Appearance",
+  settingsTabDev: "Dev",
+  summarySectionOverview: "Timeline",
+  summarySectionParking: "Parking",
+  summarySectionInsights: "Insights",
 };
 
 export const translations: Record<ActiveLang, Translations> = { tr, en };

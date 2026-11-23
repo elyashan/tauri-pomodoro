@@ -26,7 +26,7 @@ export function InlineTagForm({
           className="inline-tag-label"
           title={t.deleteTagConfirm(tagForm.currentName || "")}
         >
-          🗑 {t.deleteTagConfirm(tagForm.currentName || "")}
+          {t.deleteTagConfirm(tagForm.currentName || "")}
         </span>
         <button className="warn-btn" onClick={onSubmitTagForm}>
           ✓
@@ -129,15 +129,17 @@ export function PreviousReasonsChips({
   label,
   onSelectReason,
 }: PreviousReasonsChipsProps) {
-  if (reasons.length === 0) return null;
+  const topFive = reasons.slice(0, 5);
+  if (topFive.length === 0) return null;
   return (
     <div className="previous-reasons-box">
       <div className="section-subhead">{label}</div>
       <div className="previous-reasons-chips">
-        {reasons.map((r) => (
+        {topFive.map((r) => (
           <button
             key={r}
             className="reason-suggestion-chip"
+            title={r}
             onClick={() => onSelectReason(r)}
           >
             {r}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type React from "react";
 import type {
   ActiveDayStats,
@@ -11,19 +11,27 @@ import type {
 import type { ActiveLang, Translations } from "../i18n";
 import type { UpdateStatus } from "../updater";
 import {
-  BIO_EVENT_EMOJIS,
   BIO_EVENT_TYPES,
-  MOOD_EMOJIS,
   MOOD_TYPES,
+  SLEEP_HOUR_OPTIONS,
+  formatSleepHours,
 } from "../constants";
+import { TimeInput24 } from "../components/TimeInput24";
+import { renderBioIcon } from "../components/BioIcon";
 import {
+  IconBriefcase,
   IconChart,
+  IconChevronDown,
   IconClose,
-  IconDashboard,
+  IconCoffee,
+  IconGrip,
+  IconLayers,
   IconMinimize,
   IconPlay,
+  IconRepeat,
   IconSettings,
   IconStop,
+  IconTag,
 } from "../components/Icons";
 
 export interface MenuPageProps {
@@ -49,7 +57,7 @@ export interface MenuPageProps {
   todayBioLogs: BioLogItem[];
   selectedStartMood: MoodType | null;
   getPlanDisplayName: (plan: StudyPlan) => string;
-  onOpenDashboard: () => void;
+  onOpenDashboard?: () => void;
   onOpenSummary: () => void;
   onOpenSettings: () => void;
   onEnterMiniDock: () => void;
@@ -63,6 +71,7 @@ export interface MenuPageProps {
     eventType: BioEventType,
     eventTime?: string,
     note?: string,
+    sleepHours?: number | null,
   ) => Promise<void> | void;
   onReturnToTimer: () => void;
   onFinishSession: () => void;
@@ -92,7 +101,6 @@ export function MenuPage({
   todayBioLogs,
   selectedStartMood,
   getPlanDisplayName,
-  onOpenDashboard,
   onOpenSummary,
   onOpenSettings,
   onEnterMiniDock,
@@ -110,7 +118,9 @@ export function MenuPage({
   const [bioFormType, setBioFormType] = useState<BioEventType | null>(null);
   const [bioTimeDraft, setBioTimeDraft] = useState("");
   const [bioNoteDraft, setBioNoteDraft] = useState("");
+  const [bioSleepDraft, setBioSleepDraft] = useState<number | null>(null);
   const [bioToast, setBioToast] = useState<string | null>(null);
+  const submittingBioRef = useRef<boolean>(false);
 
   const getNowHm = () => {
     const d = new Date();
@@ -126,36 +136,39 @@ export function MenuPage({
     setBioFormType(type);
     setBioTimeDraft(getNowHm());
     setBioNoteDraft("");
+    setBioSleepDraft(null);
   };
 
-  const handleSubmitBioForm = async () => {
-    if (!bioFormType) return;
-    const hm = bioTimeDraft.trim() || getNowHm();
-    const note = bioNoteDraft.trim() || undefined;
-    const kind = bioFormType;
-    await onAddBioLog(kind, hm, note);
-    setBioFormType(null);
-    setBioNoteDraft("");
-    const msg = t.bioLoggedToast(t.bioEventLabels[kind], hm);
-    setBioToast(msg);
-    window.setTimeout(() => {
-      setBioToast((cur) => (cur === msg ? null : cur));
-    }, 2200);
+  const handleSubmitBioForm = async (overrideHm?: string) => {
+    if (!bioFormType || submittingBioRef.current) return;
+    submittingBioRef.current = true;
+    try {
+      const hm = (overrideHm ?? bioTimeDraft).trim() || getNowHm();
+      const note = bioNoteDraft.trim() || undefined;
+      const kind = bioFormType;
+      const sleepVal = kind === "wake" ? bioSleepDraft : null;
+      await onAddBioLog(kind, hm, note, sleepVal);
+      setBioFormType(null);
+      setBioNoteDraft("");
+      setBioSleepDraft(null);
+      const msg = t.bioLoggedToast(t.bioEventLabels[kind], hm);
+      setBioToast(msg);
+      window.setTimeout(() => {
+        setBioToast((cur) => (cur === msg ? null : cur));
+      }, 2200);
+    } finally {
+      submittingBioRef.current = false;
+    }
   };
 
   return (
     <>
       <div className="top-bar">
-        <span className="badge">⠿ {dayStats.label}</span>
+        <span className="badge">
+          <IconGrip size={11} className="top-grip-icon" />
+          <span>{dayStats.label}</span>
+        </span>
         <div className="top-bar-right">
-          <button
-            className="ghost-btn"
-            title={t.dashboardBtn}
-            onClick={onOpenDashboard}
-          >
-            <IconDashboard size={12} />
-            <span>{t.dashboardBtn}</span>
-          </button>
           <button
             className="ghost-btn"
             title={t.summaryTitle}
@@ -189,6 +202,7 @@ export function MenuPage({
         </div>
       </div>
 
+      {/* GÜNLÜK ÖZET ŞERİDİ (KUTUSUZ TİPOGRAFİK SATIR) */}
       <div className="stats-grid">
         <div className="stat-card" title={t.totalWork}>
           <div className="stat-val">{t.formatDuration(dayStats.totalSec)}</div>
@@ -203,70 +217,6 @@ export function MenuPage({
           <div className="stat-lbl">{t.average}</div>
         </div>
       </div>
-
-      {/* CANLI SEANS DURUM ÇUBUĞU */}
-      {sessionActive ? (
-        <div
-          className={`session-status-bar ${
-            isBreakAlarm
-              ? "active-alarm"
-              : timerMode === "work"
-                ? "active-work"
-                : "active-break"
-          }`}
-          title={t.sessionActiveTooltip(
-            timerMode === "work" ? t.work : currentBreakShortName,
-            fullTopicLabel,
-            sessionShortBreakCount,
-          )}
-        >
-          <div className="session-status-left">
-            <span
-              className={`status-dot ${
-                isBreakAlarm
-                  ? "alarm"
-                  : !isRunning
-                    ? "paused"
-                    : timerMode === "work"
-                      ? "work"
-                      : "break"
-              }`}
-            />
-            <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-              {timerMode === "work"
-                ? `💼 ${t.work}`
-                : `☕ ${currentBreakShortName}`}
-            </span>
-            <span className="session-state-tag">
-              {isRunning ? t.statusRunning : t.statusPaused}
-            </span>
-          </div>
-          <div className="session-status-right">
-            <span
-              className="cycle-badge"
-              title={t.cycleTooltip(
-                currentCycleIndex,
-                currentPlan.longBreakInterval,
-                currentPlan.longBreakMins,
-              )}
-            >
-              🔄 {currentCycleIndex}/{currentPlan.longBreakInterval}
-            </span>
-            <span className="session-clock-pill">{liveClockStr}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="session-status-bar" title={t.sessionIdleTooltip}>
-          <div className="session-status-left">
-            <span className="status-dot" />
-            <span style={{ color: "#a1a1aa" }}>{t.sessionIdleLabel}</span>
-          </div>
-          <span style={{ fontSize: "10px", color: "#71717a" }}>
-            {getPlanDisplayName(currentPlan)} • {currentPlan.workMins}
-            {activeLang === "tr" ? "dk" : "m"}
-          </span>
-        </div>
-      )}
 
       {(updateStatus.kind === "available" ||
         updateStatus.kind === "downloading") && (
@@ -284,8 +234,81 @@ export function MenuPage({
         </div>
       )}
 
-      {/* ÖZEL ÇALIŞMA PLANI SEÇİCİ & KONU SATIRI */}
-      <div className="plan-picker-box no-drag">
+      {/* BİRLEŞİK ODAK & PLAN PANELİ */}
+      <div className="focus-panel no-drag">
+        {sessionActive ? (
+          <div
+            className={`session-status-bar ${
+              isBreakAlarm
+                ? "active-alarm"
+                : timerMode === "work"
+                  ? "active-work"
+                  : "active-break"
+            }`}
+            title={t.sessionActiveTooltip(
+              timerMode === "work" ? t.work : currentBreakShortName,
+              fullTopicLabel,
+              sessionShortBreakCount,
+            )}
+          >
+            <div className="session-status-left">
+              <span
+                className={`status-dot ${
+                  isBreakAlarm
+                    ? "alarm"
+                    : !isRunning
+                      ? "paused"
+                      : timerMode === "work"
+                        ? "work"
+                        : "break"
+                }`}
+              />
+              <span className="session-mode-label">
+                {timerMode === "work" ? (
+                  <IconBriefcase size={11} />
+                ) : (
+                  <IconCoffee size={11} />
+                )}
+                <span>
+                  {timerMode === "work" ? t.work : currentBreakShortName}
+                </span>
+              </span>
+              <span className="session-state-tag">
+                {isRunning ? t.statusRunning : t.statusPaused}
+              </span>
+            </div>
+            <div className="session-status-right">
+              <span
+                className="cycle-badge"
+                title={t.cycleTooltip(
+                  currentCycleIndex,
+                  currentPlan.longBreakInterval,
+                  currentPlan.longBreakMins,
+                )}
+              >
+                <IconRepeat size={10} />
+                <span>
+                  {currentCycleIndex}/{currentPlan.longBreakInterval}
+                </span>
+              </span>
+              <span className="session-clock-pill">{liveClockStr}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="session-status-bar" title={t.sessionIdleTooltip}>
+            <div className="session-status-left">
+              <span className="status-dot" />
+              <span className="session-idle-text">{t.sessionIdleLabel}</span>
+            </div>
+            <span className="session-idle-meta">
+              {getPlanDisplayName(currentPlan)} · {currentPlan.workMins}
+              {activeLang === "tr" ? "dk" : "m"}
+            </span>
+          </div>
+        )}
+
+        <div className="focus-panel-divider" />
+
         <div className="plan-dropdown-wrap" ref={planDropdownRef}>
           <button
             type="button"
@@ -311,14 +334,22 @@ export function MenuPage({
                   )
             }
           >
-            <span>📋 {getPlanDisplayName(currentPlan)}</span>
+            <span className="plan-trigger-name">
+              <IconLayers size={12} />
+              <span>{getPlanDisplayName(currentPlan)}</span>
+            </span>
             <span className="plan-trigger-meta">
               <span>
                 {currentPlan.workMins}/{currentPlan.standardBreakMins}
-                {activeLang === "tr" ? "dk" : "m"} •{" "}
+                {activeLang === "tr" ? "dk" : "m"} ·{" "}
                 {currentPlan.longBreakInterval}+1
               </span>
-              {!sessionActive && <span>{planDropdownOpen ? "▴" : "▾"}</span>}
+              {!sessionActive && (
+                <IconChevronDown
+                  size={12}
+                  className={planDropdownOpen ? "chevron-rotated" : ""}
+                />
+              )}
             </span>
           </button>
 
@@ -347,7 +378,7 @@ export function MenuPage({
                     <span>{pName}</span>
                     <span className="plan-item-meta">
                       {p.workMins}/{p.standardBreakMins}
-                      {activeLang === "tr" ? "dk" : "m"} •{" "}
+                      {activeLang === "tr" ? "dk" : "m"} ·{" "}
                       {p.longBreakInterval}+1
                     </span>
                   </button>
@@ -357,32 +388,26 @@ export function MenuPage({
           )}
         </div>
 
+        <div className="focus-panel-divider" />
+
         <div className="plan-meta-row">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              minWidth: 0,
-              flex: 1,
-            }}
+          <button
+            type="button"
+            className="work-topic-badge menu-topic"
+            onClick={onOpenWorkTopicBox}
+            title={`${t.changeWorkTopic}: ${fullTopicLabel}`}
           >
-            <button
-              type="button"
-              className="work-topic-badge menu-topic"
-              onClick={onOpenWorkTopicBox}
-              title={`${t.changeWorkTopic}: ${fullTopicLabel}`}
-            >
-              🏷️ {fullTopicLabel}
-            </button>
-          </div>
+            <IconTag size={11} />
+            <span className="work-topic-text">{fullTopicLabel}</span>
+          </button>
 
           <div className="plan-chips-row">
             <span
               className="plan-chip highlight"
               title={`${t.planWorkMins}: ${currentPlan.workMins}`}
             >
-              💼{currentPlan.workMins}
+              <IconBriefcase size={10} />
+              <span>{currentPlan.workMins}</span>
             </span>
             <span
               className="plan-chip"
@@ -393,8 +418,11 @@ export function MenuPage({
                 currentPlan.longBreakInterval,
               )}
             >
-              ☕ {currentPlan.shortBreakMins}/{currentPlan.standardBreakMins}/
-              {currentPlan.longBreakMins}
+              <IconCoffee size={10} />
+              <span>
+                {currentPlan.shortBreakMins}/{currentPlan.standardBreakMins}/
+                {currentPlan.longBreakMins}
+              </span>
             </span>
           </div>
         </div>
@@ -425,11 +453,19 @@ export function MenuPage({
                     : t.bioEventLabels[evType]
                 }
               >
-                <span>
-                  {BIO_EVENT_EMOJIS[evType]} {t.bioEventLabels[evType]}
+                <span className="bio-pill-head">
+                  <span className={`bio-ev-icon bio-${evType}`}>
+                    {renderBioIcon(evType, 11)}
+                  </span>
+                  <span>{t.bioEventLabels[evType]}</span>
                 </span>
                 {latest && (
-                  <span className="bio-pill-time">{latest.event_time}</span>
+                  <span className="bio-pill-time">
+                    {latest.event_time}
+                    {evType === "wake" && latest.sleep_hours != null
+                      ? ` · ${formatSleepHours(latest.sleep_hours, activeLang)}`
+                      : ""}
+                  </span>
                 )}
               </button>
             );
@@ -437,36 +473,57 @@ export function MenuPage({
         </div>
         {bioFormType && (
           <div className="bio-inline-form">
-            <input
-              type="time"
-              className="bio-time-input"
-              value={bioTimeDraft}
-              onChange={(e) => setBioTimeDraft(e.target.value)}
-            />
-            <input
-              type="text"
-              className="bio-note-input"
-              placeholder={t.bioNotePlaceholder}
-              value={bioNoteDraft}
-              onChange={(e) => setBioNoteDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleSubmitBioForm();
-                } else if (e.key === "Escape") {
-                  setBioFormType(null);
-                }
-              }}
-              maxLength={60}
-              autoFocus
-            />
-            <button
-              type="button"
-              className="primary-btn bio-save-btn"
-              onClick={() => void handleSubmitBioForm()}
-            >
-              {t.bioSaveBtn}
-            </button>
+            {bioFormType === "wake" && (
+              <div className="bio-sleep-row">
+                <span className="bio-sleep-lbl">{t.bioSleepLabel}</span>
+                <div className="bio-sleep-chips">
+                  {SLEEP_HOUR_OPTIONS.map((hrs) => (
+                    <button
+                      key={hrs}
+                      type="button"
+                      className={`bio-sleep-chip ${bioSleepDraft === hrs ? "active" : ""}`}
+                      onClick={() =>
+                        setBioSleepDraft((cur) => (cur === hrs ? null : hrs))
+                      }
+                    >
+                      {formatSleepHours(hrs, activeLang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="bio-inline-row">
+              <TimeInput24
+                value={bioTimeDraft}
+                onChange={setBioTimeDraft}
+                onSubmit={(normalized) => void handleSubmitBioForm(normalized)}
+                onCancel={() => setBioFormType(null)}
+              />
+              <input
+                type="text"
+                className="bio-note-input"
+                placeholder={t.bioNotePlaceholder}
+                value={bioNoteDraft}
+                onChange={(e) => setBioNoteDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleSubmitBioForm();
+                  } else if (e.key === "Escape") {
+                    setBioFormType(null);
+                  }
+                }}
+                maxLength={60}
+                autoFocus
+              />
+              <button
+                type="button"
+                className="primary-btn bio-save-btn"
+                onClick={() => void handleSubmitBioForm()}
+              >
+                {t.bioSaveBtn}
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -484,8 +541,9 @@ export function MenuPage({
                   type="button"
                   className={`mood-pill-btn ${active ? "selected" : ""}`}
                   onClick={() => onSelectStartMood(active ? null : m)}
+                  title={t.moodLabels[m]}
                 >
-                  <span>{MOOD_EMOJIS[m]}</span>
+                  <span className={`mood-dot mood-${m}`} />
                   <span>{t.moodLabels[m]}</span>
                 </button>
               );

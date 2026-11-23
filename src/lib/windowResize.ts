@@ -40,9 +40,10 @@ export async function applyMonitorClampedWindowSize(
   let targetW = Math.round(baseW * scaleMult);
   let targetH = Math.round(baseH * scaleMult);
   try {
-    const [mon, factor] = await Promise.all([
+    const [mon, factor, curInner] = await Promise.all([
       currentMonitor(),
       win.scaleFactor(),
+      win.innerSize(),
     ]);
     if (seq !== latestWindowResizeSeq) return;
     if (mon) {
@@ -52,6 +53,11 @@ export async function applyMonitorClampedWindowSize(
       const maxH = Math.max(180, Math.floor(monLogH * 0.8));
       targetW = Math.min(targetW, maxW);
       targetH = Math.min(targetH, maxH);
+      const curLogW = Math.round(curInner.width / factor);
+      const curLogH = Math.round(curInner.height / factor);
+      if (Math.abs(curLogW - targetW) <= 1 && Math.abs(curLogH - targetH) <= 1) {
+        return;
+      }
       await win.setSize(new LogicalSize(targetW, targetH));
       if (seq !== latestWindowResizeSeq) return;
       const pos = await win.outerPosition();

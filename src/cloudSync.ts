@@ -219,26 +219,29 @@ export async function syncWithCloudServer(): Promise<SyncStatusResult> {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6500);
-
-    const resp = await fetch(`${auth.serverUrl}/api/sync`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-User-Id": auth.userId,
-      },
-      body: JSON.stringify({
-        user: {
-          userId: auth.userId,
-          email: auth.email,
-          name: auth.name,
-          picture: auth.picture,
+    let resp: Response;
+    try {
+      resp = await fetch(`${auth.serverUrl}/api/sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": auth.userId,
         },
-        mutations,
-        snapshot,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+        body: JSON.stringify({
+          user: {
+            userId: auth.userId,
+            email: auth.email,
+            name: auth.name,
+            picture: auth.picture,
+          },
+          mutations,
+          snapshot,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}`);
@@ -255,7 +258,10 @@ export async function syncWithCloudServer(): Promise<SyncStatusResult> {
     }
 
     const nowIso = new Date().toISOString();
-    await saveCloudAuthState({ ...auth, lastSyncAt: nowIso });
+    const latestAuth = await loadCloudAuthState();
+    if (latestAuth.userId === auth.userId) {
+      await saveCloudAuthState({ ...latestAuth, lastSyncAt: nowIso });
+    }
 
     const remaining = await getPendingSyncCount();
     return {
@@ -639,8 +645,9 @@ export async function syncParkingToGoogleDocs(
         throw new Error(`HTTP ${updateResp.status}`);
       }
 
+      const latestAuth = await loadCloudAuthState();
       await saveCloudAuthState({
-        ...auth,
+        ...latestAuth,
         googleDocId: documentId,
         googleDocUrl: docUrl,
         lastSyncAt: new Date().toISOString(),

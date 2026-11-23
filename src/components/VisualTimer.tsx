@@ -7,8 +7,8 @@ export interface VisualTimerProps {
   accentColor: string;
   isRunning: boolean;
   isBreakAlarm: boolean;
-  title: string;
-  onClick: () => void;
+  title?: string;
+  onClick?: () => void;
 }
 
 export function VisualTimer({
@@ -33,7 +33,7 @@ export function VisualTimer({
 
     return (
       <div
-        className={`visual-timer-wrap pie clickable-timer ${isBreakAlarm ? "alarm-timer" : ""}`}
+        className={`visual-timer-wrap pie ${onClick ? "clickable-timer" : ""} ${isBreakAlarm ? "alarm-timer" : ""}`}
         onClick={onClick}
         title={title}
       >
@@ -91,7 +91,7 @@ export function VisualTimer({
 
     return (
       <div
-        className={`visual-timer-wrap candle clickable-timer ${isBreakAlarm ? "alarm-timer" : ""}`}
+        className={`visual-timer-wrap candle ${onClick ? "clickable-timer" : ""} ${isBreakAlarm ? "alarm-timer" : ""}`}
         onClick={onClick}
         title={title}
       >
@@ -170,7 +170,7 @@ export function VisualTimer({
 
   return (
     <div
-      className={`timer-display clickable-timer ${isBreakAlarm ? "alarm-timer" : ""}`}
+      className={`timer-display ${onClick ? "clickable-timer" : ""} ${isBreakAlarm ? "alarm-timer" : ""}`}
       onClick={onClick}
       title={title}
     >

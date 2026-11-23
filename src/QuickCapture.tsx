@@ -16,7 +16,12 @@ import {
 import { ActiveLang, translations } from "./i18n";
 import { DISTRACT_CATEGORIES } from "./constants";
 import { isLightColor } from "./lib/color";
-import { IconCheck, IconClose, IconEdit } from "./components/Icons";
+import {
+  IconCheck,
+  IconClose,
+  IconCompass,
+  IconEdit,
+} from "./components/Icons";
 
 interface FrontendContextSnapshot {
   currentContext: string;
@@ -74,7 +79,7 @@ export default function QuickCapture() {
       timerMode: "work",
       distractPenaltyMins: 1,
       lang: "tr",
-      bgColor: "#1a1814",
+      bgColor: "#0c0d0e",
       recentContexts: [],
     },
   });
@@ -104,6 +109,8 @@ export default function QuickCapture() {
   const newTagInputRef = useRef<HTMLInputElement>(null);
   const entryRowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const reminderTimerRef = useRef<number | null>(null);
+  const lastOpenSeqRef = useRef<number>(-1);
+  const submittingRef = useRef<boolean>(false);
 
   const lang: ActiveLang = payload.snapshot.lang === "en" ? "en" : "tr";
   const t = translations[lang];
@@ -130,14 +137,16 @@ export default function QuickCapture() {
     const mult = Math.max(1, (scalePct ?? 100) / 100);
     const dims =
       nextStage === "reminder"
-        ? { w: 540, h: 205 }
+        ? { w: 460, h: 138 }
         : nextStage === "input"
           ? hasSuggestions && entryCount > 0
-            ? { w: 580, h: 252 + Math.min(5, entryCount) * 34 }
-            : { w: 580, h: 248 }
+            ? { w: 560, h: 224 + Math.min(5, entryCount) * 30 }
+            : { w: 560, h: 192 }
           : nextStage === "context"
-            ? { w: 580, h: 325 }
-            : { w: 580, h: 280 };
+            ? { w: 560, h: 244 }
+            : nextStage === "tag"
+              ? { w: 560, h: 184 }
+              : { w: 560, h: 146 };
     invoke("set_capture_window_size", {
       width: Math.round(dims.w * mult),
       height: Math.round(dims.h * mult),
@@ -167,6 +176,16 @@ export default function QuickCapture() {
   };
 
   const applyOpenPayload = (next: CaptureOpenPayload) => {
+    if (
+      typeof next.openSeq === "number" &&
+      next.openSeq < lastOpenSeqRef.current
+    ) {
+      return;
+    }
+    if (typeof next.openSeq === "number") {
+      lastOpenSeqRef.current = next.openSeq;
+    }
+    submittingRef.current = false;
     clearReminderTimer();
     setPayload(next);
     setCategory("impulsive_task");
@@ -194,20 +213,26 @@ export default function QuickCapture() {
   };
 
   useEffect(() => {
+    let cancelled = false;
     invoke<CaptureOpenPayload>("get_capture_open_payload")
       .then((initial) => {
-        applyOpenPayload(initial);
+        if (!cancelled) applyOpenPayload(initial);
       })
       .catch(() => {});
 
     let unlisten: (() => void) | null = null;
     listen<CaptureOpenPayload>("open-capture", (ev) => {
-      applyOpenPayload(ev.payload);
+      if (!cancelled) applyOpenPayload(ev.payload);
     }).then((fn) => {
-      unlisten = fn;
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
     });
 
     return () => {
+      cancelled = true;
       if (unlisten) unlisten();
       clearReminderTimer();
     };
@@ -346,25 +371,31 @@ export default function QuickCapture() {
     finalNote: string,
     updatedContext?: string,
   ) => {
-    const msg: CaptureSubmittedEvent = {
-      mode: "distraction",
-      category,
-      tag: selectedTag || undefined,
-      text: finalNote,
-      newContext: updatedContext ? updatedContext.trim() : undefined,
-      activeApp: payload.activeApp,
-      activeWindow: payload.activeWindow,
-    };
-    await emitTo("main", "capture-submitted", msg).catch(() => {});
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      const msg: CaptureSubmittedEvent = {
+        mode: "distraction",
+        category,
+        tag: selectedTag || undefined,
+        text: finalNote,
+        newContext: updatedContext ? updatedContext.trim() : undefined,
+        activeApp: payload.activeApp,
+        activeWindow: payload.activeWindow,
+      };
+      await emitTo("main", "capture-submitted", msg);
 
-    const isTrigger = category === "internal" || category === "external";
-    if (!isOffSession && !isTrigger && effectiveContext) {
-      setStage("reminder");
-      reminderTimerRef.current = window.setTimeout(() => {
+      const isTrigger = category === "internal" || category === "external";
+      if (!isOffSession && !isTrigger && effectiveContext) {
+        setStage("reminder");
+        reminderTimerRef.current = window.setTimeout(() => {
+          closeAndRestore();
+        }, 1700);
+      } else {
         closeAndRestore();
-      }, 1700);
-    } else {
-      closeAndRestore();
+      }
+    } catch {
+      submittingRef.current = false;
     }
   };
 
@@ -654,18 +685,21 @@ export default function QuickCapture() {
       className={`qc-shell ${isLight ? "light-theme" : ""}`}
       style={
         {
-          "--qc-bg": payload.snapshot.bgColor || "#1a1814",
+          "--qc-bg": isLight ? "#f1f2f4" : "#121315",
         } as React.CSSProperties
       }
     >
       {stage === "reminder" ? (
         <div className="qc-reminder-card" onClick={closeAndRestore}>
-          <div className="qc-reminder-header">{t.qcReminderTitle}</div>
+          <div className="qc-reminder-header">
+            <IconCompass size={12} />
+            <span>{t.qcReminderTitle}</span>
+          </div>
           <div className="qc-reminder-context">
             {effectiveContext || t.qcContextNone}
           </div>
           {activeTabDisplay !== "—" && (
-            <div className="qc-reminder-sub">🌐 {activeTabDisplay}</div>
+            <div className="qc-reminder-sub">{activeTabDisplay}</div>
           )}
           <div className="qc-reminder-hint">{t.qcReminderCloseHint}</div>
         </div>
@@ -677,18 +711,18 @@ export default function QuickCapture() {
               title={isOffSession ? t.qcOffSessionLabel : effectiveContext}
             >
               {isOffSession ? (
-                <span>⠿ {t.qcOffSessionLabel}</span>
+                <span>{t.qcOffSessionLabel}</span>
               ) : (
                 <>
                   <span className="qc-muted">
-                    ⠿ 🎯 {t.qcCurrentContextLabel}:
+                    {t.qcCurrentContextLabel}:
                   </span>{" "}
                   <span>{effectiveContext || t.qcContextNone}</span>
                 </>
               )}
             </div>
             <div className="qc-tab-pill" title={activeTabDisplay}>
-              <span className="qc-muted">🌐 {t.qcActiveTabLabel}:</span>{" "}
+              <span className="qc-muted">{t.qcActiveTabLabel}:</span>{" "}
               <span>{activeTabDisplay}</span>
             </div>
           </div>
@@ -948,7 +982,7 @@ export default function QuickCapture() {
             <>
               <div className="qc-step-hint">
                 <span>
-                  🎯 {t.qcContextHeader} — {getCategoryLabel(category)}:{" "}
+                  {t.qcContextHeader} — {getCategoryLabel(category)}:{" "}
                   <strong>{text}</strong>
                 </span>
               </div>

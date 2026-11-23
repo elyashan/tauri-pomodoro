@@ -2,24 +2,17 @@ import type React from "react";
 import { useEffect, useRef } from "react";
 import type { BreakKind, TimerMode } from "../db";
 import type { Translations } from "../i18n";
-import {
-  IconBellAlert,
-  IconBriefcase,
-  IconCoffee,
-  IconExpand,
-  IconGrip,
-  IconPause,
-  IconSparkles,
-  IconTrayHide,
-} from "./Icons";
+import { IconClose, IconCoffee, IconSparkles } from "./Icons";
 
 export interface MiniDockProps {
   isLight: boolean;
+  progressColor?: string;
+  workPhase?: "warmup" | "focus" | "final" | "hyperfocus";
   modeClass: string;
   isBreakAlarm: boolean;
   isCelebrating: boolean;
   isRunning: boolean;
-  miniDockContextToast: string | null;
+  miniDockContextToast?: string | null;
   shellStyle: React.CSSProperties;
   sessionActive: boolean;
   timerMode: TimerMode;
@@ -34,24 +27,25 @@ export interface MiniDockProps {
 
 const DRAG_THRESHOLD_PX = 5;
 
-export function MiniDock({
-  isLight,
-  modeClass,
-  isBreakAlarm,
-  isCelebrating,
-  isRunning,
-  miniDockContextToast,
-  shellStyle,
-  sessionActive,
-  timerMode,
-  breakKind,
-  liveClockStr,
-  progressPct,
-  t,
-  onStartDrag,
-  onExitMiniDock,
-  onHideToTray,
-}: MiniDockProps) {
+export function MiniDock(props: MiniDockProps) {
+  const {
+    isLight,
+    progressColor,
+    modeClass,
+    isBreakAlarm,
+    isCelebrating,
+    shellStyle,
+    sessionActive,
+    timerMode,
+    breakKind,
+    liveClockStr,
+    progressPct,
+    t,
+    onStartDrag,
+    onExitMiniDock,
+    onHideToTray,
+  } = props;
+
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -102,7 +96,15 @@ export function MiniDock({
     window.addEventListener("mouseup", handleUp);
   };
 
-  const isPaused = sessionActive && !isRunning && !isBreakAlarm;
+  const barColor =
+    progressColor ||
+    (isBreakAlarm
+      ? "var(--accent-danger)"
+      : timerMode === "work"
+        ? "var(--accent-primary)"
+        : breakKind === "long"
+          ? "var(--accent-long-break)"
+          : "var(--accent-break)");
 
   return (
     <div
@@ -110,75 +112,45 @@ export function MiniDock({
         isLight ? "light-theme" : ""
       } ${modeClass} ${isBreakAlarm ? "alarm-shell" : ""} ${
         isCelebrating ? "celebrating-shell" : ""
-      } ${miniDockContextToast ? "has-toast" : ""}`}
+      }`}
       style={shellStyle}
       onMouseDown={handleShellMouseDown}
+      title={`${t.restoreWindowTooltip} · ${t.miniDockDragTooltip}`}
     >
-      {miniDockContextToast && (
-        <div
-          className="mini-dock-context-toast"
-          title={`${t.qcCurrentContextLabel}: ${miniDockContextToast} (${t.miniDockDragTooltip})`}
-        >
-          🎯 {miniDockContextToast}
-        </div>
-      )}
-
-      <div className="mini-dock-row">
-        <div className="mini-dock-left" title={t.miniDockDragTooltip}>
-          <span
-            className={`mini-dock-icon ${isBreakAlarm ? "alarm" : isPaused ? "paused" : ""}`}
-          >
-            {!sessionActive ? (
-              <IconGrip size={13} />
-            ) : isBreakAlarm ? (
-              <IconBellAlert size={13} />
-            ) : !isRunning ? (
-              <IconPause size={13} />
-            ) : timerMode === "work" ? (
-              <IconBriefcase size={13} />
-            ) : breakKind === "long" ? (
-              <IconSparkles size={13} />
-            ) : (
-              <IconCoffee size={13} />
-            )}
-          </span>
-          <span className={`mini-dock-clock ${isBreakAlarm ? "alarm" : ""}`}>
-            {liveClockStr}
-          </span>
-        </div>
-
-        <div className="mini-dock-actions no-drag">
-          <button
-            className="mini-dock-btn"
-            onClick={onExitMiniDock}
-            title={t.restoreWindowTooltip}
-          >
-            <IconExpand size={12} />
-          </button>
-          <button
-            className="mini-dock-btn"
-            onClick={onHideToTray}
-            title={t.hideToTrayOnlyTooltip}
-          >
-            <IconTrayHide size={12} />
-          </button>
-        </div>
+      <div className="mini-dock-center">
+        <span className={`mini-dock-clock ${isBreakAlarm ? "alarm" : ""}`}>
+          {sessionActive && timerMode === "break" && (
+            <span className="mini-dock-mode-icon">
+              {breakKind === "long" ? (
+                <IconSparkles size={11} />
+              ) : (
+                <IconCoffee size={11} />
+              )}
+            </span>
+          )}
+          <span>{liveClockStr}</span>
+        </span>
       </div>
+
+      <button
+        type="button"
+        className="mini-dock-close-hover no-drag"
+        onClick={onHideToTray}
+        title={t.hideToTrayOnlyTooltip}
+      >
+        <IconClose size={10} />
+      </button>
 
       {sessionActive && (
         <div
           className="progress-bar-container"
-          style={{ bottom: 2, left: 10, right: 10, height: 2 }}
+          style={{ bottom: 2, left: 14, right: 14, height: 2 }}
         >
           <div
             className="progress-bar-fill"
             style={{
               width: `${progressPct}%`,
-              backgroundColor: isBreakAlarm
-                ? "#ef4444"
-                : timerMode === "work"
-                  ? "var(--timer-color, #fbbf24)"
-                  : "#38bdf8",
+              backgroundColor: barColor,
             }}
           />
         </div>

@@ -2,15 +2,11 @@ import { useState } from "react";
 import {
   BioEventType,
   BioLogItem,
-  MoodLogItem,
   MoodType,
   addBioLog,
-  addMoodLog,
   deleteBioLog,
-  deleteMoodLog,
   getBioLogs,
   getDateBoundsIso,
-  getMoodLogs,
 } from "../db";
 import type { NavPage } from "../constants";
 
@@ -31,7 +27,6 @@ export function useBioAndMood({
   );
   const [todayBioLogs, setTodayBioLogs] = useState<BioLogItem[]>([]);
   const [summaryBioLogs, setSummaryBioLogs] = useState<BioLogItem[]>([]);
-  const [summaryMoodLogs, setSummaryMoodLogs] = useState<MoodLogItem[]>([]);
 
   const hydrateTodayBioLogs = async () => {
     setTodayBioLogs(await getBioLogs(true));
@@ -41,11 +36,13 @@ export function useBioAndMood({
     eventType: BioEventType,
     eventTime?: string,
     note?: string,
+    sleepHours?: number | null,
+    targetDateStr?: string,
   ) => {
-    await addBioLog(eventType, eventTime, note);
+    await addBioLog(eventType, eventTime, note, sleepHours, targetDateStr);
     setTodayBioLogs(await getBioLogs(true));
     if (page === "summary") {
-      const dayRange = getDateBoundsIso(selectedSummaryDate);
+      const dayRange = getDateBoundsIso(targetDateStr || selectedSummaryDate);
       setSummaryBioLogs(await getBioLogs(false, dayRange));
     }
   };
@@ -59,22 +56,6 @@ export function useBioAndMood({
     }
   };
 
-  const handleAddMoodCheckin = async (mood: MoodType) => {
-    await addMoodLog(mood, "checkin");
-    if (page === "summary") {
-      const dayRange = getDateBoundsIso(selectedSummaryDate);
-      setSummaryMoodLogs(await getMoodLogs(false, dayRange));
-    }
-  };
-
-  const handleDeleteMoodLog = async (id: number) => {
-    await deleteMoodLog(id);
-    if (page === "summary") {
-      const dayRange = getDateBoundsIso(selectedSummaryDate);
-      setSummaryMoodLogs(await getMoodLogs(false, dayRange));
-    }
-  };
-
   return {
     selectedStartMood,
     setSelectedStartMood,
@@ -84,12 +65,8 @@ export function useBioAndMood({
     setTodayBioLogs,
     summaryBioLogs,
     setSummaryBioLogs,
-    summaryMoodLogs,
-    setSummaryMoodLogs,
     hydrateTodayBioLogs,
     handleAddBioLog,
     handleDeleteBioLog,
-    handleAddMoodCheckin,
-    handleDeleteMoodLog,
   };
 }

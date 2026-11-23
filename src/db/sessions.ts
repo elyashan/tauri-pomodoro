@@ -145,9 +145,15 @@ export async function loadRuntimeState(): Promise<RuntimeState | null> {
         raw.sessionStartMood === "calm" ||
         raw.sessionStartMood === "focused" ||
         raw.sessionStartMood === "tired" ||
+        raw.sessionStartMood === "scattered" ||
+        raw.sessionStartMood === "overwhelmed" ||
         raw.sessionStartMood === "anxious" ||
         raw.sessionStartMood === "motivated"
           ? raw.sessionStartMood
+          : null,
+      sessionGroupId:
+        typeof raw.sessionGroupId === "string" && raw.sessionGroupId.trim()
+          ? raw.sessionGroupId.trim()
           : null,
       lastActiveAt:
         typeof raw.lastActiveAt === "number" &&
@@ -176,22 +182,31 @@ export async function getActiveDayStats(
   const day = await getOrCreateActiveDay(db, locale);
   const { startIso, endIso } = getDateBoundsIso(toLocalDateStr());
 
-  const rows = await db.select<{ total: number | null; cnt: number }[]>(
-    `SELECT COALESCE(SUM(duration_sec), 0) AS total, COUNT(id) AS cnt
+  const rows = await db.select<
+    {
+      total: number | null;
+      completed_cnt: number | null;
+      all_cnt: number;
+    }[]
+  >(
+    `SELECT COALESCE(SUM(duration_sec), 0) AS total,
+            SUM(CASE WHEN COALESCE(is_completed, 0) = 1 THEN 1 ELSE 0 END) AS completed_cnt,
+            COUNT(id) AS all_cnt
      FROM sessions
-     WHERE mode = 'work' AND created_at >= $1 AND created_at <= $2`,
+     WHERE mode = 'work' AND duration_sec >= 30 AND created_at >= $1 AND created_at <= $2`,
     [startIso, endIso],
   );
 
   const totalSec = Number(rows[0]?.total ?? 0);
-  const sessionCount = Number(rows[0]?.cnt ?? 0);
+  const completedCount = Number(rows[0]?.completed_cnt ?? 0);
+  const allCount = Number(rows[0]?.all_cnt ?? 0);
 
   return {
     dayId: day.id,
     label: makeDayLabel(new Date(), locale),
     totalSec,
-    sessionCount,
-    avgSec: sessionCount > 0 ? Math.round(totalSec / sessionCount) : 0,
+    sessionCount: completedCount,
+    avgSec: allCount > 0 ? Math.round(totalSec / allCount) : 0,
   };
 }
 
@@ -206,11 +221,19 @@ export async function recordWorkSession(
   hyperfocusSec = 0,
   moodBefore?: MoodType | null,
   moodAfter?: MoodType | null,
+  planName?: string | null,
+  roundIndex = 0,
+  isCompleted = false,
+  sessionGroupId?: string | null,
 ): Promise<number | null> {
   const sec = Math.round(durationSec);
   if (sec <= 0) return null;
 
   const hf = Math.max(0, Math.round(hyperfocusSec));
+  const rIdx = Math.max(0, Math.round(roundIndex));
+  const completedFlag = isCompleted ? 1 : 0;
+  const normalizedPlan = planName?.trim() || null;
+  const normalizedGroupId = sessionGroupId?.trim() || null;
   const db = await getDb();
   const day = await getOrCreateActiveDay(db);
   const now = new Date();
@@ -227,8 +250,8 @@ export async function recordWorkSession(
   const startIso = new Date(validStartMs).toISOString();
 
   const res = await db.execute(
-    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec, end_tag, end_reason, hyperfocus_sec, mood_before, mood_after)
-     VALUES ($1, 'work', $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12)`,
+    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec, end_tag, end_reason, hyperfocus_sec, mood_before, mood_after, plan_name, round_index, is_completed, session_group_id)
+     VALUES ($1, 'work', $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       day.id,
       sec,
@@ -242,6 +265,10 @@ export async function recordWorkSession(
       hf,
       moodBefore || null,
       moodAfter || null,
+      normalizedPlan,
+      rIdx,
+      completedFlag,
+      normalizedGroupId,
     ],
   );
   await enqueueSyncMutation(db, "session", {
@@ -259,6 +286,10 @@ export async function recordWorkSession(
     hyperfocus_sec: hf,
     mood_before: moodBefore || null,
     mood_after: moodAfter || null,
+    plan_name: normalizedPlan,
+    round_index: rIdx,
+    is_completed: completedFlag,
+    session_group_id: normalizedGroupId,
   });
   let insertedId = Number(res.lastInsertId) || null;
   if (!insertedId) {
@@ -293,6 +324,7 @@ export async function recordBreakSession(
   overtimeSec = 0,
   startedAt?: string,
   endedAt?: string,
+  sessionGroupId?: string | null,
 ): Promise<void> {
   const sec = Math.round(durationSec);
   if (sec <= 0) return;
@@ -304,10 +336,11 @@ export async function recordBreakSession(
   const startIso =
     startedAt || new Date(now.getTime() - sec * 1000).toISOString();
   const overtime = Math.max(0, Math.round(overtimeSec));
+  const normalizedGroupId = sessionGroupId?.trim() || null;
 
   await db.execute(
-    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec)
-     VALUES ($1, 'break', $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO sessions (day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at, overtime_sec, session_group_id)
+     VALUES ($1, 'break', $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       day.id,
       sec,
@@ -317,6 +350,7 @@ export async function recordBreakSession(
       startIso,
       endIso,
       overtime,
+      normalizedGroupId,
     ],
   );
   await enqueueSyncMutation(db, "session", {
@@ -329,6 +363,7 @@ export async function recordBreakSession(
     started_at: startIso,
     ended_at: endIso,
     overtime_sec: overtime,
+    session_group_id: normalizedGroupId,
   });
 }
 
@@ -337,18 +372,27 @@ export async function getDayStatsForDate(
 ): Promise<{ totalSec: number; sessionCount: number; avgSec: number }> {
   const db = await getDb();
   const { startIso, endIso } = getDateBoundsIso(dateStr);
-  const rows = await db.select<{ total: number | null; cnt: number }[]>(
-    `SELECT COALESCE(SUM(duration_sec), 0) AS total, COUNT(id) AS cnt
+  const rows = await db.select<
+    {
+      total: number | null;
+      completed_cnt: number | null;
+      all_cnt: number;
+    }[]
+  >(
+    `SELECT COALESCE(SUM(duration_sec), 0) AS total,
+            SUM(CASE WHEN COALESCE(is_completed, 0) = 1 THEN 1 ELSE 0 END) AS completed_cnt,
+            COUNT(id) AS all_cnt
      FROM sessions
-     WHERE mode = 'work' AND created_at >= $1 AND created_at <= $2`,
+     WHERE mode = 'work' AND duration_sec >= 30 AND created_at >= $1 AND created_at <= $2`,
     [startIso, endIso],
   );
   const totalSec = Number(rows[0]?.total ?? 0);
-  const sessionCount = Number(rows[0]?.cnt ?? 0);
+  const completedCount = Number(rows[0]?.completed_cnt ?? 0);
+  const allCount = Number(rows[0]?.all_cnt ?? 0);
   return {
     totalSec,
-    sessionCount,
-    avgSec: sessionCount > 0 ? Math.round(totalSec / sessionCount) : 0,
+    sessionCount: completedCount,
+    avgSec: allCount > 0 ? Math.round(totalSec / allCount) : 0,
   };
 }
 
@@ -372,12 +416,18 @@ export async function getTimelineSessions(
     hyperfocus_sec: number | null;
     mood_before: string | null;
     mood_after: string | null;
+    plan_name: string | null;
+    round_index: number | null;
+    is_completed: number | null;
+    session_group_id: string | null;
   }[];
 
   if (dayId !== undefined && !dateRange) {
     rows = await db.select(
       `SELECT id, day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at,
-              overtime_sec, COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec, mood_before, mood_after
+              overtime_sec, COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec, mood_before, mood_after,
+              plan_name, COALESCE(round_index, 0) AS round_index, COALESCE(is_completed, 0) AS is_completed,
+              session_group_id
        FROM sessions
        WHERE day_id = $1
        ORDER BY COALESCE(started_at, created_at) ASC`,
@@ -386,7 +436,9 @@ export async function getTimelineSessions(
   } else {
     rows = await db.select(
       `SELECT id, day_id, mode, duration_sec, created_at, tag, reason, started_at, ended_at,
-              overtime_sec, COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec, mood_before, mood_after
+              overtime_sec, COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec, mood_before, mood_after,
+              plan_name, COALESCE(round_index, 0) AS round_index, COALESCE(is_completed, 0) AS is_completed,
+              session_group_id
        FROM sessions
        WHERE COALESCE(ended_at, created_at) > $1 AND COALESCE(started_at, created_at) <= $2
        ORDER BY COALESCE(started_at, created_at) ASC`,
@@ -469,6 +521,10 @@ export async function getTimelineSessions(
         moodAfter: (r.mood_after as MoodType | null) || null,
         tag: r.tag,
         reason: r.reason,
+        planName: r.plan_name || null,
+        roundIndex: Number(r.round_index ?? 0),
+        isCompleted: Number(r.is_completed ?? 0) === 1,
+        sessionGroupId: r.session_group_id || null,
         startedAt: clampedStart.toISOString(),
         endedAt: clampedEnd.toISOString(),
         startHour: sH,
@@ -491,21 +547,19 @@ export async function getWeeklySummary(
   const db = await getDb();
 
   const now = new Date();
-  const anchor = anchorDateStr ? parseLocalDateStr(anchorDateStr) : now;
-  const mondayOffset = (anchor.getDay() + 6) % 7;
+  const end = anchorDateStr ? parseLocalDateStr(anchorDateStr) : new Date(now);
+  end.setHours(23, 59, 59, 999);
 
-  const monday = new Date(anchor);
-  monday.setDate(anchor.getDate() - mondayOffset);
-  monday.setHours(0, 0, 0, 0);
+  const start = new Date(end);
+  start.setDate(end.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
 
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-
-  const rows = await db.select<{ duration_sec: number; created_at: string }[]>(
-    `SELECT duration_sec, created_at FROM sessions
-     WHERE mode = 'work' AND created_at >= $1 AND created_at <= $2`,
-    [monday.toISOString(), sunday.toISOString()],
+  const rows = await db.select<
+    { duration_sec: number; is_completed: number | null; created_at: string }[]
+  >(
+    `SELECT duration_sec, COALESCE(is_completed, 0) AS is_completed, created_at FROM sessions
+     WHERE mode = 'work' AND duration_sec >= 30 AND created_at >= $1 AND created_at <= $2`,
+    [start.toISOString(), end.toISOString()],
   );
 
   const isTr = locale.toLowerCase().startsWith("tr");
@@ -518,8 +572,9 @@ export async function getWeeklySummary(
   let totalSessions = 0;
 
   for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const weekdayIdx = (d.getDay() + 6) % 7;
 
     const isToday =
       d.getDate() === now.getDate() &&
@@ -540,14 +595,16 @@ export async function getWeeklySummary(
     });
 
     const daySec = matching.reduce((acc, r) => acc + Number(r.duration_sec), 0);
-    const dayCount = matching.length;
+    const dayCount = matching.filter(
+      (r) => Number(r.is_completed) === 1,
+    ).length;
 
     totalSec += daySec;
     totalSessions += dayCount;
 
     days.push({
       dayIndex: i,
-      shortLabel: shortNames[i],
+      shortLabel: shortNames[weekdayIdx],
       dateLabel: d.toLocaleDateString(locale, {
         day: "2-digit",
         month: "short",

@@ -7,6 +7,7 @@ class AmbientNoiseEngine {
   private filterNode: BiquadFilterNode | null = null;
   private activeSound: AmbientSoundType = "off";
   private isPlaying = false;
+  private fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
 
   private ensureContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -105,6 +106,10 @@ class AmbientNoiseEngine {
   }
 
   private tearDownNodes(): void {
+    if (this.fadeOutTimer !== null) {
+      clearTimeout(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
     try {
       this.sourceNode?.stop();
     } catch {
@@ -124,6 +129,10 @@ class AmbientNoiseEngine {
     volumePct: number,
     active: boolean,
   ): void {
+    if (this.fadeOutTimer !== null) {
+      clearTimeout(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
     const clampedVol = Math.max(0, Math.min(100, volumePct)) / 100;
     const targetGain = active && sound !== "off" ? clampedVol * 0.32 : 0;
 
@@ -134,11 +143,12 @@ class AmbientNoiseEngine {
           this.gainNode.gain.cancelScheduledValues(now);
           this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
           this.gainNode.gain.linearRampToValueAtTime(0, now + 0.16);
-          window.setTimeout(() => {
-            if (!this.isPlaying) return;
+          this.isPlaying = false;
+          this.fadeOutTimer = window.setTimeout(() => {
+            this.fadeOutTimer = null;
+            if (this.isPlaying) return;
             this.tearDownNodes();
           }, 180);
-          this.isPlaying = false;
         } catch {
           this.tearDownNodes();
         }

@@ -1,4 +1,9 @@
-import type { DistractionCategory, ParkingLotData, TagKind } from "./db";
+import type {
+  DistractionCategory,
+  MoodType,
+  ParkingLotData,
+  TagKind,
+} from "./db";
 
 export interface ShortcutStatus {
   distractionShortcut: string;
@@ -63,6 +68,50 @@ export const TIMER_PRESETS = [
   "#18181b",
 ];
 
+export type HarmoniousTimerColorId =
+  | "neutral"
+  | "indigo"
+  | "sky"
+  | "emerald"
+  | "amber"
+  | "violet"
+  | "rose";
+
+export interface HarmoniousTimerColor {
+  id: HarmoniousTimerColorId;
+  dark: string;
+  light: string;
+  swatch: string;
+}
+
+export const HARMONIOUS_TIMER_COLORS: HarmoniousTimerColor[] = [
+  { id: "neutral", dark: "#f2f4f8", light: "#14161c", swatch: "#d7dce6" },
+  { id: "indigo", dark: "#8b96ff", light: "#4f5cd1", swatch: "#6c79f0" },
+  { id: "sky", dark: "#6cb8ff", light: "#2472c8", swatch: "#53a8ff" },
+  { id: "emerald", dark: "#4ade80", light: "#15803d", swatch: "#22c55e" },
+  { id: "amber", dark: "#f3c75f", light: "#b88210", swatch: "#f2be42" },
+  { id: "violet", dark: "#b69eff", light: "#6d52d4", swatch: "#a78bfa" },
+  { id: "rose", dark: "#ff5c6c", light: "#dc2626", swatch: "#ef4444" },
+];
+
+export function resolveHarmoniousTimerColor(
+  savedHex: string | undefined,
+  isLight: boolean,
+): { id: HarmoniousTimerColorId; color: string } {
+  const lower = (savedHex || "").trim().toLowerCase();
+  const matched =
+    HARMONIOUS_TIMER_COLORS.find(
+      (item) =>
+        item.dark.toLowerCase() === lower ||
+        item.light.toLowerCase() === lower ||
+        item.swatch.toLowerCase() === lower,
+    ) || HARMONIOUS_TIMER_COLORS[0];
+  return {
+    id: matched.id,
+    color: isLight ? matched.light : matched.dark,
+  };
+}
+
 export const PENALTY_OPTIONS = [0, 1, 2, 3, 5];
 export const UI_SCALE_OPTIONS = [100, 125, 150] as const;
 
@@ -78,16 +127,28 @@ export const MOOD_TYPES = [
   "calm",
   "focused",
   "tired",
+  "scattered",
+  "overwhelmed",
   "anxious",
-  "motivated",
 ] as const;
-export const MOOD_EMOJIS: Record<(typeof MOOD_TYPES)[number], string> = {
+export const MOOD_EMOJIS: Record<MoodType, string> = {
   calm: "😌",
   focused: "🎯",
   tired: "😴",
+  scattered: "🌀",
+  overwhelmed: "🤯",
   anxious: "😰",
   motivated: "🔥",
 };
+
+export const SLEEP_HOUR_OPTIONS = [4.5, 5, 6, 7, 8, 9] as const;
+
+export function formatSleepHours(hours: number, lang: "tr" | "en"): string {
+  const unit = lang === "tr" ? "s" : "h";
+  if (hours < 5) return `<5${unit}`;
+  if (hours >= 9) return `9${unit}+`;
+  return `${Math.round(hours)}${unit}`;
+}
 
 export interface ReleaseCommandPreset {
   id: string;

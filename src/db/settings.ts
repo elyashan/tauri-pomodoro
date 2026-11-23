@@ -6,6 +6,7 @@ import {
   setSettings,
 } from "./core";
 import {
+  AccentPreset,
   AmbientNoiseSettings,
   AmbientSoundType,
   CustomWindowSizes,
@@ -92,6 +93,7 @@ export async function loadThemeSettings(): Promise<ThemeSettings> {
     "timerColor",
     "uiScale",
     "timerStyle",
+    "accentColor",
   ]);
   const bgColor = map.get("bgColor") ?? "";
   const timerColor = map.get("timerColor") ?? "";
@@ -100,6 +102,15 @@ export async function loadThemeSettings(): Promise<ThemeSettings> {
   const rawStyle = map.get("timerStyle");
   const timerStyle: TimerVisualStyle =
     rawStyle === "pie" || rawStyle === "candle" ? rawStyle : "digital";
+  const rawAccent = map.get("accentColor");
+  const accentColor: AccentPreset =
+    rawAccent === "sky" ||
+    rawAccent === "emerald" ||
+    rawAccent === "amber" ||
+    rawAccent === "violet" ||
+    rawAccent === "rose"
+      ? rawAccent
+      : "indigo";
 
   return {
     bgColor: HEX_COLOR.test(bgColor) ? bgColor : DEFAULT_THEME.bgColor,
@@ -113,6 +124,7 @@ export async function loadThemeSettings(): Promise<ThemeSettings> {
     uiScale:
       rawScale === 125 || rawScale === 150 ? rawScale : DEFAULT_THEME.uiScale,
     timerStyle,
+    accentColor,
   };
 }
 
@@ -123,6 +135,7 @@ export async function saveThemeSettings(theme: ThemeSettings): Promise<void> {
     ["timerColor", theme.timerColor],
     ["uiScale", String(theme.uiScale)],
     ["timerStyle", theme.timerStyle || "digital"],
+    ["accentColor", theme.accentColor || "indigo"],
   ]);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import {
   CloudAuthState,
@@ -49,6 +49,7 @@ export function useCloudSync({
   );
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const syncInFlightRef = useRef<boolean>(false);
 
   const hydrateCloudSync = async () => {
     const [loadedAuth, pendingCnt] = await Promise.all([
@@ -68,6 +69,8 @@ export function useCloudSync({
   };
 
   const triggerBackgroundCloudSync = async () => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
     try {
       const cnt = await getPendingSyncCount();
       setPendingSyncCount(cnt);
@@ -84,6 +87,8 @@ export function useCloudSync({
       }
     } catch {
       // Ignore offline transient failures
+    } finally {
+      syncInFlightRef.current = false;
     }
   };
 
@@ -142,6 +147,8 @@ export function useCloudSync({
   };
 
   const handleManualCloudSync = async () => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
     setIsSyncingCloud(true);
     setSyncStatusMsg(syncRunningLabel);
     try {
@@ -158,6 +165,7 @@ export function useCloudSync({
     } catch (err) {
       setSyncStatusMsg(String(err));
     } finally {
+      syncInFlightRef.current = false;
       setIsSyncingCloud(false);
       setTimeout(() => setSyncStatusMsg(null), 3500);
     }

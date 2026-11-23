@@ -8,7 +8,7 @@ import {
   updateTag,
 } from "../db";
 import type { Translations } from "../i18n";
-import { IconCheck, IconClose } from "./Icons";
+import { IconCheck, IconClose, IconEdit } from "./Icons";
 
 type ManageableTagKind = keyof Translations["tagManagerKindLabels"];
 
@@ -21,6 +21,16 @@ const TAG_MANAGER_KINDS: ManageableTagKind[] = [
   "ending",
   "break_overtime",
 ];
+
+const TAG_KIND_CLASS: Record<ManageableTagKind, string> = {
+  work: "work",
+  distraction_impulsive_task: "task",
+  distraction_idea: "idea",
+  distraction_internal: "internal",
+  distraction_external: "external",
+  ending: "ending",
+  break_overtime: "overtime",
+};
 
 function getDefaultSeedsForKind(
   kind: ManageableTagKind,
@@ -103,35 +113,44 @@ export function TagManagerSection({
 
   return (
     <div className="settings-section no-drag">
-      <div className="settings-label">{t.tagManagerTitle}</div>
-      <div className="release-cmd-hint">{t.tagManagerHint}</div>
+      <div className="settings-label-row">
+        <span className="settings-label">{t.tagManagerTitle}</span>
+        <span className="summary-section-count">{tags.length}</span>
+      </div>
 
-      <div className="penalty-selector tag-kind-grid">
-        {TAG_MANAGER_KINDS.map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            className={`penalty-btn ${selectedKind === kind ? "active" : ""}`}
-            onClick={() => setSelectedKind(kind)}
-            title={t.tagManagerKindLabels[kind]}
-          >
-            {t.tagManagerKindLabels[kind]}
-          </button>
-        ))}
+      <div className="tag-kind-pills">
+        {TAG_MANAGER_KINDS.map((kind) => {
+          const dotClass = TAG_KIND_CLASS[kind];
+          return (
+            <button
+              key={kind}
+              type="button"
+              className={`tag-kind-pill ${selectedKind === kind ? "active" : ""}`}
+              onClick={() => setSelectedKind(kind)}
+              title={t.tagManagerKindLabels[kind]}
+            >
+              <span className={`tag-kind-dot kind-${dotClass}`} />
+              <span>{t.tagManagerKindLabels[kind]}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="tag-manager-subhead">
+        <span>{t.tagManagerKindLabels[selectedKind]}</span>
+        <span className="tag-manager-subhint">{t.tagManagerHint}</span>
       </div>
 
       {tags.length === 0 ? (
-        <div className="release-cmd-hint" style={{ padding: "4px 2px" }}>
-          {t.tagManagerEmpty}
-        </div>
+        <div className="tag-manager-empty">{t.tagManagerEmpty}</div>
       ) : (
-        <div className="break-reminder-chips-wrap">
+        <div className="tag-manager-list">
           {tags.map((item) =>
             editingId === item.id ? (
-              <span key={item.id} className="break-reminder-chip editing">
+              <div key={item.id} className="tag-manager-row editing">
                 <input
                   type="text"
-                  className="plan-text-input tag-inline-rename-input"
+                  className="tag-manager-edit-input"
                   value={editingDraft}
                   autoFocus
                   maxLength={28}
@@ -146,46 +165,72 @@ export function TagManagerSection({
                     }
                   }}
                 />
-                <button
-                  type="button"
-                  className="break-reminder-chip-del save"
-                  onClick={() => void handleSaveRename(item.id)}
-                  title={t.add}
-                >
-                  <IconCheck size={9} />
-                </button>
-              </span>
+                <div className="tag-manager-edit-actions">
+                  <button
+                    type="button"
+                    className="tag-row-icon-btn save"
+                    onClick={() => void handleSaveRename(item.id)}
+                    title={t.add}
+                  >
+                    <IconCheck size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className="tag-row-icon-btn"
+                    onClick={() => {
+                      setEditingId(null);
+                      setEditingDraft("");
+                    }}
+                    title={t.cancel}
+                  >
+                    <IconClose size={11} />
+                  </button>
+                </div>
+              </div>
             ) : (
-              <span key={item.id} className="break-reminder-chip">
+              <div key={item.id} className="tag-manager-row">
                 <button
                   type="button"
-                  className="tag-chip-rename-trigger"
+                  className="tag-manager-name-btn"
                   onClick={() => {
                     setEditingId(item.id);
                     setEditingDraft(item.name);
                   }}
                   title={t.tagManagerHint}
                 >
-                  {item.name}
+                  <span className="tag-manager-name-text">{item.name}</span>
                 </button>
-                <button
-                  type="button"
-                  className="break-reminder-chip-del"
-                  onClick={() => void handleDelete(item.id)}
-                  title={t.cancel}
-                >
-                  <IconClose size={9} />
-                </button>
-              </span>
+                <div className="tag-manager-row-actions">
+                  <button
+                    type="button"
+                    className="tag-row-icon-btn"
+                    onClick={() => {
+                      setEditingId(item.id);
+                      setEditingDraft(item.name);
+                    }}
+                    title={t.tagManagerHint}
+                  >
+                    <IconEdit size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className="tag-row-icon-btn del"
+                    onClick={() => void handleDelete(item.id)}
+                    title={t.cancel}
+                  >
+                    <IconClose size={11} />
+                  </button>
+                </div>
+              </div>
             ),
           )}
         </div>
       )}
 
-      <div className="checklist-add-row">
+      <div className="tag-manager-add-row">
         <input
           type="text"
-          className="plan-text-input"
+          className="tag-manager-add-input"
           placeholder={t.tagManagerAddPlaceholder}
           value={newTagName}
           maxLength={28}
@@ -199,8 +244,7 @@ export function TagManagerSection({
         />
         <button
           type="button"
-          className="primary-btn"
-          style={{ fontSize: "10px", padding: "4px 10px" }}
+          className="primary-btn tag-manager-add-btn"
           onClick={() => void handleAdd()}
         >
           {t.add}

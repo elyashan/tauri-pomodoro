@@ -15,7 +15,14 @@ export type BreakKind = "standard" | "long" | "short";
 export type LangCode = "auto" | "tr" | "en";
 
 export type BioEventType = "wake" | "coffee" | "meds" | "meal";
-export type MoodType = "calm" | "focused" | "tired" | "anxious" | "motivated";
+export type MoodType =
+  | "calm"
+  | "focused"
+  | "tired"
+  | "scattered"
+  | "overwhelmed"
+  | "anxious"
+  | "motivated";
 export type MoodPhase = "start" | "end" | "checkin";
 export type ParkingBucket = "today" | "maybe" | "archived";
 
@@ -25,6 +32,7 @@ export interface BioLogItem {
   event_type: BioEventType;
   event_time: string;
   note: string | null;
+  sleep_hours: number | null;
   created_at: string;
 }
 
@@ -61,11 +69,19 @@ export interface RuntimeState {
   isHyperfocus?: boolean;
   hyperfocusExtraSec?: number;
   sessionStartMood?: MoodType | null;
+  sessionGroupId?: string | null;
   lastActiveAt?: number | null;
 }
 
 export type TimerVisualStyle = "digital" | "pie" | "candle";
 export type AmbientSoundType = "off" | "brown" | "pink" | "white" | "rain";
+export type AccentPreset =
+  | "indigo"
+  | "sky"
+  | "emerald"
+  | "amber"
+  | "violet"
+  | "rose";
 
 export interface AmbientNoiseSettings {
   sound: AmbientSoundType;
@@ -97,14 +113,16 @@ export interface ThemeSettings {
   timerColor: string; // "#rrggbb"
   uiScale: number; // 100 | 125 | 150
   timerStyle: TimerVisualStyle;
+  accentColor?: AccentPreset;
 }
 
 export const DEFAULT_THEME: ThemeSettings = {
-  bgColor: "#1a1814",
-  bgOpacity: 82,
-  timerColor: "#ffffff",
+  bgColor: "#111216",
+  bgOpacity: 96,
+  timerColor: "#f2f4f8",
   uiScale: 100,
   timerStyle: "digital",
+  accentColor: "indigo",
 };
 
 export interface AppState {
@@ -318,6 +336,9 @@ export interface AdhdInsightsData {
   hyperfocusCount: number;
   hyperfocusTotalMins: number;
   topTriggerTag: string | null;
+  moodLoggedCount: number;
+  topStartMood: MoodType | null;
+  topEndMood: MoodType | null;
 }
 
 export interface TagItem {
@@ -355,6 +376,10 @@ export interface TimelineSessionItem {
   moodAfter: MoodType | null;
   tag: string | null;
   reason: string | null;
+  planName: string | null;
+  roundIndex: number;
+  isCompleted: boolean;
+  sessionGroupId: string | null;
   startedAt: string;
   endedAt: string;
   startHour: number;
@@ -434,10 +459,10 @@ export const DEFAULT_WORK_SEC = 50 * 60;
 export const DEFAULT_BREAK_SEC = 10 * 60;
 
 export const DEFAULT_WINDOW_SIZES: Record<SizeTargetPage, WindowSizePreset> = {
-  timer: { width: 296, height: 170 },
-  menu: { width: 315, height: 405 },
-  summary: { width: 420, height: 560 },
-  settings: { width: 335, height: 495 },
+  timer: { width: 336, height: 180 },
+  menu: { width: 356, height: 472 },
+  summary: { width: 428, height: 560 },
+  settings: { width: 388, height: 520 },
   dashboard: { width: 690, height: 530 },
 };
 

@@ -207,7 +207,11 @@ export function ParkingIdeaRow({
 export interface ParkingScreenshotRowProps {
   item: ParkingItem;
   t: Translations;
-  onOpenLightbox: (entry: WorkStoryEntry) => void;
+  onOpenLightbox: (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+    source?: "story" | "parking",
+  ) => void;
   onDeleteEntry: (id: number) => void;
   onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
 }
@@ -230,19 +234,23 @@ export function ParkingScreenshotRow({
           alt="ss"
           className="parking-ss-thumb"
           onClick={() =>
-            onOpenLightbox({
-              id: item.id,
-              day_id: item.day_id,
-              entry_type: "screenshot_note",
-              screenshot_data: item.screenshot_data,
-              active_app: item.active_app,
-              active_window: item.active_window,
-              context_text: item.context_text,
-              work_tag: "",
-              note: item.content,
-              created_at: item.created_at,
-              elapsed_work_sec: 0,
-            })
+            onOpenLightbox(
+              {
+                id: item.id,
+                day_id: item.day_id,
+                entry_type: "screenshot_note",
+                screenshot_data: item.screenshot_data,
+                active_app: item.active_app,
+                active_window: item.active_window,
+                context_text: item.context_text,
+                work_tag: "",
+                note: item.content,
+                created_at: item.created_at,
+                elapsed_work_sec: 0,
+              },
+              undefined,
+              "parking",
+            )
           }
         />
       )}
@@ -276,8 +284,13 @@ export interface ParkingLotPanelProps {
     rating: "important" | "unimportant" | "unrated",
   ) => void;
   onDeleteEntry: (id: number) => void;
-  onOpenLightbox: (entry: WorkStoryEntry) => void;
+  onOpenLightbox: (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+    source?: "story" | "parking",
+  ) => void;
   onChangeBucket?: (id: number, bucket: ParkingBucket) => void;
+  onBreakLayoutChange?: (openRows: number, sections: number) => void;
 }
 
 type ParkingSectionKey =
@@ -297,6 +310,7 @@ export function ParkingLotPanel({
   onDeleteEntry,
   onOpenLightbox,
   onChangeBucket,
+  onBreakLayoutChange,
 }: ParkingLotPanelProps) {
   const [activeBucket, setActiveBucket] = useState<ParkingBucket>("today");
   const [openSections, setOpenSections] = useState<
@@ -309,6 +323,37 @@ export function ParkingLotPanel({
     unimportant: false,
     screenshots: false,
   });
+
+  useEffect(() => {
+    if (!isBreakView || !onBreakLayoutChange) return;
+    const defs: [ParkingSectionKey, number][] = [
+      ["pending", data.pendingTasks.length],
+      ["done", data.doneTasks.length],
+      ["unrated", data.unratedIdeas.length],
+      ["important", data.importantIdeas.length],
+      ["unimportant", data.unimportantIdeas.length],
+      ["screenshots", data.screenshotNotes.length],
+    ];
+    let sections = 0;
+    let openRows = 0;
+    for (const [k, len] of defs) {
+      if (len > 0) {
+        sections += 1;
+        if (openSections[k]) openRows += len;
+      }
+    }
+    onBreakLayoutChange(openRows, sections);
+  }, [
+    isBreakView,
+    onBreakLayoutChange,
+    openSections,
+    data.pendingTasks.length,
+    data.doneTasks.length,
+    data.unratedIdeas.length,
+    data.importantIdeas.length,
+    data.unimportantIdeas.length,
+    data.screenshotNotes.length,
+  ]);
 
   const toggleSection = (key: ParkingSectionKey) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -361,14 +406,6 @@ export function ParkingLotPanel({
 
   return (
     <>
-      {isBreakView && (
-        <div className="parking-header-bar">
-          <div className="parking-banner-title">
-            {t.parkingBreakBannerTitle}
-          </div>
-        </div>
-      )}
-
       {!isBreakView && (
         <div className="parking-bucket-tabs">
           <button
@@ -422,7 +459,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("pending")}
               >
                 <span>{t.parkingPendingTasks} ({data.pendingTasks.length})</span>
-                <span>{openSections.pending ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.pending ? "▾" : "▸"}</span>
               </button>
               {openSections.pending &&
                 data.pendingTasks.map((it) => (
@@ -447,7 +484,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("done")}
               >
                 <span>{t.parkingDoneTasks} ({data.doneTasks.length})</span>
-                <span>{openSections.done ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.done ? "▾" : "▸"}</span>
               </button>
               {openSections.done &&
                 data.doneTasks.map((it) => (
@@ -472,7 +509,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("unrated")}
               >
                 <span>{t.parkingUnratedIdeas} ({data.unratedIdeas.length})</span>
-                <span>{openSections.unrated ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.unrated ? "▾" : "▸"}</span>
               </button>
               {openSections.unrated &&
                 data.unratedIdeas.map((it) => (
@@ -496,7 +533,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("important")}
               >
                 <span>{t.parkingImportantIdeas} ({data.importantIdeas.length})</span>
-                <span>{openSections.important ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.important ? "▾" : "▸"}</span>
               </button>
               {openSections.important &&
                 data.importantIdeas.map((it) => (
@@ -520,7 +557,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("unimportant")}
               >
                 <span>{t.parkingUnimportantIdeas} ({data.unimportantIdeas.length})</span>
-                <span>{openSections.unimportant ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.unimportant ? "▾" : "▸"}</span>
               </button>
               {openSections.unimportant &&
                 data.unimportantIdeas.map((it) => (
@@ -544,7 +581,7 @@ export function ParkingLotPanel({
                 onClick={() => toggleSection("screenshots")}
               >
                 <span>{t.parkingScreenshotNotes} ({data.screenshotNotes.length})</span>
-                <span>{openSections.screenshots ? "▾" : "▸"}</span>
+                <span className="parking-section-chevron">{openSections.screenshots ? "▾" : "▸"}</span>
               </button>
               {openSections.screenshots &&
                 data.screenshotNotes.map((it) => (
@@ -589,28 +626,18 @@ function uniqueJoined(
   return seen.length > 0 ? seen.join(", ") : "—";
 }
 
-function parseEntryLocalHour(iso: string): number | null {
-  const dt = new Date(iso);
-  if (!Number.isNaN(dt.getTime())) {
-    return dt.getHours() + dt.getMinutes() / 60 + dt.getSeconds() / 3600;
-  }
-  const hh = Number(iso.slice(11, 13));
-  const mm = Number(iso.slice(14, 16));
-  if (Number.isFinite(hh) && Number.isFinite(mm)) {
-    return hh + mm / 60;
-  }
-  return null;
-}
-
 export function matchSessionStoryEntries(
   entries: WorkStoryEntry[],
   session: TimelineSessionItem,
 ): WorkStoryEntry[] {
   if (session.mode !== "work" || entries.length === 0) return [];
+  const startMs = new Date(session.startedAt).getTime();
+  const endMs = new Date(session.endedAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return [];
   const matched = entries.filter((e) => {
-    const hour = parseEntryLocalHour(e.created_at);
-    if (hour === null) return false;
-    return hour >= session.startHour - 0.02 && hour <= session.endHour + 0.02;
+    const entryMs = new Date(e.created_at).getTime();
+    if (!Number.isFinite(entryMs)) return false;
+    return entryMs >= startMs - 90_000 && entryMs <= endMs + 90_000;
   });
   return matched.sort(
     (a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id,
@@ -622,12 +649,14 @@ export function buildSessionStoryTooltip(
   frames: WorkStoryEntry[],
   t: Translations,
   durationLabel: string,
+  extraMeta?: string | null,
 ): string {
   const label = session.tag || (session.mode === "work" ? t.work : t.break);
   const title = `${label} (${session.timeRangeLabel} • ${durationLabel})`;
+  const metaLine = extraMeta?.trim() ? `\n📋 ${extraMeta.trim()}` : "";
   if (frames.length === 0) {
     const reasonLine = session.reason ? `\n🎯 ${session.reason}` : "";
-    return `${title}${reasonLine}\n📸 ${t.workStoryEmpty}`;
+    return `${title}${metaLine}${reasonLine}\n📸 ${t.workStoryEmpty}`;
   }
   const topicsSummary = uniqueJoined([
     session.tag,
@@ -638,13 +667,18 @@ export function buildSessionStoryTooltip(
     ...frames.map((f) => f.context_text),
   ]);
   const appsSummary = uniqueJoined(frames.map((f) => f.note || f.active_app));
-  return t.storyHoverTooltip(
+  const body = t.storyHoverTooltip(
     title,
     topicsSummary,
     contextsSummary,
     appsSummary,
     frames.length,
   );
+  if (!metaLine) return body;
+  const nlIdx = body.indexOf("\n");
+  return nlIdx >= 0
+    ? `${body.slice(0, nlIdx)}${metaLine}${body.slice(nlIdx)}`
+    : `${body}${metaLine}`;
 }
 
 export interface SessionStorySlideshowProps {
@@ -689,15 +723,15 @@ export function SessionStorySlideshow({
     return (
       <div className="story-slideshow-box">
         <div className="story-slideshow-top">
-          <span className="story-slideshow-title">🎬 {title}</span>
+          <span className="story-slideshow-title">{title}</span>
           <button type="button" className="tag-icon-btn" onClick={onClose}>
             <IconClose size={11} />
           </button>
         </div>
         <div
           style={{
-            fontSize: "9.5px",
-            color: "#a1a1aa",
+            fontSize: "10px",
+            color: "var(--text-muted)",
             textAlign: "center",
             padding: "8px",
           }}
@@ -715,7 +749,7 @@ export function SessionStorySlideshow({
     <div className="story-slideshow-box">
       <div className="story-slideshow-top">
         <span className="story-slideshow-title">
-          🎬 {title} ({t.storyFramesCount(frames.length)})
+          {title} ({t.storyFramesCount(frames.length)})
         </span>
         <div className="story-slideshow-controls">
           {frames.length > 1 && (
@@ -778,36 +812,40 @@ export function SessionStorySlideshow({
       </div>
 
       <div className="story-step-strip">
-        {frames.map((fr, idx) => (
-          <button
-            key={fr.id}
-            type="button"
-            className={`story-step-pill ${idx === safeIdx ? "active" : ""}`}
-            onClick={() => {
-              setIsPlaying(false);
-              setFrameIdx(idx);
-            }}
-            title={`${formatEntryClock(fr.created_at)} • ${fr.context_text || fr.active_app || ""}`}
-          >
-            {idx * 5 + 5}dk ({formatEntryClock(fr.created_at)})
-          </button>
-        ))}
+        {frames.map((fr, idx) => {
+          const minsLabel =
+            fr.elapsed_work_sec > 0
+              ? Math.max(1, Math.round(fr.elapsed_work_sec / 60))
+              : (idx + 1) * 5;
+          return (
+            <button
+              key={fr.id}
+              type="button"
+              className={`story-step-pill ${idx === safeIdx ? "active" : ""}`}
+              onClick={() => {
+                setIsPlaying(false);
+                setFrameIdx(idx);
+              }}
+              title={`${formatEntryClock(fr.created_at)} • ${fr.context_text || fr.active_app || ""}`}
+            >
+              {minsLabel}dk ({formatEntryClock(fr.created_at)})
+            </button>
+          );
+        })}
       </div>
 
       <div className="story-slide-meta">
-        {currentFrame.work_tag && <span>💼 {currentFrame.work_tag}</span>}
-        {currentFrame.context_text && (
-          <span>🎯 {currentFrame.context_text}</span>
-        )}
+        {currentFrame.work_tag && <span>{currentFrame.work_tag}</span>}
+        {currentFrame.context_text && <span>{currentFrame.context_text}</span>}
         {(currentFrame.active_app || currentFrame.active_window) && (
           <span>
-            🌐 {currentFrame.active_app || ""}
+            {currentFrame.active_app || ""}
             {currentFrame.active_window
               ? ` — ${currentFrame.active_window}`
               : ""}
           </span>
         )}
-        {currentFrame.note && <span>📝 {currentFrame.note}</span>}
+        {currentFrame.note && <span>{currentFrame.note}</span>}
       </div>
     </div>
   );

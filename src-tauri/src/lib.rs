@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, Position, Size, State, UserAttentionType,
-    WebviewWindow, Window, WindowEvent,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Position, RunEvent, Size, State,
+    UserAttentionType, WebviewWindow, Window, WindowEvent,
 };
 
 static SHAKE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -183,6 +183,9 @@ fn sync_capture_snapshot(
 
 #[tauri::command]
 fn set_window_zoom(caller: WebviewWindow, app: AppHandle, zoom: f64) {
+    if !zoom.is_finite() {
+        return;
+    }
     let safe_zoom = zoom.clamp(0.5, 2.5);
     if caller.label() == "main" {
         for label in ["main", "capture"] {
@@ -219,6 +222,7 @@ fn close_capture_and_restore_focus(app: AppHandle, state: State<'_, Mutex<Shared
             (guard.snapshot.ui_scale.max(100) as f64) / 100.0,
         )
     };
+    restore_hwnd(prev_hwnd);
     if let Some(cap_win) = app.get_webview_window("capture") {
         let _ = cap_win.hide();
         let _ = cap_win.set_size(Size::Logical(LogicalSize::new(
@@ -226,7 +230,6 @@ fn close_capture_and_restore_focus(app: AppHandle, state: State<'_, Mutex<Shared
             (CAPTURE_DEFAULT_HEIGHT * scale).round(),
         )));
     }
-    restore_hwnd(prev_hwnd);
 }
 
 #[tauri::command]
@@ -248,8 +251,13 @@ fn capture_screen_snapshot(
 
 #[tauri::command]
 fn set_capture_window_size(app: AppHandle, width: f64, height: f64) {
+    if !width.is_finite() || !height.is_finite() {
+        return;
+    }
+    let safe_w = width.clamp(240.0, 1400.0);
+    let safe_h = height.clamp(120.0, 900.0);
     if let Some(cap_win) = app.get_webview_window("capture") {
-        let _ = cap_win.set_size(Size::Logical(LogicalSize::new(width, height)));
+        let _ = cap_win.set_size(Size::Logical(LogicalSize::new(safe_w, safe_h)));
     }
 }
 
@@ -435,6 +443,11 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(handle_window_event)
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let RunEvent::Exit = event {
+                focus_mode::restore_focus_mode_on_exit();
+            }
+        });
 }

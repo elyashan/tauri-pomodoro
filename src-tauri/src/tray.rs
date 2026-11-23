@@ -78,7 +78,7 @@ pub fn setup_tray(app: &App) -> tauri::Result<()> {
             }
             "toggle" => {
                 if let Some(win) = app.get_webview_window("main") {
-                    if win.is_visible().unwrap_or(false) {
+                    if win.is_visible().unwrap_or(false) && !win.is_minimized().unwrap_or(false) {
                         let _ = win.hide();
                     } else {
                         restore_main_window(&win);

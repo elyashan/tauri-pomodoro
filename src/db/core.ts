@@ -28,6 +28,11 @@ const ALTER_MIGRATIONS = [
   "ALTER TABLE sessions ADD COLUMN mood_after TEXT",
   "ALTER TABLE parking_items ADD COLUMN bucket TEXT NOT NULL DEFAULT 'today'",
   "ALTER TABLE distractions ADD COLUMN is_off_session INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE sessions ADD COLUMN plan_name TEXT",
+  "ALTER TABLE sessions ADD COLUMN round_index INTEGER DEFAULT 0",
+  "ALTER TABLE sessions ADD COLUMN is_completed INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE bio_logs ADD COLUMN sleep_hours REAL",
+  "ALTER TABLE sessions ADD COLUMN session_group_id TEXT",
 ];
 
 let dbPromise: Promise<Database> | null = null;
@@ -286,15 +291,12 @@ export function getDateBoundsIso(dateStr: string): DateRangeFilter {
 }
 
 export function getWeekBoundsIso(anchorDateStr?: string): DateRangeFilter {
-  const anchor = anchorDateStr ? parseLocalDateStr(anchorDateStr) : new Date();
-  const mondayOffset = (anchor.getDay() + 6) % 7;
-  const monday = new Date(anchor);
-  monday.setDate(anchor.getDate() - mondayOffset);
-  monday.setHours(0, 0, 0, 0);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-  return { startIso: monday.toISOString(), endIso: sunday.toISOString() };
+  const end = anchorDateStr ? parseLocalDateStr(anchorDateStr) : new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(end.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
 }
 
 export function makeDayLabel(date: Date, locale = "tr-TR"): string {

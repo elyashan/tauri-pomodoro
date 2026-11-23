@@ -141,6 +141,7 @@ mod platform {
         fn CreateCompatibleBitmap(hdc: HDC, cx: i32, cy: i32) -> HBITMAP;
         fn SelectObject(hdc: HDC, h: HGDIOBJ) -> HGDIOBJ;
         fn SetStretchBltMode(hdc: HDC, mode: i32) -> i32;
+        fn SetBrushOrgEx(hdc: HDC, x: i32, y: i32, lppt: *mut std::ffi::c_void) -> BOOL;
         fn StretchBlt(
             hdcDest: HDC,
             xDest: i32,
@@ -236,7 +237,12 @@ mod platform {
             }
 
             gdi.old_obj = SelectObject(gdi.hdc_mem, gdi.hbm);
+            if gdi.old_obj == 0 || gdi.old_obj == -1 {
+                gdi.old_obj = 0;
+                return None;
+            }
             let _ = SetStretchBltMode(gdi.hdc_mem, HALFTONE);
+            let _ = SetBrushOrgEx(gdi.hdc_mem, 0, 0, std::ptr::null_mut());
             let ok_blt = StretchBlt(
                 gdi.hdc_mem,
                 0,
@@ -279,6 +285,12 @@ mod platform {
                 bi_clr_important: 0,
             };
 
+            // MSDN requires deselecting HBITMAP from the memory DC before calling GetDIBits
+            if gdi.old_obj != 0 {
+                let _ = SelectObject(gdi.hdc_mem, gdi.old_obj);
+                gdi.old_obj = 0;
+            }
+
             let lines = GetDIBits(
                 gdi.hdc_mem,
                 gdi.hbm,
@@ -298,7 +310,7 @@ mod platform {
             bmp_buf[30..34].copy_from_slice(&bmi.bi_compression.to_le_bytes());
             bmp_buf[34..38].copy_from_slice(&(image_size as u32).to_le_bytes());
 
-            if lines <= 0 {
+            if lines != target_h {
                 return None;
             }
 

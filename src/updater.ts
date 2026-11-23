@@ -11,13 +11,25 @@ export type UpdateStatus =
 
 // Bulunan güncelleme nesnesini sakla; kullanıcı "Güncelle" dediğinde tekrar sormaya gerek kalmasın
 let pendingUpdate: Update | null = null;
+let isInstalling = false;
+
+async function releasePendingUpdate(): Promise<void> {
+  const prev = pendingUpdate;
+  pendingUpdate = null;
+  if (prev) {
+    await prev.close().catch(() => {});
+  }
+}
 
 export async function checkForUpdate(): Promise<UpdateStatus> {
   try {
     const update = await check();
     if (!update) {
-      pendingUpdate = null;
+      await releasePendingUpdate();
       return { kind: "up-to-date" };
+    }
+    if (pendingUpdate && pendingUpdate !== update) {
+      await pendingUpdate.close().catch(() => {});
     }
     pendingUpdate = update;
     return {
@@ -40,36 +52,48 @@ export async function installUpdate(
   onProgress: (status: UpdateStatus) => void,
   beforeInstall: () => Promise<void>,
 ): Promise<void> {
-  if (!pendingUpdate) {
-    const status = await checkForUpdate();
-    if (status.kind !== "available") {
-      onProgress(status);
-      return;
-    }
-  }
-  const update = pendingUpdate!;
-
-  let total = 0;
-  let downloaded = 0;
-  onProgress({ kind: "downloading", percent: null });
-
+  if (isInstalling) return;
+  isInstalling = true;
   try {
-    await update.download((event) => {
-      if (event.event === "Started") {
-        total = event.data.contentLength ?? 0;
-      } else if (event.event === "Progress") {
-        downloaded += event.data.chunkLength;
-        onProgress({
-          kind: "downloading",
-          percent: total > 0 ? Math.round((downloaded / total) * 100) : null,
-        });
+    if (!pendingUpdate) {
+      const status = await checkForUpdate();
+      if (status.kind !== "available") {
+        onProgress(status);
+        return;
       }
-    });
+    }
+    const update = pendingUpdate;
+    if (!update) return;
 
-    await beforeInstall();
-    await update.install();
-    await relaunch();
-  } catch (err) {
-    onProgress({ kind: "error", message: String(err) });
+    let total = 0;
+    let downloaded = 0;
+    onProgress({ kind: "downloading", percent: null });
+
+    try {
+      await update.download((event) => {
+        if (event.event === "Started") {
+          total = event.data.contentLength ?? 0;
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          onProgress({
+            kind: "downloading",
+            percent:
+              total > 0
+                ? Math.min(100, Math.max(0, Math.round((downloaded / total) * 100)))
+                : null,
+          });
+        }
+      });
+
+      await beforeInstall();
+      await update.install();
+      await releasePendingUpdate();
+      await relaunch();
+    } catch (err) {
+      await releasePendingUpdate();
+      onProgress({ kind: "error", message: String(err) });
+    }
+  } finally {
+    isInstalling = false;
   }
 }

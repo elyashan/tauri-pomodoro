@@ -1,35 +1,28 @@
+// @llm-index Main Application Composition & Session/Timer Coordinator
+// State & Hook Wiring      : lines ~110-585
+// Mount Hydration/Recovery : lines ~585-980
+// Sizing, Watchers, Tick   : lines ~980-1515
+// Context & Capture Flow   : lines ~1515-1930
+// Session Lifecycle (Start/Stop/Break): lines ~1930-2875
+// Language/Penalty/Reset   : lines ~2875-2985
+// JSX Shell (MiniDock, Modals, Pages, Lightbox): lines ~2985-end
+
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
-import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import {
   PageType,
   TimerMode,
   BreakKind,
   RuntimeState,
   AppState,
-  ActiveDayStats,
-  ThemeSettings,
   LangCode,
-  TagKind,
-  TagItem,
-  SummaryReasonsData,
-  WeekDayStat,
-  WeeklySummary,
   DistractionCategory,
   doesCategoryAddPenalty,
-  ParkingLotData,
-  ContextStatItem,
-  AppDistractionGroup,
-  GlobalShortcutSettings,
-  DEFAULT_SHORTCUTS,
-  SizeTargetPage,
-  CustomWindowSizes,
-  AdhdInsightsData,
-  DEFAULT_WINDOW_SIZES,
-  DEFAULT_THEME,
+  DEFAULT_STUDY_PLANS,
   DEFAULT_WORK_SEC,
   DEFAULT_BREAK_SEC,
   loadAppState,
@@ -37,7 +30,6 @@ import {
   loadRuntimeState,
   saveRuntimeState,
   loadThemeSettings,
-  saveThemeSettings,
   loadLanguagePreference,
   saveLanguagePreference,
   loadDistractPenalty,
@@ -48,24 +40,11 @@ import {
   updateSessionMoodAfter,
   recordBreakSession,
   getTimelineSessions,
-  TimelineSessionItem,
-  exportAllData,
-  StudyPlan,
-  DEFAULT_STUDY_PLANS,
-  AmbientNoiseSettings,
-  DEFAULT_AMBIENT_NOISE,
   loadAmbientNoiseSettings,
-  saveAmbientNoiseSettings,
-  RescueExerciseSettings,
-  DEFAULT_RESCUE_EXERCISES,
   loadRescueExerciseSettings,
-  saveRescueExerciseSettings,
   loadBreakChecklistItems,
-  saveBreakChecklistItems,
   loadStudyPlans,
-  saveStudyPlans,
   loadActivePlanId,
-  saveActivePlanId,
   loadSessionCycleStats,
   saveSessionCycleStats,
   recordDistraction,
@@ -73,76 +52,50 @@ import {
   ClearDataOptions,
   clearSelectedData,
   getTags,
-  addTag,
-  updateTag,
-  deleteTag,
   getPreviousReasons,
-  getSummaryReasonsData,
   loadCustomWindowSizes,
-  saveCustomWindowSizes,
-  resetCustomWindowSizes,
-  getAdhdInsights,
   addParkingItem,
-  getParkingLotData,
   getBreakParkingLotData,
-  toggleParkingTaskDone,
-  rateParkingIdea,
-  deleteParkingItem,
-  updateParkingBucket,
-  ParkingBucket,
   MoodType,
-  getBioLogs,
   addMoodLog,
-  getMoodLogs,
   startContextLog,
   finalizeContextLog,
   incrementContextDistraction,
   getRecentContexts,
-  getContextStatsSummary,
-  getAppDistractionSummary,
   loadGlobalShortcuts,
-  saveGlobalShortcuts,
-  WorkStoryEntry,
-  addWorkStoryEntry,
   getWorkStoryEntries,
-  deleteWorkStoryEntry,
   toLocalDateStr,
   parseLocalDateStr,
   getDateBoundsIso,
-  getWeekBoundsIso,
-  getDayStatsForDate,
 } from "./db";
-import { captureScreenCompressed } from "./screenshot";
-import { UpdateStatus, checkForUpdate, installUpdate } from "./updater";
-import { type ActiveLang, translations, resolveLanguage } from "./i18n";
+import { translations, resolveLanguage } from "./i18n";
 import { ConfettiCanvas } from "./Confetti";
 import type { CaptureSubmittedEvent } from "./QuickCapture";
 import {
   EMPTY_PARKING,
   NavPage,
   ShortcutStatus,
-  TagFormState,
-  UPDATE_CHECK_INTERVAL_MS,
   formatClock,
   getFinalStretchSec,
   getWarmupDurationSec,
+  resolveHarmoniousTimerColor,
 } from "./constants";
-import {
-  playAlarmChime,
-  playBreakChime,
-  playCelebrationFanfare,
-  playSubtleMilestoneChime,
-} from "./lib/audio";
-import { ambientNoiseEngine } from "./lib/ambientNoise";
+import { playBreakChime, playCelebrationFanfare } from "./lib/audio";
 import { hexToRgba, isLightColor } from "./lib/color";
-import {
-  applyMonitorClampedWindowSize,
-  persistSnapshots,
-} from "./lib/windowResize";
+import { persistSnapshots } from "./lib/windowResize";
+import { useAppSettingsAndTags } from "./hooks/useAppSettingsAndTags";
 import { useBioAndMood } from "./hooks/useBioAndMood";
 import { useCloudSync } from "./hooks/useCloudSync";
 import { useFeedback } from "./hooks/useFeedback";
 import { useMiniDock } from "./hooks/useMiniDock";
+import { useSummaryAndParking } from "./hooks/useSummaryAndParking";
+import { useSystemWatchers } from "./hooks/useSystemWatchers";
+import {
+  STALE_SESSION_TIMEOUT_MS,
+  STALE_SESSION_TIMEOUT_SEC,
+  useTimerLoop,
+} from "./hooks/useTimerLoop";
+import { useWindowSizing } from "./hooks/useWindowSizing";
 import { IconClose } from "./components/Icons";
 import { MiniDock } from "./components/MiniDock";
 import {
@@ -158,16 +111,9 @@ import {
 import { TimerPage, WorkPhase } from "./pages/TimerPage";
 import { MenuPage } from "./pages/MenuPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import {
-  SummaryPage,
-  SummaryReasonsTabType,
-  SummaryTabType,
-} from "./pages/SummaryPage";
+import { SummaryPage } from "./pages/SummaryPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import "./App.css";
-
-const STALE_SESSION_TIMEOUT_SEC = 60 * 60; // 60 min
-const STALE_SESSION_TIMEOUT_MS = STALE_SESSION_TIMEOUT_SEC * 1000;
 
 export default function App() {
   const [loaded, setLoaded] = useState(false);
@@ -187,24 +133,16 @@ export default function App() {
   const activeLang = resolveLanguage(langPref);
   const t = translations[activeLang];
 
-  // Çalışma Planları (Study Plans) & Döngü Takibi
-  const [studyPlans, setStudyPlans] = useState<StudyPlan[]>(DEFAULT_STUDY_PLANS);
-  const [activePlanId, setActivePlanId] = useState<string>("developer");
-  const [editingPlanId, setEditingPlanId] = useState<string>("developer");
+  // Çalışma Planları & Döngü Takibi
   const [completedWorkCount, setCompletedWorkCount] = useState<number>(0);
   const [sessionShortBreakCount, setSessionShortBreakCount] = useState<number>(0);
+  const [sessionGroupId, setSessionGroupId] = useState<string | null>(null);
+  const sessionGroupIdRef = useRef<string | null>(null);
+  sessionGroupIdRef.current = sessionGroupId;
   const [breakKind, setBreakKind] = useState<BreakKind>("standard");
   const [savedWorkSecondsLeft, setSavedWorkSecondsLeft] =
     useState<number>(DEFAULT_WORK_SEC);
   const [savedWorkElapsedSec, setSavedWorkElapsedSec] = useState<number>(0);
-
-  const currentPlan =
-    studyPlans.find((p) => p.id === activePlanId) ||
-    studyPlans[0] ||
-    DEFAULT_STUDY_PLANS[0];
-
-  const getPlanDisplayName = (plan: StudyPlan): string =>
-    plan.name.trim() || t.planNames[plan.id] || plan.id;
 
   const [workSecondsLeft, setWorkSecondsLeft] = useState(DEFAULT_WORK_SEC);
   const [workElapsedSec, setWorkElapsedSec] = useState(0);
@@ -218,9 +156,6 @@ export default function App() {
   const [showBreakOverdueBox, setShowBreakOverdueBox] = useState(false);
   // Gecikme diyaloğu kapandığında çalışmayı otomatik başlatıp başlatmayacağımızı tutar
   const autoStartAfterBreakRef = useRef<boolean>(true);
-  const [breakOverdueTags, setBreakOverdueTags] = useState<TagItem[]>([]);
-  const [selectedBreakOverdueTag, setSelectedBreakOverdueTag] =
-    useState<string>("Telefon");
   const [breakOverduePrevReasons, setBreakOverduePrevReasons] = useState<
     string[]
   >([]);
@@ -245,16 +180,12 @@ export default function App() {
   const [currentWorkTag, setCurrentWorkTag] = useState<string>("Ders");
   const [currentWorkReason, setCurrentWorkReason] = useState<string>("");
   const [showWorkTopicBox, setShowWorkTopicBox] = useState(false);
-  const [workTags, setWorkTags] = useState<TagItem[]>([]);
-  const [selectedWorkTopicTag, setSelectedWorkTopicTag] =
-    useState<string>("Ders");
   const [workTopicReasonText, setWorkTopicReasonText] = useState("");
   const [workPrevReasons, setWorkPrevReasons] = useState<string[]>([]);
   const [isEditingWorkTags, setIsEditingWorkTags] = useState(false);
 
   const [isRunning, setIsRunning] = useState(false);
   const [isCelebrating, setIsCelebrating] = useState(false);
-  const [autoStartOn, setAutoStartOn] = useState(false);
 
   // Dikkat Dağılma Ek Süresi (Dakika) ve Seans İçi Dağılma Sayacı
   const [distractPenaltyMins, setDistractPenaltyMins] = useState(1);
@@ -263,12 +194,13 @@ export default function App() {
 
   // Dikkatim Dağıldı Kutusu & Açık Sekme Yakalama
   const [showDistractBox, setShowDistractBox] = useState(false);
+  const [distractModalHeight, setDistractModalHeight] = useState<number>(274);
   const [detectedActiveApp, setDetectedActiveApp] = useState<{
     appName: string;
     windowTitle: string;
   }>({ appName: "", windowTitle: "" });
 
-  // Aktif Meşguliyet (Context), Kısa Mola Notu, Otopark & Global Kısayollar
+  // Aktif Meşguliyet (Context) & Kısa Mola Notu
   const [currentContext, setCurrentContext] = useState<string>("");
   const [activeContextLogId, setActiveContextLogId] = useState<number | null>(
     null,
@@ -276,10 +208,6 @@ export default function App() {
   const [contextStartedAtElapsedSec, setContextStartedAtElapsedSec] =
     useState<number>(0);
   const [recentContexts, setRecentContexts] = useState<string[]>([]);
-  const [contextStats, setContextStats] = useState<ContextStatItem[]>([]);
-  const [appDistractions, setAppDistractions] = useState<AppDistractionGroup[]>(
-    [],
-  );
 
   const [showShortBreakPrompt, setShowShortBreakPrompt] =
     useState<boolean>(false);
@@ -317,13 +245,9 @@ export default function App() {
     setTodayBioLogs,
     summaryBioLogs,
     setSummaryBioLogs,
-    summaryMoodLogs,
-    setSummaryMoodLogs,
     hydrateTodayBioLogs,
     handleAddBioLog,
     handleDeleteBioLog,
-    handleAddMoodCheckin,
-    handleDeleteMoodLog,
   } = useBioAndMood({ page, selectedSummaryDate });
   const [milestonePulse, setMilestonePulse] = useState<boolean>(false);
   const firedMilestonesRef = useRef<{
@@ -331,60 +255,8 @@ export default function App() {
     halfway: boolean;
     finalStretch: boolean;
   }>({ warmupDone: false, halfway: false, finalStretch: false });
-
-  const [breakParkingData, setBreakParkingData] =
-    useState<ParkingLotData>(EMPTY_PARKING);
-  const [summaryParkingData, setSummaryParkingData] =
-    useState<ParkingLotData>(EMPTY_PARKING);
-  const [showBreakParking, setShowBreakParking] = useState<boolean>(true);
-
-  const [shortcuts, setShortcuts] =
-    useState<GlobalShortcutSettings>(DEFAULT_SHORTCUTS);
-  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus | null>(
-    null,
-  );
-  const [recordingShortcutFor, setRecordingShortcutFor] = useState<
-    "distraction" | null
-  >(null);
-
-  // Satır-İçi Tag Ekle / Düzenle / Sil Formu (window.prompt / window.confirm yerine)
-  const [tagForm, setTagForm] = useState<TagFormState | null>(null);
-
-  // Çalışma <-> Mola Geçiş Animasyonu
   const [isModeSwitching, setIsModeSwitching] = useState(false);
-  const prevTimerModeRef = useRef<TimerMode>("work");
 
-  // Özel Pencere Boyutları
-  const [customSizes, setCustomSizes] = useState<CustomWindowSizes>({});
-  const [currentWinSize, setCurrentWinSize] = useState<{
-    w: number;
-    h: number;
-  }>({
-    w: 315,
-    h: 362,
-  });
-  const [sizeSavedFlash, setSizeSavedFlash] = useState(false);
-
-  // 5dk Çalışma Hikayesi & Lightbox
-  const [workStoryEntries, setWorkStoryEntries] = useState<WorkStoryEntry[]>(
-    [],
-  );
-  const [lightboxEntry, setLightboxEntry] = useState<WorkStoryEntry | null>(
-    null,
-  );
-  const [lightboxGroupEntries, setLightboxGroupEntries] = useState<
-    WorkStoryEntry[]
-  >([]);
-  const openLightbox = (
-    entry: WorkStoryEntry,
-    groupFrames?: WorkStoryEntry[],
-  ) => {
-    setLightboxEntry(entry);
-    setLightboxGroupEntries(groupFrames || []);
-  };
-  const lastPeriodicShotSecRef = useRef<number>(0);
-
-  // Uygulama İçi Geri Bildirim (Feedback) & ADHD Öz-Farkındalık Verisi
   const {
     feedbacks,
     feedbackCat,
@@ -398,14 +270,9 @@ export default function App() {
     handleCopyAllFeedbacks,
     handleOpenGithubFeedback,
   } = useFeedback();
-  const [adhdInsights, setAdhdInsights] = useState<AdhdInsightsData | null>(
-    null,
-  );
 
   // Erken Durdurma Kutusu
   const [showStopBox, setShowStopBox] = useState(false);
-  const [endingTags, setEndingTags] = useState<TagItem[]>([]);
-  const [selectedEndingTag, setSelectedEndingTag] = useState<string>("Diğer");
   const [endingPreviousReasons, setEndingPreviousReasons] = useState<string[]>(
     [],
   );
@@ -428,61 +295,8 @@ export default function App() {
     (effectiveEndMs: number) => Promise<void>
   >(async () => {});
 
-  // İstatistikler ve Özet verisi
-  const [dayStats, setDayStats] = useState<ActiveDayStats>({
-    dayId: 1,
-    label: "Bugün",
-    totalSec: 0,
-    sessionCount: 0,
-    avgSec: 0,
-  });
-  const [weeklySummary, setWeeklySummary] = useState<WeeklySummary | null>(
-    null,
-  );
-  const [summaryTab, setSummaryTab] = useState<SummaryTabType>("timeline");
-  const [selectedDayStats, setSelectedDayStats] = useState<{
-    totalSec: number;
-    sessionCount: number;
-    avgSec: number;
-  }>({ totalSec: 0, sessionCount: 0, avgSec: 0 });
-  const [exportDirPath, setExportDirPath] = useState<string>("");
-  const [exportSavedMsg, setExportSavedMsg] = useState<string | null>(null);
-  const [summaryReasonsTab, setSummaryReasonsTab] =
-    useState<SummaryReasonsTabType>("distractions");
-  const [summaryReasonsData, setSummaryReasonsData] =
-    useState<SummaryReasonsData | null>(null);
-  const [timelineSessions, setTimelineSessions] = useState<
-    TimelineSessionItem[]
-  >([]);
-  const [hoveredTimelineItem, setHoveredTimelineItem] =
-    useState<TimelineSessionItem | null>(null);
-  const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
-  const [hoveredWeekDay, setHoveredWeekDay] = useState<WeekDayStat | null>(
-    null,
-  );
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [freqOnlyToday, setFreqOnlyToday] = useState(true);
-
-  // Arka planda gizliyken bile sürenin şaşmaması için zaman referansı
   const lastTickRef = useRef<number>(Date.now());
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Renk ayarları, görsel sayaç, arka plan sesi, mola rutini & uzaktan güncelleme
-  const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
-  const themeDirtyRef = useRef(false);
-  const [ambientNoise, setAmbientNoise] = useState<AmbientNoiseSettings>(
-    DEFAULT_AMBIENT_NOISE,
-  );
-  const [rescueExercises, setRescueExercises] = useState<RescueExerciseSettings>(
-    DEFAULT_RESCUE_EXERCISES,
-  );
-  const [breakChecklistItems, setBreakChecklistItems] = useState<string[]>([]);
-  const currentPlanWorkMinsRef = useRef<number>(currentPlan.workMins);
-  currentPlanWorkMinsRef.current = currentPlan.workMins;
-  const [appVersion, setAppVersion] = useState("");
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
-    kind: "idle",
-  });
 
   // Güncel anlık durum referansları (interval ve yedekleme için güvenli okuma)
   const appStateRef = useRef<AppState>({
@@ -520,6 +334,7 @@ export default function App() {
     isHyperfocus: false,
     hyperfocusExtraSec: 0,
     sessionStartMood: null,
+    sessionGroupId: null,
     lastActiveAt: null,
   });
   runtimeStateRef.current = {
@@ -544,6 +359,7 @@ export default function App() {
     isHyperfocus,
     hyperfocusExtraSec,
     sessionStartMood,
+    sessionGroupId,
     lastActiveAt: lastActiveAtRef.current,
   };
 
@@ -551,10 +367,171 @@ export default function App() {
   distractPenaltyRef.current = distractPenaltyMins;
   const activeLangRef = useRef(activeLang);
   activeLangRef.current = activeLang;
-  const freqOnlyTodayRef = useRef(freqOnlyToday);
-  freqOnlyTodayRef.current = freqOnlyToday;
   const isRunningRef = useRef<boolean>(false);
   isRunningRef.current = isRunning;
+
+  const refreshPendingSyncCountRef = useRef<() => Promise<void>>(
+    async () => {},
+  );
+
+  const {
+    dayStats,
+    setDayStats,
+    weeklySummary,
+    setWeeklySummary,
+    summaryTab,
+    selectedDayStats,
+    setSelectedDayStats,
+    exportDirPath,
+    setExportDirPath,
+    exportSavedMsg,
+    summaryReasonsTab,
+    setSummaryReasonsTab,
+    summaryReasonsData,
+    timelineSessions,
+    setTimelineSessions,
+    hoveredTimelineItem,
+    setHoveredTimelineItem,
+    expandedTags,
+    hoveredWeekDay,
+    setHoveredWeekDay,
+    showResetConfirm,
+    setShowResetConfirm,
+    freqOnlyToday,
+    freqOnlyTodayRef,
+    adhdInsights,
+    contextStats,
+    setContextStats,
+    appDistractions,
+    setAppDistractions,
+    workStoryEntries,
+    setWorkStoryEntries,
+    lightboxEntry,
+    setLightboxEntry,
+    lightboxGroupEntries,
+    setLightboxGroupEntries,
+    lightboxSource,
+    setLightboxSource,
+    openLightbox,
+    breakParkingData,
+    setBreakParkingData,
+    summaryParkingData,
+    setSummaryParkingData,
+    showBreakParking,
+    setShowBreakParking,
+    breakParkingLayout,
+    setBreakParkingLayout,
+    handleBreakParkingLayoutChange,
+    maxWeeklyHours,
+    loadSummaryForScope,
+    openSummary,
+    openDashboard,
+    handleChangeSummaryTab,
+    handleSelectSummaryDate,
+    handleShiftSummaryDate,
+    toggleFreqFilter,
+    refreshParkingViews,
+    handleToggleParkingTask,
+    handleRateParkingIdea,
+    handleDeleteParkingEntry,
+    handleChangeParkingBucket,
+    handleDeleteWorkStoryItem,
+    handleExportData,
+    toggleAccordionTag,
+  } = useSummaryAndParking({
+    page,
+    setPage,
+    activeLang,
+    t,
+    selectedSummaryDate,
+    setSelectedSummaryDate,
+    setSummaryBioLogs,
+    setIsCelebrating,
+    setPlanDropdownOpen,
+    refreshPendingSyncCount: () => refreshPendingSyncCountRef.current(),
+  });
+
+  const {
+    studyPlans,
+    setStudyPlans,
+    activePlanId,
+    setActivePlanId,
+    editingPlanId,
+    setEditingPlanId,
+    currentPlan,
+    currentPlanWorkMinsRef,
+    getPlanDisplayName,
+    theme,
+    setTheme,
+    ambientNoise,
+    setAmbientNoise,
+    rescueExercises,
+    setRescueExercises,
+    breakChecklistItems,
+    setBreakChecklistItems,
+    shortcuts,
+    setShortcuts,
+    shortcutStatus,
+    setShortcutStatus,
+    recordingShortcutFor,
+    setRecordingShortcutFor,
+    autoStartOn,
+    setAutoStartOn,
+    appVersion,
+    setAppVersion,
+    updateStatus,
+    tagForm,
+    setTagForm,
+    workTags,
+    setWorkTags,
+    selectedWorkTopicTag,
+    setSelectedWorkTopicTag,
+    endingTags,
+    setEndingTags,
+    selectedEndingTag,
+    setSelectedEndingTag,
+    breakOverdueTags,
+    setBreakOverdueTags,
+    selectedBreakOverdueTag,
+    setSelectedBreakOverdueTag,
+    handleSelectPlan,
+    handleUpdatePlanField,
+    handleResetPlansDefault,
+    updateTheme,
+    handleUpdateAmbientNoise,
+    handleUpdateRescueExercises,
+    handleUpdateBreakChecklistItems,
+    handleApplyShortcuts,
+    handleResetShortcuts,
+    openQuickCaptureFromUi,
+    toggleAutoStart,
+    handleCheckUpdate,
+    handleInstallUpdate,
+    handleAddNewTag,
+    handleEditTagItem,
+    handleDeleteTagItem,
+    submitTagForm,
+    handleTagsChangedFromSettings,
+    refreshTagsForTranslations,
+  } = useAppSettingsAndTags({
+    loaded,
+    t,
+    sessionActive,
+    timerMode,
+    isRunning,
+    workElapsedSec,
+    currentWorkTag,
+    setCurrentWorkTag,
+    setPlanDropdownOpen,
+    setWorkSecondsLeft,
+    setBreakTotalSec,
+    setBreakSecondsLeft,
+    setIsRunning,
+    onSaveBeforeUpdate: async () => {
+      await saveAppState(appStateRef.current).catch(() => {});
+      await saveRuntimeState(runtimeStateRef.current).catch(() => {});
+    },
+  });
 
   const {
     isMiniDock,
@@ -605,8 +582,13 @@ export default function App() {
       setWorkStoryEntries(wStory);
     },
   });
+  refreshPendingSyncCountRef.current = refreshPendingSyncCount;
+
+  const startupInitRef = useRef<boolean>(false);
 
   useEffect(() => {
+    if (startupInitRef.current) return;
+    startupInitRef.current = true;
     (async () => {
       try {
         const saved = await loadAppState();
@@ -709,6 +691,10 @@ export default function App() {
                   savedRuntime.hyperfocusExtraSec || 0,
                   savedRuntime.sessionStartMood ?? null,
                   null,
+                  null,
+                  0,
+                  false,
+                  savedRuntime.sessionGroupId ?? null,
                 ).catch(() => {});
               }
             } else if (savedRuntime.mode === "break") {
@@ -734,6 +720,10 @@ export default function App() {
                   savedRuntime.hyperfocusExtraSec || 0,
                   savedRuntime.sessionStartMood ?? null,
                   null,
+                  null,
+                  0,
+                  false,
+                  savedRuntime.sessionGroupId ?? null,
                 ).catch(() => {});
               }
               const plannedBreakDone = Math.min(
@@ -761,6 +751,7 @@ export default function App() {
                   0,
                   new Date(bEndMs - plannedBreakDone * 1000).toISOString(),
                   new Date(bEndMs).toISOString(),
+                  savedRuntime.sessionGroupId ?? null,
                 ).catch(() => {});
               }
             }
@@ -795,6 +786,7 @@ export default function App() {
               isHyperfocus: false,
               hyperfocusExtraSec: 0,
               sessionStartMood: null,
+              sessionGroupId: null,
               lastActiveAt: null,
             };
             await saveAppState(cleanAppState).catch(() => {});
@@ -804,6 +796,8 @@ export default function App() {
             workStartedAtRef.current = null;
             breakStartedAtRef.current = null;
             lastActiveAtRef.current = null;
+            sessionGroupIdRef.current = null;
+            setSessionGroupId(null);
             setCompletedWorkCount(0);
             setSessionShortBreakCount(0);
             setSessionActive(false);
@@ -859,6 +853,9 @@ export default function App() {
             setIsHyperfocus(Boolean(savedRuntime.isHyperfocus));
             setHyperfocusExtraSec(savedRuntime.hyperfocusExtraSec || 0);
             setSessionStartMood(savedRuntime.sessionStartMood ?? null);
+            const loadedGroupId = savedRuntime.sessionGroupId ?? null;
+            sessionGroupIdRef.current = loadedGroupId;
+            setSessionGroupId(loadedGroupId);
 
             if (savedRuntime.sessionActive) {
               lastActiveAtRef.current = savedRuntime.lastActiveAt ?? Date.now();
@@ -983,146 +980,171 @@ export default function App() {
     })();
   }, []);
 
-  // Çalışma sayacı aktifken Windows Focus Moduna (Rahatsız Etmeyin / Bildirimleri Gizle) gir, mola veya duraklatmada geri aç
-  useEffect(() => {
-    if (!loaded) return;
-    const shouldSuppress =
-      sessionActive && isRunning && timerMode === "work";
-    invoke("set_windows_focus_mode", { enabled: shouldSuppress }).catch(
-      () => {},
-    );
-  }, [loaded, sessionActive, isRunning, timerMode]);
+  const anyModalOpen =
+    showStopBox ||
+    showDistractBox ||
+    showBreakOverdueBox ||
+    showWorkTopicBox ||
+    showShortBreakPrompt ||
+    showContextEditBox ||
+    showStuckRescueBox;
 
-  // Sağ alt sistem tepsisi (System Tray) simgesi üzerine gelindiğinde Son Meşguliyet (Context) ve sayacı göster
-  useEffect(() => {
-    if (!loaded) return;
-    const ctxLabel =
-      currentContext.trim() ||
-      (currentWorkTag
-        ? `${currentWorkTag}${currentWorkReason ? `: ${currentWorkReason}` : ""}`
-        : t.qcContextNone);
-    const clk = formatClock(
-      timerMode === "work" ? workSecondsLeft : breakSecondsLeft,
-    );
-    const modeTitle = !sessionActive
-      ? "Pomodoro Widget"
-      : timerMode === "work"
-        ? `💼 ${clk}`
-        : `☕ ${clk}`;
-    invoke("update_tray_tooltip", {
-      tooltip: `${modeTitle} • 🎯 ${ctxLabel}`,
-    }).catch(() => {});
-  }, [
+  const warmupTotalSec = getWarmupDurationSec(currentPlan.workMins);
+  const finalStretchSec = getFinalStretchSec(currentPlan.workMins);
+  const warmupLeftSec =
+    warmupTotalSec > 0 && !isHyperfocus && workElapsedSec < warmupTotalSec
+      ? warmupTotalSec - workElapsedSec
+      : 0;
+  const workPhase: WorkPhase = isHyperfocus
+    ? "hyperfocus"
+    : warmupLeftSec > 0
+      ? "warmup"
+      : workSecondsLeft > 0 && workSecondsLeft <= finalStretchSec
+        ? "final"
+        : "focus";
+  const showStuckBtn =
+    sessionActive &&
+    timerMode === "work" &&
+    (workElapsedSec <= Math.max(warmupTotalSec, 180) ||
+      currentSessionDistractions >= 1);
+
+  const hyperfocusOfferLeftSec =
+    sessionActive &&
+    timerMode === "break" &&
+    breakKind !== "short" &&
+    recentCompletedRound &&
+    breakElapsedSec < 15
+      ? Math.max(0, 15 - breakElapsedSec)
+      : 0;
+
+  const hasHyperfocusOffer = hyperfocusOfferLeftSec > 0;
+  const canShowBreakEndMood = Boolean(
+    sessionActive &&
+    timerMode === "break" &&
+    recentCompletedRound?.sessionId &&
+    !recentCompletedRound.moodLogged,
+  );
+  const hasWorkElapsed = workElapsedSec > 0;
+  const hasWorkPauseStart = workPauseStartedAtMs !== null;
+  const hasReminderBanner = reminderBanner?.kind === "milestone";
+  const isBreakAlarm =
+    sessionActive && timerMode === "break" && breakOverdueSec > 0;
+
+  const {
+    setCustomSizes,
+    currentWinSize,
+    setCurrentWinSize,
+    sizeSavedFlash,
+    handleSaveCurrentWindowSize,
+    handleResetStandardSizes,
+  } = useWindowSizing({
+    loaded,
+    isMiniDock,
+    page,
+    theme,
+    anyModalOpen,
+    showDistractBox,
+    distractModalHeight,
+    showStuckRescueBox,
+    showShortBreakPrompt,
+    showContextEditBox,
+    showWorkTopicBox,
+    isEditingWorkTags,
+    hasTagForm: Boolean(tagForm),
+    workPrevReasonsCount: workPrevReasons.length,
+    currentContext,
+    recentContextsCount: recentContexts.length,
+    updateStatusKind: updateStatus.kind,
+    sessionActive,
+    isRunning,
+    hasWorkElapsed,
+    hasWorkPauseStart,
+    hasReminderBanner,
+    hasHyperfocusOffer,
+    canShowBreakEndMood,
+    isBreakAlarm,
+    isHyperfocus,
+    timerMode,
+    showBreakParking,
+    breakParkingLayout,
+    breakParkingData,
+    breakChecklistCount: breakChecklistItems.length,
+  });
+
+  useSystemWatchers({
     loaded,
     sessionActive,
+    isRunning,
     timerMode,
     workSecondsLeft,
     breakSecondsLeft,
+    workElapsedSec,
     currentContext,
     currentWorkTag,
     currentWorkReason,
-    t.qcContextNone,
-  ]);
-
-  // 5 Dakikada 1 Otomatik Ekran Görüntüsü + Açık Pencere İsmi + Context = Çalışma Hikayesi
-  useEffect(() => {
-    if (!loaded || !sessionActive || !isRunning || timerMode !== "work") {
-      if (!sessionActive || timerMode !== "work") {
-        lastPeriodicShotSecRef.current = 0;
-      }
-      return;
-    }
-    const currentBucket = Math.floor(workElapsedSec / 300);
-    const prevBucket = Math.floor(lastPeriodicShotSecRef.current / 300);
-    if (workElapsedSec >= 300 && currentBucket > prevBucket) {
-      lastPeriodicShotSecRef.current = workElapsedSec;
-      (async () => {
-        try {
-          const shot = await captureScreenCompressed(true, null, 720, 0.68);
-          if (!shot.dataUrl) return;
-          const fg =
-            shot.activeApp || shot.activeWindow
-              ? { appName: shot.activeApp, windowTitle: shot.activeWindow }
-              : await invoke<{ appName: string; windowTitle: string }>(
-                  "get_last_active_window",
-                ).catch(() => ({ appName: "", windowTitle: "" }));
-          const rt = runtimeStateRef.current;
-          const ctxText =
-            rt.currentContext.trim() ||
-            (rt.workTag
-              ? `${rt.workTag}${rt.workReason ? `: ${rt.workReason}` : ""}`
-              : "");
-          await addWorkStoryEntry({
-            entryType: "periodic",
-            screenshotData: shot.dataUrl,
-            activeApp: fg.appName,
-            activeWindow: fg.windowTitle,
-            contextText: ctxText,
-            workTag: rt.workTag,
-            note: `${Math.floor(workElapsedSec / 60)} dk • ${fg.appName || rt.workTag || "Çalışma"}`,
-            elapsedWorkSec: workElapsedSec,
-          });
-          setWorkStoryEntries(
-            await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
-          );
-          triggerBackgroundCloudSync();
-        } catch (err) {
-          console.error("5dk çalışma hikayesi kaydedilemedi:", err);
-        }
-      })();
-    }
-  }, [loaded, sessionActive, isRunning, timerMode, workElapsedSec]);
-
-  // Çalışma <-> Mola geçişlerinde yumuşak görsel geçiş animasyonu tetikle ve Otopark'ı yenile
-  useEffect(() => {
-    if (!loaded) {
-      prevTimerModeRef.current = timerMode;
-      return;
-    }
-    if (prevTimerModeRef.current !== timerMode) {
-      prevTimerModeRef.current = timerMode;
-      setIsModeSwitching(true);
-      if (timerMode === "break") {
-        setShowBreakParking(true);
-        getBreakParkingLotData()
-          .then(setBreakParkingData)
-          .catch(() => {});
-      }
-      const timer = setTimeout(() => setIsModeSwitching(false), 680);
-      return () => clearTimeout(timer);
-    }
-  }, [timerMode, loaded]);
-
-  // Spotlight Yakalama Penceresi için Rust arka planına anlık durum senkronizasyonu
-  useEffect(() => {
-    if (!loaded) return;
-    invoke("sync_capture_snapshot", {
-      snapshot: {
-        currentContext,
-        workTag: currentWorkTag,
-        workReason: currentWorkReason,
-        sessionActive,
-        timerMode,
-        distractPenaltyMins,
-        lang: activeLang,
-        bgColor: theme.bgColor,
-        recentContexts,
-        uiScale: theme.uiScale,
-      },
-    }).catch(() => {});
-  }, [
-    loaded,
-    currentContext,
-    currentWorkTag,
-    currentWorkReason,
-    sessionActive,
-    timerMode,
     distractPenaltyMins,
     activeLang,
-    theme.bgColor,
-    theme.uiScale,
+    bgColor: theme.bgColor,
+    uiScale: theme.uiScale,
     recentContexts,
-  ]);
+    isMiniDock,
+    qcContextNoneLabel: t.qcContextNone,
+    runtimeStateRef,
+    isRunningRef,
+    lastTickRef,
+    lastActiveAtRef,
+    workPauseStartedAtRef,
+    freqOnlyTodayRef,
+    autoCloseStaleSessionRef,
+    revealExpandedWindowRef,
+    enterMiniDock,
+    exitMiniDock,
+    setIsRunning,
+    setWorkPauseStartedAtMs,
+    setCurrentWinSize,
+    setWorkStoryEntries,
+    triggerBackgroundCloudSync,
+  });
+
+  useTimerLoop({
+    loaded,
+    sessionActive,
+    isRunning,
+    timerMode,
+    isHyperfocus,
+    workElapsedSec,
+    workSecondsLeft,
+    workPlanMins: currentPlan.workMins,
+    workPauseStartedAtMs,
+    showBreakOverdueBox,
+    milestonePulse,
+    t,
+    lastTickRef,
+    lastActiveAtRef,
+    lastAlarmPlayRef,
+    workPauseStartedAtRef,
+    isRunningRef,
+    isMiniDockRef,
+    appStateRef,
+    runtimeStateRef,
+    autoCloseStaleSessionRef,
+    revealExpandedWindowRef,
+    firedMilestonesRef,
+    setWorkSecondsLeft,
+    setWorkElapsedSec,
+    setBreakSecondsLeft,
+    setBreakElapsedSec,
+    setBreakOverdueSec,
+    setIsRunning,
+    setWorkPauseStartedAtMs,
+    setWorkPausedLiveSec,
+    setMilestonePulse,
+    setReminderBanner,
+    setIsModeSwitching,
+    setShowBreakParking,
+    setBreakParkingData,
+    triggerMiniDockContextToast,
+  });
 
   // Sayaç ekranı hatırlatıcı şeridini 14 saniye sonra otomatik temizle
   useEffect(() => {
@@ -1164,303 +1186,6 @@ export default function App() {
     };
   }, [planDropdownOpen]);
 
-  const anyModalOpen =
-    showStopBox ||
-    showDistractBox ||
-    showBreakOverdueBox ||
-    showWorkTopicBox ||
-    showShortBreakPrompt ||
-    showContextEditBox ||
-    showStuckRescueBox;
-
-  // Sistem tepsisi (Tray), OS uyanma ve pencere kapatma olaylarını dinle
-  useEffect(() => {
-    if (!loaded) return;
-    let unlistenMini: (() => void) | null = null;
-    let unlistenRestore: (() => void) | null = null;
-    let unlistenOsResumed: (() => void) | null = null;
-    let unlistenResize: (() => void) | null = null;
-
-    (async () => {
-      unlistenMini = await listen("request-mini-dock", () => {
-        enterMiniDock();
-      });
-      unlistenRestore = await listen("tray-restore", () => {
-        exitMiniDock();
-      });
-      unlistenOsResumed = await listen("os-resumed", () => {
-        const rt = runtimeStateRef.current;
-        const anchorMs =
-          lastTickRef.current || lastActiveAtRef.current || Date.now();
-        if (
-          rt.sessionActive &&
-          (Date.now() - anchorMs >= STALE_SESSION_TIMEOUT_MS ||
-            toLocalDateStr(new Date(anchorMs)) !== toLocalDateStr())
-        ) {
-          void autoCloseStaleSessionRef.current(anchorMs);
-          void revealExpandedWindowRef.current();
-          return;
-        }
-        if (rt.sessionActive && rt.mode === "work" && isRunningRef.current) {
-          if (!workPauseStartedAtRef.current) {
-            setWorkPauseStartedAtMs(lastTickRef.current || Date.now());
-          }
-          lastTickRef.current = Date.now();
-          setIsRunning(false);
-        }
-        void revealExpandedWindowRef.current();
-      });
-      const win = getCurrentWindow();
-      unlistenResize = await win.onResized(async () => {
-        try {
-          const factor = await win.scaleFactor();
-          const size = await win.innerSize();
-          const mult = Math.max(1, (theme.uiScale || 100) / 100);
-          setCurrentWinSize({
-            w: Math.round(size.width / factor / mult),
-            h: Math.round(size.height / factor / mult),
-          });
-        } catch {
-          // ignore
-        }
-      });
-    })();
-
-    return () => {
-      if (unlistenMini) unlistenMini();
-      if (unlistenRestore) unlistenRestore();
-      if (unlistenOsResumed) unlistenOsResumed();
-      if (unlistenResize) unlistenResize();
-    };
-  }, [loaded, isMiniDock, theme.uiScale]);
-
-  useEffect(() => {
-    document.documentElement.style.zoom = "";
-    if (!loaded) return;
-    const scaleMult = Math.max(1, (theme.uiScale || 100) / 100);
-    invoke("set_window_zoom", { zoom: scaleMult }).catch(() => {});
-  }, [theme.uiScale, loaded]);
-
-  const warmupTotalSec = getWarmupDurationSec(currentPlan.workMins);
-  const finalStretchSec = getFinalStretchSec(currentPlan.workMins);
-  const warmupLeftSec =
-    warmupTotalSec > 0 && !isHyperfocus && workElapsedSec < warmupTotalSec
-      ? warmupTotalSec - workElapsedSec
-      : 0;
-  const workPhase: WorkPhase = isHyperfocus
-    ? "hyperfocus"
-    : warmupLeftSec > 0
-      ? "warmup"
-      : workSecondsLeft > 0 && workSecondsLeft <= finalStretchSec
-        ? "final"
-        : "focus";
-  const showStuckBtn =
-    sessionActive &&
-    timerMode === "work" &&
-    (workElapsedSec <= Math.max(warmupTotalSec, 180) ||
-      currentSessionDistractions >= 1);
-
-  const hyperfocusOfferLeftSec =
-    sessionActive &&
-    timerMode === "break" &&
-    breakKind !== "short" &&
-    recentCompletedRound &&
-    breakElapsedSec < 15
-      ? Math.max(0, 15 - breakElapsedSec)
-      : 0;
-
-  const hasWorkElapsed = workElapsedSec > 0;
-  const hasWorkPauseStart = workPauseStartedAtMs !== null;
-  const hasReminderBanner = reminderBanner?.kind === "milestone";
-  const isBreakAlarm =
-    sessionActive && timerMode === "break" && breakOverdueSec > 0;
-
-  // Sayfaya, diyaloglara, mini widget durumuna ve kullanıcı özel boyutlarına göre pencere boyutunu ayarla
-  useEffect(() => {
-    if (!loaded || isMiniDock) return;
-    const scaleMult = Math.max(1, (theme.uiScale || 100) / 100);
-    const applyScaledSize = (baseW: number, baseH: number) => {
-      void applyMonitorClampedWindowSize(baseW, baseH, scaleMult);
-      setCurrentWinSize({ w: baseW, h: baseH });
-    };
-
-    if (anyModalOpen) {
-      let modalW = 325;
-      let modalH = 340;
-      if (showDistractBox) {
-        modalW = 370;
-        modalH = 490;
-      } else if (showStuckRescueBox) {
-        modalW = 340;
-        modalH = 325;
-      } else if (showShortBreakPrompt || showContextEditBox) {
-        const hasChips = Boolean(currentContext || recentContexts.length > 0);
-        modalW = 325;
-        modalH = showContextEditBox
-          ? hasChips
-            ? 205
-            : 165
-          : hasChips
-            ? 230
-            : 190;
-      } else if (showWorkTopicBox) {
-        modalW = 325;
-        modalH = tagForm ? 300 : workPrevReasons.length > 0 ? 270 : 235;
-      }
-      applyScaledSize(modalW, modalH);
-      return;
-    }
-    const targetPage = page as SizeTargetPage;
-    const custom = customSizes[targetPage];
-    const hasBreakParking =
-      targetPage === "timer" &&
-      sessionActive &&
-      timerMode === "break" &&
-      showBreakParking &&
-      breakParkingData.pendingTasks.length > 0;
-    const hasPausedHint =
-      targetPage === "timer" &&
-      sessionActive &&
-      !isRunning &&
-      timerMode === "work" &&
-      (hasWorkElapsed || hasWorkPauseStart);
-    const hasTimerReminder = targetPage === "timer" && hasReminderBanner;
-    const timerMinW =
-      timerMode === "work" && !isRunning
-        ? 304
-        : DEFAULT_WINDOW_SIZES.timer.width;
-    const timerMinH =
-      (timerMode === "work" ? DEFAULT_WINDOW_SIZES.timer.height : 138) +
-      (theme.timerStyle !== "digital" ? 42 : 0) +
-      (hasPausedHint ? 20 : 0) +
-      (hasTimerReminder ? 28 : 0) +
-      (showStuckBtn && timerMode === "work" ? 26 : 0) +
-      (timerMode === "break" && breakChecklistItems.length > 0 ? 28 : 0) +
-      (hyperfocusOfferLeftSec > 0 && timerMode === "break" ? 34 : 0) +
-      (isBreakAlarm ? 24 : 0);
-    const breakPanelH =
-      (isBreakAlarm ? 392 : 365) + (breakChecklistItems.length > 0 ? 22 : 0);
-
-    if (custom) {
-      const w = hasBreakParking
-        ? Math.max(custom.width, 345)
-        : targetPage === "timer"
-          ? Math.max(custom.width, timerMinW)
-          : custom.width;
-      const h = hasBreakParking
-        ? Math.max(custom.height, breakPanelH)
-        : targetPage === "timer"
-          ? Math.max(custom.height, timerMinH)
-          : custom.height;
-      applyScaledSize(w, h);
-      return;
-    }
-    if (page === "menu") {
-      const hasBanner =
-        updateStatus.kind === "available" ||
-        updateStatus.kind === "downloading";
-      const h = hasBanner
-        ? DEFAULT_WINDOW_SIZES.menu.height + 35
-        : DEFAULT_WINDOW_SIZES.menu.height;
-      applyScaledSize(DEFAULT_WINDOW_SIZES.menu.width, h);
-    } else if (page === "dashboard") {
-      applyScaledSize(
-        DEFAULT_WINDOW_SIZES.dashboard.width,
-        DEFAULT_WINDOW_SIZES.dashboard.height,
-      );
-    } else if (page === "summary") {
-      applyScaledSize(
-        DEFAULT_WINDOW_SIZES.summary.width,
-        DEFAULT_WINDOW_SIZES.summary.height,
-      );
-    } else if (page === "settings") {
-      applyScaledSize(
-        DEFAULT_WINDOW_SIZES.settings.width,
-        DEFAULT_WINDOW_SIZES.settings.height,
-      );
-    } else {
-      const w = hasBreakParking ? 345 : timerMinW;
-      const h = hasBreakParking ? breakPanelH : timerMinH;
-      applyScaledSize(w, h);
-    }
-  }, [
-    page,
-    anyModalOpen,
-    showDistractBox,
-    showStuckRescueBox,
-    showShortBreakPrompt,
-    showContextEditBox,
-    showWorkTopicBox,
-    tagForm,
-    workPrevReasons.length,
-    currentContext,
-    recentContexts.length,
-    loaded,
-    updateStatus.kind,
-    isMiniDock,
-    customSizes,
-    sessionActive,
-    isRunning,
-    hasWorkElapsed,
-    hasWorkPauseStart,
-    hasReminderBanner,
-    showStuckBtn,
-    hyperfocusOfferLeftSec,
-    isBreakAlarm,
-    timerMode,
-    showBreakParking,
-    breakParkingData.pendingTasks.length,
-    breakChecklistItems.length,
-    theme.uiScale,
-    theme.timerStyle,
-  ]);
-
-  const ambientShouldPlay =
-    loaded &&
-    ambientNoise.sound !== "off" &&
-    (!ambientNoise.playOnlyInWork ||
-      (sessionActive && timerMode === "work" && isRunning));
-
-  useEffect(() => {
-    ambientNoiseEngine.setConfig(
-      ambientNoise.sound,
-      ambientNoise.volume,
-      ambientShouldPlay,
-    );
-  }, [ambientNoise.sound, ambientNoise.volume, ambientShouldPlay]);
-
-  useEffect(() => {
-    return () => {
-      ambientNoiseEngine.stop();
-    };
-  }, []);
-
-  // Renk ayarları değişince kaydet
-  useEffect(() => {
-    if (!loaded || !themeDirtyRef.current) return;
-    const tTimer = setTimeout(() => {
-      saveThemeSettings(theme).catch((err) =>
-        console.error("Renk ayarları kaydedilemedi:", err),
-      );
-    }, 400);
-    return () => clearTimeout(tTimer);
-  }, [theme, loaded]);
-
-  // Güncelleme kontrolü
-  useEffect(() => {
-    if (!loaded || import.meta.env.DEV) return;
-    const runCheck = async () => {
-      const result = await checkForUpdate();
-      if (result.kind === "available") setUpdateStatus(result);
-    };
-    const first = setTimeout(runCheck, 10_000);
-    const interval = setInterval(runCheck, UPDATE_CHECK_INTERVAL_MS);
-    return () => {
-      clearTimeout(first);
-      clearInterval(interval);
-    };
-  }, [loaded]);
-
   // Durum kaydı (duraklatıldığında ve kritik değişikliklerde anında kaydet)
   useEffect(() => {
     if (!loaded || isRunning) return;
@@ -1487,45 +1212,6 @@ export default function App() {
     workPauseStartedAtMs,
   ]);
 
-  // Çalışma sırasında duraklatıldığında geçen ara süresini canlı say
-  useEffect(() => {
-    if (
-      !loaded ||
-      !sessionActive ||
-      isRunning ||
-      timerMode !== "work" ||
-      workPauseStartedAtMs === null ||
-      showBreakOverdueBox
-    ) {
-      setWorkPausedLiveSec(0);
-      return;
-    }
-    const updatePauseClock = () => {
-      const pausedSec = Math.max(
-        0,
-        Math.floor((Date.now() - workPauseStartedAtMs) / 1000),
-      );
-      if (
-        pausedSec >= STALE_SESSION_TIMEOUT_SEC ||
-        toLocalDateStr(new Date(workPauseStartedAtMs)) !== toLocalDateStr()
-      ) {
-        void autoCloseStaleSessionRef.current(workPauseStartedAtMs);
-        return;
-      }
-      setWorkPausedLiveSec(pausedSec);
-    };
-    updatePauseClock();
-    const tmr = setInterval(updatePauseClock, 1000);
-    return () => clearInterval(tmr);
-  }, [
-    loaded,
-    sessionActive,
-    isRunning,
-    timerMode,
-    workPauseStartedAtMs,
-    showBreakOverdueBox,
-  ]);
-
   // Sayaç çalışırken 5 saniyede bir yedekle
   useEffect(() => {
     if (!loaded || !isRunning) return;
@@ -1536,249 +1222,6 @@ export default function App() {
     );
     return () => clearInterval(backup);
   }, [loaded, isRunning]);
-
-  // Sistem saatine dayalı sayaç döngüsü (StrictMode güvenli — iç içe setState yok)
-  useEffect(() => {
-    if (!isRunning || !sessionActive) return;
-    let disposed = false;
-    let sleepCheckInFlight = false;
-    lastTickRef.current = Date.now();
-
-    const applyDelta = (delta: number, now: number) => {
-      lastTickRef.current += delta * 1000;
-      lastActiveAtRef.current = now;
-
-      const rt = runtimeStateRef.current;
-      const appSt = appStateRef.current;
-
-      if (rt.mode === "work") {
-        setWorkSecondsLeft((prev) => Math.max(0, prev - delta));
-        setWorkElapsedSec((prev) => prev + delta);
-        return;
-      }
-
-      const prevLeft = appSt.break_seconds_left;
-      if (prevLeft > 0) {
-        if (prevLeft > delta) {
-          setBreakSecondsLeft(prevLeft - delta);
-          setBreakElapsedSec(rt.breakElapsedSec + delta);
-        } else {
-          // Mola tam bu adımda doldu: aşan kısmı gecikmeye yaz ve alarm çal
-          const overflow = delta - prevLeft;
-          const nextOverdue = rt.breakOverdueSec + overflow;
-          if (
-            nextOverdue + rt.breakOvertimeAccumSec >=
-            STALE_SESSION_TIMEOUT_SEC
-          ) {
-            void autoCloseStaleSessionRef.current(now - nextOverdue * 1000);
-            return;
-          }
-          setBreakSecondsLeft(0);
-          setBreakElapsedSec(rt.breakElapsedSec + prevLeft);
-          setBreakOverdueSec(nextOverdue);
-          playAlarmChime();
-          if (isMiniDockRef.current) {
-            triggerMiniDockContextToast(t.breakOverAlert);
-            setTimeout(() => {
-              invoke("alert_break_started").catch(() => {});
-            }, 90);
-          } else {
-            invoke("alert_break_started").catch(() => {});
-          }
-          lastAlarmPlayRef.current = now;
-        }
-      } else {
-        const nextOverdue = rt.breakOverdueSec + delta;
-        if (
-          nextOverdue + rt.breakOvertimeAccumSec >=
-          STALE_SESSION_TIMEOUT_SEC
-        ) {
-          void autoCloseStaleSessionRef.current(now - nextOverdue * 1000);
-          return;
-        }
-        setBreakOverdueSec(nextOverdue);
-        if (now - lastAlarmPlayRef.current >= 12000) {
-          playAlarmChime();
-          lastAlarmPlayRef.current = now;
-        }
-      }
-    };
-
-    const runTick = async () => {
-      if (disposed || sleepCheckInFlight) return;
-      const now = Date.now();
-      const delta = Math.floor((now - lastTickRef.current) / 1000);
-      if (delta < 1) return;
-
-      if (delta <= 15) {
-        applyDelta(delta, now);
-        return;
-      }
-
-      const tickAnchor = lastTickRef.current;
-      const crossedDay =
-        toLocalDateStr(new Date(tickAnchor)) !== toLocalDateStr();
-
-      if (runtimeStateRef.current.mode === "break") {
-        const rt = runtimeStateRef.current;
-        const remBreak = appStateRef.current.break_seconds_left;
-        const projectedOverdue =
-          rt.breakOvertimeAccumSec +
-          rt.breakOverdueSec +
-          Math.max(0, delta - remBreak);
-        if (crossedDay || projectedOverdue >= STALE_SESSION_TIMEOUT_SEC) {
-          void autoCloseStaleSessionRef.current(
-            tickAnchor + Math.min(delta, remBreak) * 1000,
-          );
-          return;
-        }
-        applyDelta(delta, now);
-        return;
-      }
-
-      // WebView2 arka plan/tepsi kısıtlaması (throttling) nedeniyle delta > 15 olabilir;
-      // sadece Rust tarafı gerçek bir OS uyku/askıya alma boşluğu gördüyse çalışmayı duraklat.
-      sleepCheckInFlight = true;
-      try {
-        const osSlept = await invoke<boolean>("did_os_sleep_since", {
-          sinceMs: tickAnchor,
-        }).catch(() => delta > 300);
-        if (disposed) return;
-        if (osSlept) {
-          const sleptLong = Date.now() - tickAnchor >= STALE_SESSION_TIMEOUT_MS;
-          if (crossedDay || sleptLong) {
-            void autoCloseStaleSessionRef.current(tickAnchor);
-            void revealExpandedWindowRef.current();
-            return;
-          }
-          if (!workPauseStartedAtRef.current) {
-            setWorkPauseStartedAtMs(tickAnchor);
-          }
-          lastTickRef.current = Date.now();
-          setIsRunning(false);
-          void revealExpandedWindowRef.current();
-          return;
-        }
-        const latestNow = Date.now();
-        const latestDelta = Math.floor((latestNow - lastTickRef.current) / 1000);
-        if (latestDelta >= 1) {
-          applyDelta(latestDelta, latestNow);
-        }
-      } finally {
-        sleepCheckInFlight = false;
-      }
-    };
-
-    const onWakeCheck = () => {
-      if (document.visibilityState === "visible") {
-        void runTick();
-      }
-    };
-
-    const timer = setInterval(() => {
-      void runTick();
-    }, 500);
-    window.addEventListener("focus", onWakeCheck);
-    document.addEventListener("visibilitychange", onWakeCheck);
-
-    return () => {
-      disposed = true;
-      clearInterval(timer);
-      window.removeEventListener("focus", onWakeCheck);
-      document.removeEventListener("visibilitychange", onWakeCheck);
-    };
-  }, [isRunning, sessionActive]);
-
-  // Ekran kapalı / PC başından 5 dk ayrılma durumunda çalışmayı duraklat ve ara başlangıcını kaydet (mola kesilmez)
-  useEffect(() => {
-    if (!isRunning || !sessionActive) return;
-    const pollIdle = setInterval(async () => {
-      const idleSecs = await invoke<number>("get_system_idle_secs").catch(
-        () => 0,
-      );
-      const rt = runtimeStateRef.current;
-      if (rt.mode === "work" && idleSecs >= 300) {
-        const rewindSec = Math.min(
-          idleSecs,
-          appStateRef.current.work_elapsed_sec,
-        );
-        if (rewindSec > 0) {
-          setWorkElapsedSec((prev) => Math.max(0, prev - rewindSec));
-          setWorkSecondsLeft((prev) => prev + rewindSec);
-        }
-        if (!workPauseStartedAtRef.current) {
-          setWorkPauseStartedAtMs(Date.now() - rewindSec * 1000);
-        }
-        setIsRunning(false);
-        void revealExpandedWindowRef.current();
-      }
-    }, 10000);
-    return () => clearInterval(pollIdle);
-  }, [isRunning, sessionActive]);
-
-  // Isınma bitişi, yarı zaman ve son dakikalarda hafif faz bildirimi (yalnızca +-5sn penceresinde)
-  useEffect(() => {
-    if (!isRunning || !sessionActive || timerMode !== "work" || isHyperfocus) {
-      return;
-    }
-    const warmupSec = getWarmupDurationSec(currentPlan.workMins);
-    const finalSec = getFinalStretchSec(currentPlan.workMins);
-
-    if (
-      warmupSec > 0 &&
-      Math.abs(workElapsedSec - warmupSec) <= 5 &&
-      !firedMilestonesRef.current.warmupDone &&
-      workSecondsLeft > finalSec
-    ) {
-      firedMilestonesRef.current.warmupDone = true;
-      playSubtleMilestoneChime("warmup_done");
-      setMilestonePulse(true);
-      setReminderBanner({ kind: "milestone", text: t.warmupDoneBanner });
-    }
-
-    const totalRoundSec = workElapsedSec + workSecondsLeft;
-    if (
-      totalRoundSec >= 240 &&
-      workSecondsLeft > finalSec &&
-      Math.abs(workElapsedSec - Math.floor(totalRoundSec / 2)) <= 5 &&
-      !firedMilestonesRef.current.halfway
-    ) {
-      firedMilestonesRef.current.halfway = true;
-      playSubtleMilestoneChime("halfway");
-      setMilestonePulse(true);
-      setReminderBanner({ kind: "milestone", text: t.halfwayBanner });
-    }
-
-    if (
-      workElapsedSec >= 60 &&
-      workSecondsLeft > 0 &&
-      Math.abs(workSecondsLeft - finalSec) <= 5 &&
-      !firedMilestonesRef.current.finalStretch
-    ) {
-      firedMilestonesRef.current.finalStretch = true;
-      playSubtleMilestoneChime("final");
-      setMilestonePulse(true);
-      setReminderBanner({
-        kind: "milestone",
-        text: t.finalStretchBanner(Math.max(1, Math.ceil(finalSec / 60))),
-      });
-    }
-  }, [
-    isRunning,
-    sessionActive,
-    timerMode,
-    isHyperfocus,
-    workElapsedSec,
-    workSecondsLeft,
-    currentPlan.workMins,
-    t,
-  ]);
-
-  useEffect(() => {
-    if (!milestonePulse) return;
-    const id = setTimeout(() => setMilestonePulse(false), 2500);
-    return () => clearTimeout(id);
-  }, [milestonePulse]);
 
   // Çalışma süresi 0'a ulaştığında doğrudan molaya geç (ilk 15sn içinde Hiperodak seçeneği ile)
   useEffect(() => {
@@ -1889,6 +1332,8 @@ export default function App() {
           () => {},
         );
       }
+      const roundNum =
+        (prevCompleted % Math.max(1, currentPlan.longBreakInterval)) + 1;
       const sid = await recordWorkSession(
         finishedElapsed,
         finishedTag,
@@ -1900,6 +1345,10 @@ export default function App() {
         finishedHyperfocus,
         finishedStartMood,
         null,
+        getPlanDisplayName(currentPlan),
+        roundNum,
+        true,
+        sessionGroupIdRef.current,
       );
       const completedRound = {
         ...prelimRound,
@@ -2011,7 +1460,7 @@ export default function App() {
 
   const handleSelectBreakEndMood = async (mood: MoodType) => {
     const recent = recentCompletedRoundRef.current ?? recentCompletedRound;
-    if (!recent || !recent.sessionId) return;
+    if (!recent || !recent.sessionId || recent.moodLogged) return;
     if (recentCompletedRoundRef.current) {
       recentCompletedRoundRef.current = {
         ...recentCompletedRoundRef.current,
@@ -2053,46 +1502,6 @@ export default function App() {
 
   const hideToTray = () => {
     getCurrentWindow().hide();
-  };
-
-  // Özel Pencere Boyutu Kaydetme & Standart Boyuta Dönme
-  const handleSaveCurrentWindowSize = async () => {
-    const win = getCurrentWindow();
-    const factor = await win.scaleFactor();
-    const size = await win.innerSize();
-    const mult = Math.max(1, (theme.uiScale || 100) / 100);
-    const w = Math.max(220, Math.round(size.width / factor / mult));
-    const h = Math.max(110, Math.round(size.height / factor / mult));
-    const targetPage = page as SizeTargetPage;
-    const updated: CustomWindowSizes = {
-      ...customSizes,
-      [targetPage]: { width: w, height: h },
-    };
-    setCustomSizes(updated);
-    setCurrentWinSize({ w, h });
-    await saveCustomWindowSizes(updated);
-    setSizeSavedFlash(true);
-    setTimeout(() => setSizeSavedFlash(false), 1800);
-  };
-
-  const handleResetStandardSizes = async () => {
-    setCustomSizes({});
-    await resetCustomWindowSizes();
-    const targetPage = page as SizeTargetPage;
-    const std = DEFAULT_WINDOW_SIZES[targetPage] || DEFAULT_WINDOW_SIZES.menu;
-    const mult = Math.max(1, (theme.uiScale || 100) / 100);
-    await applyMonitorClampedWindowSize(std.width, std.height, mult);
-    setCurrentWinSize({ w: std.width, h: std.height });
-  };
-
-  const toggleAutoStart = async () => {
-    if (autoStartOn) {
-      await disable();
-      setAutoStartOn(false);
-    } else {
-      await enable();
-      setAutoStartOn(true);
-    }
   };
 
   const getCategoryDisplayName = (
@@ -2208,18 +1617,7 @@ export default function App() {
         activeWindow: params.activeWindow,
         contextText: effectiveCtx,
       });
-      setBreakParkingData(await getBreakParkingLotData());
-      if (page === "summary") {
-        const scopeRange =
-          summaryTab === "weekly"
-            ? getWeekBoundsIso(selectedSummaryDate)
-            : getDateBoundsIso(selectedSummaryDate);
-        setSummaryParkingData(await getParkingLotData(false, scopeRange));
-      } else {
-        setSummaryParkingData(
-          await getParkingLotData(freqOnlyTodayRef.current),
-        );
-      }
+      await refreshParkingViews();
     }
 
     await recordDistraction({
@@ -2263,13 +1661,21 @@ export default function App() {
 
   useEffect(() => {
     if (!loaded) return;
+    let cancelled = false;
     let unlistenCapture: (() => void) | null = null;
     listen<CaptureSubmittedEvent>("capture-submitted", (ev) => {
-      captureHandlerRef.current(ev.payload);
+      if (!cancelled) {
+        captureHandlerRef.current(ev.payload);
+      }
     }).then((fn) => {
-      unlistenCapture = fn;
+      if (cancelled) {
+        fn();
+      } else {
+        unlistenCapture = fn;
+      }
     });
     return () => {
+      cancelled = true;
       if (unlistenCapture) unlistenCapture();
     };
   }, [loaded]);
@@ -2322,6 +1728,10 @@ export default function App() {
             rt.hyperfocusExtraSec || 0,
             rt.sessionStartMood ?? null,
             null,
+            null,
+            0,
+            false,
+            rt.sessionGroupId ?? null,
           ).catch(() => {});
         }
       } else if (rt.mode === "break") {
@@ -2344,6 +1754,10 @@ export default function App() {
             rt.hyperfocusExtraSec || 0,
             rt.sessionStartMood ?? null,
             null,
+            null,
+            0,
+            false,
+            rt.sessionGroupId ?? null,
           ).catch(() => {});
         }
         const plannedBreakDone = Math.min(rt.breakElapsedSec, rt.breakTotalSec);
@@ -2368,6 +1782,7 @@ export default function App() {
             0,
             new Date(bEndMs - plannedBreakDone * 1000).toISOString(),
             new Date(bEndMs).toISOString(),
+            rt.sessionGroupId ?? null,
           ).catch(() => {});
         }
       }
@@ -2376,6 +1791,8 @@ export default function App() {
       const stdBreakSec = currentPlan.standardBreakMins * 60;
 
       setSessionActive(false);
+      sessionGroupIdRef.current = null;
+      setSessionGroupId(null);
       setTimerMode("work");
       setWorkSecondsLeft(wSec);
       setWorkElapsedSec(0);
@@ -2439,6 +1856,7 @@ export default function App() {
         isHyperfocus: false,
         hyperfocusExtraSec: 0,
         sessionStartMood: null,
+        sessionGroupId: null,
         lastActiveAt: null,
       };
       persistSnapshots(cleanAppState, cleanRuntimeState);
@@ -2503,6 +1921,7 @@ export default function App() {
           pausedSec,
           new Date(startMs).toISOString(),
           new Date().toISOString(),
+          sessionGroupIdRef.current,
         );
       }
     }
@@ -2529,6 +1948,9 @@ export default function App() {
     const startMood = selectedStartMood;
     setSessionStartMood(startMood);
     setSelectedStartMood(null);
+    const nextGroupId = `sg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    sessionGroupIdRef.current = nextGroupId;
+    setSessionGroupId(nextGroupId);
 
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
     const freshStats = await getActiveDayStats(locale);
@@ -2618,6 +2040,9 @@ export default function App() {
       setContextStartedAtElapsedSec(0);
 
       // Yarım kalan çalışma veya mola varsa istatistik kaybolmasın diye kaydet
+      const activeRoundNum =
+        (completedWorkCount % Math.max(1, currentPlan.longBreakInterval)) + 1;
+      const activePlanLabel = getPlanDisplayName(currentPlan);
       if (timerMode === "work" && workElapsedSec >= 15) {
         const startIso =
           workStartedAtRef.current ||
@@ -2633,6 +2058,10 @@ export default function App() {
           curHyperfocus,
           curStartMood,
           null,
+          activePlanLabel,
+          activeRoundNum,
+          false,
+          sessionGroupIdRef.current,
         );
       } else if (timerMode === "break") {
         // Kısa moladaysa önce duraklatılmış çalışmayı kaydet
@@ -2651,6 +2080,10 @@ export default function App() {
             curHyperfocus,
             curStartMood,
             null,
+            activePlanLabel,
+            activeRoundNum,
+            false,
+            sessionGroupIdRef.current,
           );
         }
         const totalOvertime = breakOvertimeAccumSec + breakOverdueSec;
@@ -2670,6 +2103,7 @@ export default function App() {
             breakStartedAtRef.current ||
               new Date(Date.now() - actualBreakSec * 1000).toISOString(),
             nowIso,
+            sessionGroupIdRef.current,
           );
         }
       }
@@ -2678,6 +2112,8 @@ export default function App() {
       const stdBreakSec = currentPlan.standardBreakMins * 60;
 
       setSessionActive(false);
+      sessionGroupIdRef.current = null;
+      setSessionGroupId(null);
       setTimerMode("work");
       setWorkSecondsLeft(wSec);
       setWorkElapsedSec(0);
@@ -2799,6 +2235,11 @@ export default function App() {
               hyperfocusExtraSec,
               sessionStartMood,
               null,
+              getPlanDisplayName(currentPlan),
+              (completedWorkCount % Math.max(1, currentPlan.longBreakInterval)) +
+                1,
+              false,
+              sessionGroupIdRef.current,
             );
             const locale = activeLang === "tr" ? "tr-TR" : "en-US";
             setDayStats(await getActiveDayStats(locale));
@@ -2806,9 +2247,22 @@ export default function App() {
             setTimelineSessions(await getTimelineSessions());
           }
           setSessionActive(false);
+          sessionGroupIdRef.current = null;
+          setSessionGroupId(null);
+          recentCompletedRoundRef.current = null;
+          setRecentCompletedRound(null);
           setWorkSecondsLeft(currentPlan.workMins * 60);
           setWorkElapsedSec(0);
+          setSavedWorkSecondsLeft(currentPlan.workMins * 60);
+          setSavedWorkElapsedSec(0);
+          setBreakKind("standard");
+          setBreakTotalSec(currentPlan.standardBreakMins * 60);
+          setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
           setCurrentSessionDistractions(0);
+          setCompletedWorkCount(0);
+          setSessionShortBreakCount(0);
+          setCurrentContext("");
+          setReminderBanner(null);
           setIsHyperfocus(false);
           setHyperfocusExtraSec(0);
           setSessionStartMood(null);
@@ -2819,6 +2273,7 @@ export default function App() {
           };
           workStartedAtRef.current = null;
           lastActiveAtRef.current = null;
+          await saveSessionCycleStats(0, 0);
           setPage("menu");
         } finally {
           isSubmittingSessionRef.current = false;
@@ -2838,12 +2293,43 @@ export default function App() {
         setShowStopBox(true);
         return;
       }
+      await flushPendingWorkPauseSilently();
+      if (activeContextLogId) {
+        await finalizeContextLog(
+          activeContextLogId,
+          Math.max(0, workElapsedSec - contextStartedAtElapsedSec),
+        );
+        setActiveContextLogId(null);
+        setContextStartedAtElapsedSec(0);
+      }
       setSessionActive(false);
+      sessionGroupIdRef.current = null;
+      setSessionGroupId(null);
+      recentCompletedRoundRef.current = null;
+      setRecentCompletedRound(null);
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
+      setSavedWorkSecondsLeft(currentPlan.workMins * 60);
+      setSavedWorkElapsedSec(0);
+      setBreakKind("standard");
+      setBreakTotalSec(currentPlan.standardBreakMins * 60);
+      setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
       setCurrentSessionDistractions(0);
+      setCompletedWorkCount(0);
+      setSessionShortBreakCount(0);
+      setCurrentContext("");
+      setReminderBanner(null);
+      setIsHyperfocus(false);
+      setHyperfocusExtraSec(0);
+      setSessionStartMood(null);
+      firedMilestonesRef.current = {
+        warmupDone: false,
+        halfway: false,
+        finalStretch: false,
+      };
       workStartedAtRef.current = null;
       lastActiveAtRef.current = null;
+      await saveSessionCycleStats(0, 0);
       setPage("menu");
     } else {
       const totalOvertime = breakOvertimeAccumSec + breakOverdueSec;
@@ -2909,6 +2395,10 @@ export default function App() {
           hyperfocusExtraSec,
           sessionStartMood,
           null,
+          getPlanDisplayName(currentPlan),
+          (completedWorkCount % Math.max(1, currentPlan.longBreakInterval)) + 1,
+          false,
+          sessionGroupIdRef.current,
         );
         const locale = activeLang === "tr" ? "tr-TR" : "en-US";
         setDayStats(await getActiveDayStats(locale));
@@ -2916,9 +2406,22 @@ export default function App() {
         setTimelineSessions(await getTimelineSessions());
       }
       setSessionActive(false);
+      sessionGroupIdRef.current = null;
+      setSessionGroupId(null);
+      recentCompletedRoundRef.current = null;
+      setRecentCompletedRound(null);
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
+      setSavedWorkSecondsLeft(currentPlan.workMins * 60);
+      setSavedWorkElapsedSec(0);
+      setBreakKind("standard");
+      setBreakTotalSec(currentPlan.standardBreakMins * 60);
+      setBreakSecondsLeft(currentPlan.standardBreakMins * 60);
       setCurrentSessionDistractions(0);
+      setCompletedWorkCount(0);
+      setSessionShortBreakCount(0);
+      setCurrentContext("");
+      setReminderBanner(null);
       setIsHyperfocus(false);
       setHyperfocusExtraSec(0);
       setSessionStartMood(null);
@@ -2929,6 +2432,7 @@ export default function App() {
       };
       workStartedAtRef.current = null;
       lastActiveAtRef.current = null;
+      await saveSessionCycleStats(0, 0);
       setShowStopBox(false);
       setEndingReasonText("");
       setIsEditingEndingTags(false);
@@ -3011,52 +2515,6 @@ export default function App() {
     lastActiveAtRef.current = Date.now();
   };
 
-  const handleSelectPlan = async (planId: string) => {
-    setPlanDropdownOpen(false);
-    if (sessionActive) return;
-    setActivePlanId(planId);
-    setEditingPlanId(planId);
-    await saveActivePlanId(planId);
-    const chosen = studyPlans.find((p) => p.id === planId);
-    if (chosen) {
-      setWorkSecondsLeft(chosen.workMins * 60);
-      setBreakTotalSec(chosen.standardBreakMins * 60);
-      setBreakSecondsLeft(chosen.standardBreakMins * 60);
-    }
-  };
-
-  const handleUpdatePlanField = async (
-    planId: string,
-    field: keyof StudyPlan,
-    value: string | number,
-  ) => {
-    const updated = studyPlans.map((p) => {
-      if (p.id !== planId) return p;
-      return { ...p, [field]: value };
-    });
-    setStudyPlans(updated);
-    await saveStudyPlans(updated);
-    if (
-      planId === activePlanId &&
-      field === "workMins" &&
-      !isRunning &&
-      workElapsedSec === 0 &&
-      timerMode === "work"
-    ) {
-      setWorkSecondsLeft(Number(value) * 60);
-    }
-  };
-
-  const handleResetPlansDefault = async () => {
-    const fresh = DEFAULT_STUDY_PLANS.map((p) => ({ ...p }));
-    setStudyPlans(fresh);
-    await saveStudyPlans(fresh);
-    const current = fresh.find((p) => p.id === activePlanId) || fresh[0];
-    if (!isRunning && workElapsedSec === 0 && timerMode === "work") {
-      setWorkSecondsLeft(current.workMins * 60);
-    }
-  };
-
   const handleOpenBreakOverdueBox = async (
     source: "break" | "work_pause" = "break",
   ) => {
@@ -3112,6 +2570,7 @@ export default function App() {
           pauseSec,
           startIso,
           endIso,
+          sessionGroupIdRef.current,
         );
         setTimelineSessions(await getTimelineSessions());
 
@@ -3165,6 +2624,7 @@ export default function App() {
           totalOvertime,
           startIso,
           endIso,
+          sessionGroupIdRef.current,
         );
         setTimelineSessions(await getTimelineSessions());
       }
@@ -3179,6 +2639,62 @@ export default function App() {
       recentCompletedRoundRef.current = null;
       setRecentCompletedRound(null);
       breakStartedAtRef.current = null;
+
+      if (breakKind === "long") {
+        const wSec = currentPlan.workMins * 60;
+        const stdBreakSec = currentPlan.standardBreakMins * 60;
+
+        setSessionActive(false);
+        sessionGroupIdRef.current = null;
+        setSessionGroupId(null);
+        setIsRunning(false);
+        setTimerMode("work");
+        setBreakKind("standard");
+        setWorkSecondsLeft(wSec);
+        setWorkElapsedSec(0);
+        setSavedWorkSecondsLeft(wSec);
+        setSavedWorkElapsedSec(0);
+        setBreakTotalSec(stdBreakSec);
+        setBreakSecondsLeft(stdBreakSec);
+        setWorkPauseStartedAtMs(null);
+        setWorkPausedLiveSec(0);
+        setPendingWorkPauseSec(0);
+        setPendingWorkPauseStartIso(null);
+        setCurrentSessionDistractions(0);
+        setCompletedWorkCount(0);
+        setSessionShortBreakCount(0);
+        setCurrentContext("");
+        setActiveContextLogId(null);
+        setContextStartedAtElapsedSec(0);
+        setReminderBanner(null);
+        setIsHyperfocus(false);
+        setHyperfocusExtraSec(0);
+        setSessionStartMood(null);
+        firedMilestonesRef.current = {
+          warmupDone: false,
+          halfway: false,
+          finalStretch: false,
+        };
+        workStartedAtRef.current = null;
+        lastActiveAtRef.current = null;
+
+        await saveSessionCycleStats(0, 0);
+        const locale = activeLang === "tr" ? "tr-TR" : "en-US";
+        setDayStats(await getActiveDayStats(locale));
+        setWeeklySummary(await getWeeklySummary(locale));
+        setTimelineSessions(
+          await getTimelineSessions(
+            undefined,
+            getDateBoundsIso(toLocalDateStr()),
+          ),
+        );
+        setBreakParkingData(await getBreakParkingLotData());
+        if (isMiniDockRef.current) {
+          await exitMiniDock();
+        }
+        setPage("menu");
+        return;
+      }
 
       if (breakKind === "short") {
         setWorkSecondsLeft(savedWorkSecondsLeft);
@@ -3259,162 +2775,6 @@ export default function App() {
     setShowWorkTopicBox(false);
   };
 
-  const handleExportData = async () => {
-    try {
-      const jsonStr = await exportAllData();
-      const filename = "pomodoro-backup.json";
-      try {
-        const savedPath = await invoke<string>("save_backup_json", {
-          filename,
-          content: jsonStr,
-        });
-        setExportSavedMsg(t.exportSavedMsg(savedPath));
-        setTimeout(() => setExportSavedMsg(null), 4500);
-        return;
-      } catch {
-        // Tarayıcı geliştirme modu fallback
-      }
-      const blob = new Blob([jsonStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setExportSavedMsg(t.exportSavedMsg(filename));
-      setTimeout(() => setExportSavedMsg(null), 4500);
-    } catch (err) {
-      console.error("Dışa aktarma hatası:", err);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // TAG YÖNETİMİ (SATIR-İÇİ EKLE, DÜZENLE, SİL — OS POPUP OLMADAN)
-  // ---------------------------------------------------------------------------
-  const handleAddNewTag = (kind: TagKind) => {
-    setTagForm({ mode: "add", kind, value: "" });
-  };
-
-  const handleEditTagItem = (
-    tagId: number,
-    currentName: string,
-    kind: TagKind,
-  ) => {
-    setTagForm({
-      mode: "edit",
-      kind,
-      tagId,
-      currentName,
-      value: currentName,
-    });
-  };
-
-  const handleDeleteTagItem = (tagId: number, name: string, kind: TagKind) => {
-    setTagForm({
-      mode: "delete",
-      kind,
-      tagId,
-      currentName: name,
-      value: name,
-    });
-  };
-
-  const submitTagForm = async () => {
-    if (!tagForm) return;
-    const { mode, kind, tagId, currentName, value } = tagForm;
-    const trimmed = value.trim();
-
-    if (mode === "add") {
-      if (!trimmed) return;
-      const added = await addTag(trimmed, kind);
-      const pickedName = added?.name || trimmed;
-      if (kind === "ending") {
-        setEndingTags(await getTags("ending", t.defaultEndingTags));
-        setSelectedEndingTag(pickedName);
-      } else if (kind === "work") {
-        setWorkTags(await getTags("work", t.defaultWorkTags));
-        setSelectedWorkTopicTag(pickedName);
-      } else if (kind === "break_overtime") {
-        setBreakOverdueTags(
-          await getTags("break_overtime", t.defaultBreakOvertimeTags),
-        );
-        setSelectedBreakOverdueTag(pickedName);
-      }
-    } else if (mode === "edit" && tagId !== undefined && currentName) {
-      if (trimmed && trimmed !== currentName) {
-        await updateTag(tagId, trimmed, kind);
-        if (kind === "ending") {
-          setEndingTags(await getTags("ending", t.defaultEndingTags));
-          if (selectedEndingTag === currentName) setSelectedEndingTag(trimmed);
-        } else if (kind === "work") {
-          setWorkTags(await getTags("work", t.defaultWorkTags));
-          if (currentWorkTag === currentName) setCurrentWorkTag(trimmed);
-          if (selectedWorkTopicTag === currentName) {
-            setSelectedWorkTopicTag(trimmed);
-          }
-        } else if (kind === "break_overtime") {
-          setBreakOverdueTags(
-            await getTags("break_overtime", t.defaultBreakOvertimeTags),
-          );
-          if (selectedBreakOverdueTag === currentName) {
-            setSelectedBreakOverdueTag(trimmed);
-          }
-        }
-      }
-    } else if (mode === "delete" && tagId !== undefined) {
-      await deleteTag(tagId);
-      if (kind === "ending") {
-        setEndingTags(await getTags("ending", t.defaultEndingTags));
-      } else if (kind === "work") {
-        setWorkTags(await getTags("work", t.defaultWorkTags));
-      } else if (kind === "break_overtime") {
-        setBreakOverdueTags(
-          await getTags("break_overtime", t.defaultBreakOvertimeTags),
-        );
-      }
-    }
-    setTagForm(null);
-  };
-
-  const handleTagsChangedFromSettings = async (kind: TagKind) => {
-    if (kind === "work") {
-      setWorkTags(await getTags("work", t.defaultWorkTags));
-    } else if (kind === "ending") {
-      setEndingTags(await getTags("ending", t.defaultEndingTags));
-    } else if (kind === "break_overtime") {
-      setBreakOverdueTags(
-        await getTags("break_overtime", t.defaultBreakOvertimeTags),
-      );
-    }
-  };
-
-  const openDashboard = async () => {
-    setIsCelebrating(false);
-    setPlanDropdownOpen(false);
-    const locale = activeLang === "tr" ? "tr-TR" : "en-US";
-    const weekly = await getWeeklySummary(locale);
-    const reasonsData = await getSummaryReasonsData(freqOnlyToday);
-    const timeline = await getTimelineSessions();
-    const insights = await getAdhdInsights(freqOnlyToday);
-    const pData = await getParkingLotData(freqOnlyToday);
-    const cStats = await getContextStatsSummary(freqOnlyToday);
-    const aStats = await getAppDistractionSummary(freqOnlyToday);
-    const wStory = await getWorkStoryEntries(freqOnlyToday, 80);
-
-    setWeeklySummary(weekly);
-    setSummaryReasonsData(reasonsData);
-    setTimelineSessions(timeline);
-    setAdhdInsights(insights);
-    setSummaryParkingData(pData);
-    setContextStats(cStats);
-    setAppDistractions(aStats);
-    setWorkStoryEntries(wStory);
-    await refreshPendingSyncCount();
-    setPage("dashboard");
-  };
-
   const handleResumeWork = async () => {
     if (!sessionActive) return;
     if (timerMode === "work") {
@@ -3490,149 +2850,10 @@ export default function App() {
     setPage("menu");
   };
 
-  const loadSummaryForScope = async (
-    tab: SummaryTabType,
-    dateStr: string,
-    lang: ActiveLang = activeLang,
-  ) => {
-    const locale = lang === "tr" ? "tr-TR" : "en-US";
-    const dateRange =
-      tab === "weekly" ? getWeekBoundsIso(dateStr) : getDateBoundsIso(dateStr);
-    const dayRange = getDateBoundsIso(dateStr);
-    const [
-      dayStat,
-      weekly,
-      reasonsData,
-      timeline,
-      insights,
-      pData,
-      cStats,
-      aStats,
-      wStory,
-      bLogs,
-      mLogs,
-    ] = await Promise.all([
-      getDayStatsForDate(dateStr),
-      getWeeklySummary(locale, dateStr),
-      getSummaryReasonsData(false, dateRange),
-      getTimelineSessions(undefined, dayRange),
-      getAdhdInsights(false, dateRange),
-      getParkingLotData(false, dateRange),
-      getContextStatsSummary(false, dateRange),
-      getAppDistractionSummary(false, dateRange),
-      getWorkStoryEntries(false, 200, dateRange),
-      getBioLogs(false, dayRange),
-      getMoodLogs(false, dayRange),
-    ]);
-
-    setSelectedDayStats(dayStat);
-    setWeeklySummary(weekly);
-    setSummaryReasonsData(reasonsData);
-    setTimelineSessions(timeline);
-    setAdhdInsights(insights);
-    setSummaryParkingData(pData);
-    setContextStats(cStats);
-    setAppDistractions(aStats);
-    setWorkStoryEntries(wStory);
-    setSummaryBioLogs(bLogs);
-    setSummaryMoodLogs(mLogs);
-    const selectedOrToday =
-      weekly.days.find((d) => d.fullDateStr === dateStr) ??
-      weekly.days.find((d) => d.is_today) ??
-      weekly.days[weekly.days.length - 1] ??
-      null;
-    setHoveredWeekDay(selectedOrToday);
-    setHoveredTimelineItem(null);
-  };
-
-  const openSummary = async () => {
-    setIsCelebrating(false);
-    setPlanDropdownOpen(false);
-    const initialTab: SummaryTabType =
-      summaryTab === "weekly" ? "weekly" : "timeline";
-    setSummaryTab(initialTab);
-    setFreqOnlyToday(initialTab === "timeline");
-    const todayStr = toLocalDateStr();
-    setSelectedSummaryDate(todayStr);
-    await loadSummaryForScope(initialTab, todayStr, activeLang);
-    setShowResetConfirm(false);
-    setPage("summary");
-  };
-
-  const handleChangeSummaryTab = async (tab: SummaryTabType) => {
-    setSummaryTab(tab);
-    setFreqOnlyToday(tab === "timeline");
-    await loadSummaryForScope(tab, selectedSummaryDate, activeLang);
-  };
-
-  const handleSelectSummaryDate = async (dateStr: string) => {
-    setSelectedSummaryDate(dateStr);
-    await loadSummaryForScope(summaryTab, dateStr, activeLang);
-  };
-
-  const handleShiftSummaryDate = async (deltaDays: number) => {
-    const d = parseLocalDateStr(selectedSummaryDate);
-    d.setDate(d.getDate() + deltaDays);
-    const nextStr = toLocalDateStr(d);
-    setSelectedSummaryDate(nextStr);
-    await loadSummaryForScope(summaryTab, nextStr, activeLang);
-  };
-
   const openSettings = () => {
     setPlanDropdownOpen(false);
     setRecordingShortcutFor(null);
     setPage("settings");
-  };
-
-  const toggleFreqFilter = async () => {
-    const nextVal = !freqOnlyToday;
-    setFreqOnlyToday(nextVal);
-    setSummaryReasonsData(await getSummaryReasonsData(nextVal));
-    setAdhdInsights(await getAdhdInsights(nextVal));
-    setSummaryParkingData(await getParkingLotData(nextVal));
-    setContextStats(await getContextStatsSummary(nextVal));
-    setAppDistractions(await getAppDistractionSummary(nextVal));
-    setWorkStoryEntries(await getWorkStoryEntries(nextVal, 80));
-  };
-
-  // Mola Otoparkı & Özet Otoparkı Etkileşimleri (Veritabanına Ekleme Sırasıyla Kaydedilir)
-  const refreshParkingViews = async () => {
-    setBreakParkingData(await getBreakParkingLotData());
-    if (page === "summary") {
-      const scopeRange =
-        summaryTab === "weekly"
-          ? getWeekBoundsIso(selectedSummaryDate)
-          : getDateBoundsIso(selectedSummaryDate);
-      setSummaryParkingData(await getParkingLotData(false, scopeRange));
-    } else {
-      setSummaryParkingData(await getParkingLotData(freqOnlyTodayRef.current));
-    }
-  };
-
-  const handleToggleParkingTask = async (id: number, done: boolean) => {
-    await toggleParkingTaskDone(id, done);
-    await refreshParkingViews();
-  };
-
-  const handleRateParkingIdea = async (
-    id: number,
-    rating: "important" | "unimportant" | "unrated",
-  ) => {
-    await rateParkingIdea(id, rating);
-    await refreshParkingViews();
-  };
-
-  const handleDeleteParkingEntry = async (id: number) => {
-    await deleteParkingItem(id);
-    await refreshParkingViews();
-  };
-
-  const handleChangeParkingBucket = async (
-    id: number,
-    bucket: ParkingBucket,
-  ) => {
-    await updateParkingBucket(id, bucket);
-    await refreshParkingViews();
   };
 
   const handleOpenStuckRescue = () => {
@@ -3655,43 +2876,6 @@ export default function App() {
     handleTakeShortBreak();
   };
 
-  const handleDeleteWorkStoryItem = async (id: number) => {
-    await deleteWorkStoryEntry(id);
-    setLightboxGroupEntries((prev) => prev.filter((item) => item.id !== id));
-    setLightboxEntry(null);
-    if (page === "summary") {
-      await loadSummaryForScope(summaryTab, selectedSummaryDate, activeLang);
-    } else {
-      setWorkStoryEntries(
-        await getWorkStoryEntries(freqOnlyTodayRef.current, 80),
-      );
-    }
-  };
-
-  // Global Kısayol Kaydetme & Sıfırlama
-  const handleApplyShortcuts = async (next: GlobalShortcutSettings) => {
-    setShortcuts(next);
-    await saveGlobalShortcuts(next);
-    const status = await invoke<ShortcutStatus>("update_global_shortcuts", {
-      distractionShortcut: next.distractionShortcut,
-      contextShortcut: next.contextShortcut,
-    }).catch(() => null);
-    if (status) setShortcutStatus(status);
-  };
-
-  const handleResetShortcuts = async () => {
-    setRecordingShortcutFor(null);
-    await handleApplyShortcuts({ ...DEFAULT_SHORTCUTS });
-  };
-
-  const openQuickCaptureFromUi = (mode: "distraction" | "context") => {
-    invoke("open_quick_capture_manual", { mode }).catch(() => {});
-  };
-
-  const toggleAccordionTag = (tagName: string) => {
-    setExpandedTags((prev) => ({ ...prev, [tagName]: !prev[tagName] }));
-  };
-
   const handleResetData = async (options: ClearDataOptions) => {
     if (!options.workTime && !options.distractions) return;
     const locale = activeLang === "tr" ? "tr-TR" : "en-US";
@@ -3703,6 +2887,8 @@ export default function App() {
     if (options.workTime) {
       const freshStats = await getActiveDayStats(locale);
       setSessionActive(false);
+      sessionGroupIdRef.current = null;
+      setSessionGroupId(null);
       setTimerMode("work");
       setWorkSecondsLeft(currentPlan.workMins * 60);
       setWorkElapsedSec(0);
@@ -3729,6 +2915,7 @@ export default function App() {
       setHyperfocusExtraSec(0);
       setSessionStartMood(null);
       setSelectedStartMood(null);
+      recentCompletedRoundRef.current = null;
       setRecentCompletedRound(null);
       setShowStuckRescueBox(false);
       firedMilestonesRef.current = {
@@ -3746,7 +2933,6 @@ export default function App() {
       setWorkStoryEntries([]);
       setHoveredWeekDay(null);
       setHoveredTimelineItem(null);
-      setSummaryMoodLogs([]);
       if (options.distractions) {
         setTodayBioLogs([]);
         setSummaryBioLogs([]);
@@ -3768,63 +2954,17 @@ export default function App() {
     setShowResetConfirm(false);
   };
 
-  const updateTheme = (patch: Partial<ThemeSettings>) => {
-    themeDirtyRef.current = true;
-    setTheme((prev) => ({ ...prev, ...patch }));
-  };
-
-  const handleUpdateAmbientNoise = (patch: Partial<AmbientNoiseSettings>) => {
-    setAmbientNoise((prev) => {
-      const next = { ...prev, ...patch };
-      saveAmbientNoiseSettings(next).catch(() => {});
-      return next;
-    });
-  };
-
-  const handleUpdateRescueExercises = (
-    patch: Partial<RescueExerciseSettings>,
-  ) => {
-    setRescueExercises((prev) => {
-      const next = { ...prev, ...patch };
-      saveRescueExerciseSettings(next).catch(() => {});
-      return next;
-    });
-  };
-
-  const handleUpdateBreakChecklistItems = (items: string[]) => {
-    setBreakChecklistItems(items);
-    saveBreakChecklistItems(items).catch(() => {});
-  };
-
   const handleLanguageChange = async (newPref: LangCode) => {
     setLangPref(newPref);
     await saveLanguagePreference(newPref);
     const newActive = resolveLanguage(newPref);
     const newT = translations[newActive];
-    setEndingTags(await getTags("ending", newT.defaultEndingTags));
-    setWorkTags(await getTags("work", newT.defaultWorkTags));
-    setBreakOverdueTags(
-      await getTags("break_overtime", newT.defaultBreakOvertimeTags),
-    );
+    await refreshTagsForTranslations(newT);
   };
 
   const handlePenaltyChange = async (mins: number) => {
     setDistractPenaltyMins(mins);
     await saveDistractPenalty(mins);
-  };
-
-  const handleCheckUpdate = async () => {
-    setUpdateStatus({ kind: "checking" });
-    setUpdateStatus(await checkForUpdate());
-  };
-
-  const handleInstallUpdate = async () => {
-    setIsRunning(false);
-    await installUpdate(setUpdateStatus, async () => {
-      await saveAppState(appStateRef.current).catch(() => {});
-      await saveRuntimeState(runtimeStateRef.current).catch(() => {});
-      await saveThemeSettings(theme).catch(() => {});
-    });
   };
 
   if (!loaded) return null;
@@ -3912,20 +3052,51 @@ export default function App() {
     currentWorkReason ? `: ${currentWorkReason}` : ""
   }`;
 
-  const maxWeeklyHours = Math.max(
-    1,
-    ...(weeklySummary?.days.map((d) => d.total_sec / 3600) ?? [1]),
-  );
-
   const updateAvailable = updateStatus.kind === "available";
 
+  const isLightTheme = isLightColor(theme.bgColor);
+  const effectiveBgHex = isLightTheme ? "#efefef" : "#0c0d0e";
+  const resolvedUserTimer = resolveHarmoniousTimerColor(
+    theme.timerColor,
+    isLightTheme,
+  );
+  const effectiveTimerColor = isBreakAlarm
+    ? isLightTheme
+      ? "#dc2626"
+      : "#f87171"
+    : sessionActive && timerMode === "break"
+      ? breakKind === "long"
+        ? isLightTheme
+          ? "#6d28d9"
+          : "#c4b5fd"
+        : isLightTheme
+          ? "#0284c7"
+          : "#7dd3fc"
+      : sessionActive && timerMode === "work" && isHyperfocus
+        ? isLightTheme
+          ? "#d97706"
+          : "#fbbf24"
+        : resolvedUserTimer.color;
+
+  const effectiveProgressColor = isBreakAlarm
+    ? "var(--accent-danger)"
+    : sessionActive && timerMode === "break"
+      ? breakKind === "long"
+        ? "var(--accent-long-break)"
+        : "var(--accent-warmup)"
+      : sessionActive && timerMode === "work" && isHyperfocus
+        ? "var(--accent-amber)"
+        : resolvedUserTimer.id !== "neutral"
+          ? resolvedUserTimer.color
+          : "var(--accent-primary)";
+
   const shellStyle = {
-    "--shell-bg": hexToRgba(theme.bgColor, theme.bgOpacity / 100),
+    "--shell-bg": hexToRgba(effectiveBgHex, theme.bgOpacity / 100),
     "--shell-bg-solid": hexToRgba(
-      theme.bgColor,
+      effectiveBgHex,
       Math.max(0.97, Math.min(1, theme.bgOpacity / 100 + 0.2)),
     ),
-    "--timer-color": theme.timerColor,
+    "--timer-color": effectiveTimerColor,
   } as React.CSSProperties;
 
   const isTimerModeStyle = (page === "timer" || isMiniDock) && sessionActive;
@@ -3940,7 +3111,9 @@ export default function App() {
   if (isMiniDock) {
     return (
       <MiniDock
-        isLight={isLightColor(theme.bgColor)}
+        isLight={isLightTheme}
+        progressColor={effectiveProgressColor}
+        workPhase={workPhase}
         modeClass={modeClass}
         isBreakAlarm={isBreakAlarm}
         isCelebrating={isCelebrating}
@@ -3971,6 +3144,9 @@ export default function App() {
     showBreakParking &&
     breakParkingTotalCount > 0;
 
+  const isTimerCentered =
+    page === "timer" && !anyModalOpen && !hasBreakParkingView;
+
   const tagHandlers = {
     tagForm,
     onChangeTagForm: setTagForm,
@@ -3986,7 +3162,9 @@ export default function App() {
         page !== "timer" || anyModalOpen || hasBreakParkingView
           ? "solid-bg"
           : ""
-      } ${isLightColor(theme.bgColor) ? "light-theme" : ""} ${modeClass} ${
+      } ${isTimerCentered ? "timer-centered" : ""} ${
+        isLightTheme ? "light-theme" : ""
+      } ${modeClass} ${
         isModeSwitching ? "mode-switching" : ""
       } ${isCelebrating ? "celebrating-shell" : ""} ${
         milestonePulse ? "milestone-pulse" : ""
@@ -4013,17 +3191,7 @@ export default function App() {
             className="progress-bar-fill"
             style={{
               width: `${progressPct}%`,
-              backgroundColor: isBreakAlarm
-                ? "#ef4444"
-                : timerMode === "work"
-                  ? workPhase === "warmup"
-                    ? "#34d399"
-                    : workPhase === "final"
-                      ? "#fb923c"
-                      : workPhase === "hyperfocus"
-                        ? "#f97316"
-                        : "var(--timer-color, #fbbf24)"
-                  : "#38bdf8",
+              backgroundColor: effectiveProgressColor,
             }}
           />
         </div>
@@ -4092,6 +3260,7 @@ export default function App() {
           getCategoryDisplayName={(cat) => getCategoryDisplayName(cat)}
           canShowStuckRescue={timerMode === "work" && (showStuckBtn || workElapsedSec <= 300)}
           onOpenStuckRescue={handleOpenStuckRescue}
+          onPreferredHeightChange={setDistractModalHeight}
           onSubmit={submitDistraction}
           onCancel={() => {
             setShowDistractBox(false);
@@ -4167,7 +3336,7 @@ export default function App() {
               activeSeconds={activeSeconds}
               remainingRatio={remainingRatio}
               timerStyle={theme.timerStyle}
-              timerColor={theme.timerColor}
+              timerColor={effectiveTimerColor}
               hasPausedProgress={hasPausedProgress}
               workElapsedSec={workElapsedSec}
               workPausedLiveSec={workPausedLiveSec}
@@ -4177,10 +3346,7 @@ export default function App() {
               warmupLeftSec={warmupLeftSec}
               showStuckBtn={showStuckBtn}
               hyperfocusOfferLeftSec={hyperfocusOfferLeftSec}
-              canLogBreakEndMood={Boolean(
-                recentCompletedRound?.sessionId &&
-                !recentCompletedRound.moodLogged,
-              )}
+              canLogBreakEndMood={canShowBreakEndMood}
               onToggleRunning={handleToggleRunning}
               onOpenWorkTopicBox={handleOpenWorkTopicBox}
               onOpenContextBox={handleOpenContextBox}
@@ -4191,7 +3357,34 @@ export default function App() {
               onSelectBreakEndMood={(mood) =>
                 void handleSelectBreakEndMood(mood)
               }
-              onToggleBreakParking={() => setShowBreakParking((p) => !p)}
+              onDismissBreakEndMood={() => {
+                if (recentCompletedRoundRef.current) {
+                  recentCompletedRoundRef.current = {
+                    ...recentCompletedRoundRef.current,
+                    moodLogged: true,
+                  };
+                }
+                setRecentCompletedRound((prev) =>
+                  prev ? { ...prev, moodLogged: true } : null,
+                );
+              }}
+              onToggleBreakParking={() => {
+                if (!showBreakParking) {
+                  const sections =
+                    (breakParkingData.pendingTasks.length > 0 ? 1 : 0) +
+                    (breakParkingData.doneTasks.length > 0 ? 1 : 0) +
+                    (breakParkingData.unratedIdeas.length > 0 ? 1 : 0) +
+                    (breakParkingData.importantIdeas.length > 0 ? 1 : 0) +
+                    (breakParkingData.unimportantIdeas.length > 0 ? 1 : 0) +
+                    (breakParkingData.screenshotNotes.length > 0 ? 1 : 0);
+                  const openRows =
+                    breakParkingData.pendingTasks.length +
+                    breakParkingData.unratedIdeas.length +
+                    breakParkingData.importantIdeas.length;
+                  setBreakParkingLayout({ openRows, sections });
+                }
+                setShowBreakParking((p) => !p);
+              }}
               onOpenMenu={openMenu}
               onEnterMiniDock={enterMiniDock}
               onHideToTray={hideToTray}
@@ -4200,6 +3393,7 @@ export default function App() {
               onRateParkingIdea={handleRateParkingIdea}
               onDeleteParkingEntry={handleDeleteParkingEntry}
               onChangeParkingBucket={handleChangeParkingBucket}
+              onBreakParkingLayoutChange={handleBreakParkingLayoutChange}
               onOpenLightbox={openLightbox}
               onStartWorkFromBreak={handleStartWorkFromBreak}
               onStopSession={handleStopSession}
@@ -4324,7 +3518,6 @@ export default function App() {
               summaryParkingData={summaryParkingData}
               workStoryEntries={workStoryEntries}
               bioLogs={summaryBioLogs}
-              moodLogs={summaryMoodLogs}
               showResetConfirm={showResetConfirm}
               hoveredTimelineItem={hoveredTimelineItem}
               timelineSessions={timelineSessions}
@@ -4352,8 +3545,6 @@ export default function App() {
               onChangeParkingBucket={handleChangeParkingBucket}
               onAddBioLog={handleAddBioLog}
               onDeleteBioLog={handleDeleteBioLog}
-              onAddMoodCheckin={handleAddMoodCheckin}
-              onDeleteMoodLog={handleDeleteMoodLog}
               onOpenLightbox={openLightbox}
               onToggleAccordionTag={toggleAccordionTag}
               onExportData={handleExportData}
@@ -4406,8 +3597,18 @@ export default function App() {
               onClose={() => {
                 setLightboxEntry(null);
                 setLightboxGroupEntries([]);
+                setLightboxSource("story");
               }}
-              onDelete={handleDeleteWorkStoryItem}
+              onDelete={async (id) => {
+                if (lightboxSource === "parking") {
+                  await handleDeleteParkingEntry(id);
+                  setLightboxEntry(null);
+                  setLightboxGroupEntries([]);
+                  setLightboxSource("story");
+                } else {
+                  await handleDeleteWorkStoryItem(id);
+                }
+              }}
             />
           )}
         </>

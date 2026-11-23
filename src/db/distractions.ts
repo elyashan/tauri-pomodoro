@@ -11,6 +11,7 @@ import {
   DateRangeFilter,
   DistractionCategory,
   DistractionTrigger,
+  MoodType,
   RecordDistractionParams,
   SummaryReasonsData,
   TagItem,
@@ -364,7 +365,7 @@ export async function getPreviousReasons(
 ): Promise<string[]> {
   const db = await getDb();
   const cfg =
-    kind === "distraction"
+    kind === "distraction" || kind.startsWith("distraction_")
       ? { table: "distractions", baseWhere: "1=1", tagCol: "tag", reasonCol: "reason" }
       : kind === "work"
         ? { table: "sessions", baseWhere: "mode = 'work'", tagCol: "tag", reasonCol: "reason" }
@@ -392,7 +393,7 @@ export async function getPreviousReasons(
          AND ${cfg.reasonCol} != ${cfg.tagCol}
        GROUP BY ${cfg.reasonCol}
        ORDER BY cnt DESC, MAX(id) DESC
-       LIMIT 8`,
+       LIMIT 5`,
       [trimmedTag],
     );
     if (rows.length > 0) return rows.map((r) => r.reason);
@@ -405,7 +406,7 @@ export async function getPreviousReasons(
        AND ${cfg.reasonCol} IS NOT NULL AND ${cfg.reasonCol} != ''
      GROUP BY ${cfg.reasonCol}
      ORDER BY cnt DESC, MAX(id) DESC
-     LIMIT 8`,
+     LIMIT 5`,
   );
   return rows.map((r) => r.reason);
 }
@@ -536,7 +537,7 @@ export async function getAdhdInsights(
     dateRange,
   );
 
-  const [workSessions, breakSessions, distRows] = await Promise.all([
+  const [workSessions, breakSessions, distRows, moodRows] = await Promise.all([
     db.select<{
       duration_sec: number;
       started_at: string | null;
@@ -544,10 +545,15 @@ export async function getAdhdInsights(
       end_tag: string | null;
       end_reason: string | null;
       hyperfocus_sec: number | null;
+      is_completed: number | null;
+      mood_before: string | null;
+      mood_after: string | null;
     }[]>(
       `SELECT duration_sec, started_at, created_at, end_tag, end_reason,
-              COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec
-       FROM sessions WHERE mode = 'work' ${dayClause}`,
+              COALESCE(hyperfocus_sec, 0) AS hyperfocus_sec,
+              COALESCE(is_completed, 0) AS is_completed,
+              mood_before, mood_after
+       FROM sessions WHERE mode = 'work' AND duration_sec >= 30 ${dayClause}`,
       params,
     ),
     db.select<{ duration_sec: number; overtime_sec: number | null }[]>(
@@ -563,6 +569,10 @@ export async function getAdhdInsights(
     }[]>(
       `SELECT tag, created_at, elapsed_work_sec, trigger_type
        FROM distractions ${distWhere} AND COALESCE(is_off_session, 0) = 0`,
+      params,
+    ),
+    db.select<{ phase: string; mood: string }[]>(
+      `SELECT phase, mood FROM mood_logs WHERE 1=1 ${dayClause}`,
       params,
     ),
   ]);
@@ -611,7 +621,7 @@ export async function getAdhdInsights(
 
   const totalDist = internalCount + externalCount;
   const internalPct =
-    totalDist > 0 ? Math.round((internalCount / totalDist) * 100) : 0;
+    totalDist > 0 ? Math.round((internalCount / totalDist) * 100) : 50;
 
   let topTriggerTag: string | null = null;
   let topTriggerMax = 0;
@@ -623,17 +633,38 @@ export async function getAdhdInsights(
   }
 
   const workBuckets = new Array<number>(12).fill(0);
-  let earlyStopCount = 0;
+  let completedCount = 0;
   let hyperfocusCount = 0;
   let hyperfocusSecSum = 0;
+  const validMoods = new Set<MoodType>([
+    "calm",
+    "focused",
+    "tired",
+    "scattered",
+    "overwhelmed",
+    "anxious",
+    "motivated",
+  ]);
+  const startMoodFreq = new Map<MoodType, number>();
+  const endMoodFreq = new Map<MoodType, number>();
+  let sessionsWithMood = 0;
 
   for (const w of workSessions) {
     const dur = Number(w.duration_sec) || 0;
     const hf = Math.max(0, Number(w.hyperfocus_sec ?? 0) || 0);
-    const isEarlyStop = Boolean(w.end_tag || w.end_reason);
-    if (isEarlyStop) earlyStopCount++;
-    if (hf > 0 || (dur >= 35 * 60 && !isEarlyStop)) hyperfocusCount++;
+    if (Number(w.is_completed ?? 0) === 1) completedCount++;
+    if (hf > 0) hyperfocusCount++;
     hyperfocusSecSum += hf;
+
+    const mb = w.mood_before as MoodType | null;
+    const ma = w.mood_after as MoodType | null;
+    if (mb && validMoods.has(mb)) {
+      startMoodFreq.set(mb, (startMoodFreq.get(mb) || 0) + 1);
+    }
+    if (ma && validMoods.has(ma)) {
+      endMoodFreq.set(ma, (endMoodFreq.get(ma) || 0) + 1);
+    }
+    if (mb || ma) sessionsWithMood++;
 
     const dt = new Date(w.started_at || w.created_at);
     if (!Number.isNaN(dt.getTime())) {
@@ -641,6 +672,36 @@ export async function getAdhdInsights(
       workBuckets[b] = (workBuckets[b] || 0) + dur;
     }
   }
+
+  if (startMoodFreq.size === 0) {
+    for (const m of moodRows) {
+      if (m.phase === "start" && validMoods.has(m.mood as MoodType)) {
+        const key = m.mood as MoodType;
+        startMoodFreq.set(key, (startMoodFreq.get(key) || 0) + 1);
+      }
+    }
+  }
+  if (endMoodFreq.size === 0) {
+    for (const m of moodRows) {
+      if (m.phase === "end" && validMoods.has(m.mood as MoodType)) {
+        const key = m.mood as MoodType;
+        endMoodFreq.set(key, (endMoodFreq.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  const pickTopMood = (map: Map<MoodType, number>): MoodType | null => {
+    let best: MoodType | null = null;
+    let bestCnt = 0;
+    for (const [m, cnt] of map.entries()) {
+      if (cnt > bestCnt) {
+        bestCnt = cnt;
+        best = m;
+      }
+    }
+    return best;
+  };
+  const moodLoggedCount = Math.max(sessionsWithMood, moodRows.length);
 
   const formatBucket = (idx: number): string => {
     const pad = (n: number) => n.toString().padStart(2, "0");
@@ -683,10 +744,8 @@ export async function getAdhdInsights(
 
   const completionRatePct =
     workSessions.length > 0
-      ? Math.round(
-          ((workSessions.length - earlyStopCount) / workSessions.length) * 100,
-        )
-      : 100;
+      ? Math.round((completedCount / workSessions.length) * 100)
+      : 0;
 
   return {
     avgFocusThresholdMins,
@@ -701,6 +760,9 @@ export async function getAdhdInsights(
     hyperfocusCount,
     hyperfocusTotalMins: Math.round(hyperfocusSecSum / 60),
     topTriggerTag,
+    moodLoggedCount,
+    topStartMood: pickTopMood(startMoodFreq),
+    topEndMood: pickTopMood(endMoodFreq),
   };
 }
 

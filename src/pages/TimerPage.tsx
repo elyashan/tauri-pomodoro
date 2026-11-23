@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   BreakKind,
   MoodType,
@@ -10,15 +10,21 @@ import type {
   WorkStoryEntry,
 } from "../db";
 import type { ActiveLang, Translations } from "../i18n";
-import { MOOD_EMOJIS, MOOD_TYPES, formatClock } from "../constants";
+import { MOOD_TYPES, formatClock } from "../constants";
 import { ParkingLotPanel } from "../components/ParkingLot";
 import { VisualTimer } from "../components/VisualTimer";
 import {
+  IconBriefcase,
+  IconCheck,
   IconClose,
   IconCoffee,
+  IconCompass,
+  IconFlame,
   IconMenu,
   IconMinimize,
   IconPlay,
+  IconRepeat,
+  IconSparkles,
   IconStop,
   IconZap,
 } from "../components/Icons";
@@ -66,6 +72,7 @@ export interface TimerPageProps {
   onOpenStuckRescue?: () => void;
   onExtendHyperfocus?: (extraMins: number) => void;
   onSelectBreakEndMood?: (mood: MoodType) => void;
+  onDismissBreakEndMood?: () => void;
   onToggleBreakParking: () => void;
   onOpenMenu: () => void;
   onEnterMiniDock: () => void;
@@ -78,7 +85,12 @@ export interface TimerPageProps {
   ) => void;
   onDeleteParkingEntry: (id: number) => void;
   onChangeParkingBucket?: (id: number, bucket: ParkingBucket) => void;
-  onOpenLightbox: (entry: WorkStoryEntry) => void;
+  onBreakParkingLayoutChange?: (openRows: number, sections: number) => void;
+  onOpenLightbox: (
+    entry: WorkStoryEntry,
+    groupFrames?: WorkStoryEntry[],
+    source?: "story" | "parking",
+  ) => void;
   onStartWorkFromBreak: () => void;
   onStopSession: () => void;
   onTakeShortBreak: () => void;
@@ -126,6 +138,7 @@ export function TimerPage({
   onOpenStuckRescue,
   onExtendHyperfocus,
   onSelectBreakEndMood,
+  onDismissBreakEndMood,
   onToggleBreakParking,
   onOpenMenu,
   onEnterMiniDock,
@@ -135,6 +148,7 @@ export function TimerPage({
   onRateParkingIdea,
   onDeleteParkingEntry,
   onChangeParkingBucket,
+  onBreakParkingLayoutChange,
   onOpenLightbox,
   onStartWorkFromBreak,
   onStopSession,
@@ -142,17 +156,30 @@ export function TimerPage({
   onDistractedClick,
 }: TimerPageProps) {
   const [hfMins, setHfMins] = useState<number>(10);
+  const [checkedReminders, setCheckedReminders] = useState<
+    Record<string, boolean>
+  >({});
+  useEffect(() => {
+    if (timerMode !== "break") {
+      setCheckedReminders({});
+    }
+  }, [timerMode]);
   const hideUntilHover = !hasBreakParkingView && !isBreakAlarm;
-  const accentColor =
-    timerMode === "break"
-      ? "#38bdf8"
-      : workPhase === "warmup"
-        ? "#34d399"
-        : workPhase === "final"
-          ? "#fb923c"
-          : workPhase === "hyperfocus"
-            ? "#f97316"
-            : timerColor || "#fbbf24";
+  const accentColor = timerColor || "#f2f4f8";
+  const showHyperfocusOffer =
+    timerMode === "break" &&
+    hyperfocusOfferLeftSec > 0 &&
+    Boolean(onExtendHyperfocus);
+  const showBreakMoodPrompt =
+    timerMode === "break" &&
+    !showHyperfocusOffer &&
+    Boolean(canLogBreakEndMood && onSelectBreakEndMood);
+  const showBreakChecklist =
+    timerMode === "break" &&
+    !isBreakAlarm &&
+    !showHyperfocusOffer &&
+    !showBreakMoodPrompt &&
+    breakChecklistItems.length > 0;
 
   return (
     <>
@@ -161,10 +188,10 @@ export function TimerPage({
           {timerMode === "work" ? (
             <>
               <span
-                className="badge"
+                className="timer-mode-badge"
                 title={`${t.work} (${planDisplayName} • ${currentPlan.workMins} ${activeLang === "tr" ? "dk" : "min"})`}
               >
-                💼
+                <IconBriefcase size={11} />
               </span>
 
               <span
@@ -175,11 +202,13 @@ export function TimerPage({
                   currentPlan.longBreakMins,
                 )}
               >
-                🔄{" "}
-                {t.cycleProgressBadge(
-                  currentCycleIndex,
-                  currentPlan.longBreakInterval,
-                )}
+                <IconRepeat size={10} />
+                <span>
+                  {t.cycleProgressBadge(
+                    currentCycleIndex,
+                    currentPlan.longBreakInterval,
+                  )}
+                </span>
               </span>
 
               {workPhase === "warmup" && (
@@ -194,7 +223,8 @@ export function TimerPage({
               )}
               {workPhase === "hyperfocus" && (
                 <span className="phase-chip hyperfocus">
-                  {t.phaseHyperfocus}
+                  <IconFlame size={9} />
+                  <span>{t.phaseHyperfocus}</span>
                 </span>
               )}
 
@@ -203,34 +233,45 @@ export function TimerPage({
                   className="short-break-chip"
                   title={t.shortBreaksCountBadge(sessionShortBreakCount)}
                 >
-                  ☕ {sessionShortBreakCount}
+                  <IconCoffee size={10} />
+                  <span>{sessionShortBreakCount}</span>
                 </span>
               )}
             </>
           ) : (
             <>
-              <span className="badge" title={currentBreakFullTooltip}>
-                {breakKind === "short"
-                  ? "☕"
-                  : breakKind === "long"
-                    ? "🎉"
-                    : "🌴"}{" "}
-                {currentBreakShortName}
-              </span>
-              <span
-                className="cycle-badge"
-                title={t.cycleTooltip(
-                  currentCycleIndex,
-                  currentPlan.longBreakInterval,
-                  currentPlan.longBreakMins,
+              <span className="timer-mode-badge" title={currentBreakFullTooltip}>
+                {breakKind === "long" ? (
+                  <IconSparkles size={11} />
+                ) : (
+                  <IconCoffee size={11} />
                 )}
-              >
-                🔄{" "}
-                {t.cycleProgressBadge(
-                  currentCycleIndex,
-                  currentPlan.longBreakInterval,
-                )}
+                <span>{currentBreakShortName}</span>
               </span>
+              {(() => {
+                const breakCycleIndex =
+                  breakKind === "long"
+                    ? currentPlan.longBreakInterval
+                    : currentCycleIndex;
+                return (
+                  <span
+                    className="cycle-badge"
+                    title={t.cycleTooltip(
+                      breakCycleIndex,
+                      currentPlan.longBreakInterval,
+                      currentPlan.longBreakMins,
+                    )}
+                  >
+                    <IconRepeat size={10} />
+                    <span>
+                      {t.cycleProgressBadge(
+                        breakCycleIndex,
+                        currentPlan.longBreakInterval,
+                      )}
+                    </span>
+                  </span>
+                );
+              })()}
               {breakParkingTotalCount > 0 && (
                 <button
                   type="button"
@@ -287,10 +328,6 @@ export function TimerPage({
           accentColor={accentColor}
           isRunning={isRunning}
           isBreakAlarm={isBreakAlarm}
-          title={isRunning ? t.timerPauseTooltip : t.timerResumeTooltip}
-          onClick={() => {
-            if (!isBreakAlarm) onToggleRunning();
-          }}
         />
         {isBreakAlarm && (
           <div className="alarm-badge">
@@ -298,10 +335,19 @@ export function TimerPage({
           </div>
         )}
 
+        {timerMode === "work" && workPhase === "hyperfocus" && (
+          <div className="hyperfocus-live-pill">
+            <IconFlame size={10} />
+            <span>{t.phaseHyperfocus}</span>
+          </div>
+        )}
+
         {timerMode === "work" && (
           <div
             className={
-              hideUntilHover ? "timer-meta-row hover-reveal" : "timer-meta-row"
+              hideUntilHover
+                ? "timer-meta-row hover-reveal hover-collapse"
+                : "timer-meta-row"
             }
           >
             <button
@@ -316,10 +362,10 @@ export function TimerPage({
               type="button"
               className="timer-meta-item context-pill"
               onClick={onOpenContextBox}
-              title={`${t.contextShortLabel}: ${currentContext || t.qcContextNone}`}
+              title={`${t.contextShortLabel}: ${currentContext || t.timerContextAddBtn}`}
             >
               <span className="timer-meta-value">
-                {currentContext || t.qcContextNone}
+                {currentContext || t.timerContextAddBtn}
               </span>
             </button>
           </div>
@@ -330,19 +376,24 @@ export function TimerPage({
             type="button"
             className={
               hideUntilHover
-                ? "stuck-rescue-btn hover-reveal no-drag"
+                ? "stuck-rescue-btn hover-reveal hover-collapse no-drag"
                 : "stuck-rescue-btn no-drag"
             }
             onClick={onOpenStuckRescue}
           >
-            {t.stuckBtnLabel}
+            <IconCompass size={11} />
+            <span>{t.stuckBtnLabel}</span>
           </button>
         )}
 
         {(hasPausedProgress ||
           (!isRunning && timerMode === "work" && workPausedLiveSec > 0)) && (
           <div
-            className={hideUntilHover ? "resume-hint hover-reveal" : "resume-hint"}
+            className={
+              hideUntilHover
+                ? "resume-hint hover-reveal hover-collapse"
+                : "resume-hint"
+            }
           >
             {t.resumeHint(
               Math.floor(workElapsedSec / 60),
@@ -353,53 +404,57 @@ export function TimerPage({
           </div>
         )}
 
-        {timerMode === "break" &&
-          hyperfocusOfferLeftSec > 0 &&
-          onExtendHyperfocus && (
-            <div className="hyperfocus-offer-bar no-drag">
-              <button
-                type="button"
-                className="hf-step-btn"
-                disabled={hfMins <= 5}
-                onClick={() => setHfMins((m) => Math.max(5, m - 5))}
-                title="-5"
-              >
-                −
-              </button>
-              <button
-                type="button"
-                className="hf-main-btn"
-                onClick={() => onExtendHyperfocus(hfMins)}
-                title={t.hyperfocusSectionTitle}
-              >
-                <span>🔥 {t.hyperfocusBtnLabel(hfMins)}</span>
-                <span className="hf-countdown-badge">
-                  {hyperfocusOfferLeftSec}s
-                </span>
-              </button>
-              <button
-                type="button"
-                className="hf-step-btn"
-                disabled={hfMins >= 20}
-                onClick={() => setHfMins((m) => Math.min(20, m + 5))}
-                title="+5"
-              >
-                +
-              </button>
-            </div>
-          )}
-
-        {timerMode === "break" &&
-          canLogBreakEndMood &&
-          onSelectBreakEndMood && (
-            <div
-              className={
-                hideUntilHover
-                  ? "break-mood-strip hover-reveal no-drag"
-                  : "break-mood-strip no-drag"
-              }
-              title={t.moodPromptEnd}
+        {showHyperfocusOffer && onExtendHyperfocus && (
+          <div className="hyperfocus-offer-bar no-drag">
+            <button
+              type="button"
+              className="hf-step-btn"
+              disabled={hfMins <= 5}
+              onClick={() => setHfMins((m) => Math.max(5, m - 5))}
+              title="-5"
             >
+              −
+            </button>
+            <button
+              type="button"
+              className="hf-main-btn"
+              onClick={() => onExtendHyperfocus(hfMins)}
+              title={t.hyperfocusSectionTitle}
+            >
+              <IconFlame size={10} />
+              <span>{t.hyperfocusBtnLabel(hfMins)}</span>
+              <span className="hf-countdown-badge">
+                {hyperfocusOfferLeftSec}s
+              </span>
+            </button>
+            <button
+              type="button"
+              className="hf-step-btn"
+              disabled={hfMins >= 20}
+              onClick={() => setHfMins((m) => Math.min(20, m + 5))}
+              title="+5"
+            >
+              +
+            </button>
+          </div>
+        )}
+
+        {showBreakMoodPrompt && onSelectBreakEndMood && (
+          <div className="break-mood-card no-drag">
+            <div className="break-mood-header">
+              <span className="break-mood-prompt">{t.moodPromptEnd}</span>
+              {onDismissBreakEndMood && (
+                <button
+                  type="button"
+                  className="tag-icon-btn del-btn break-mood-dismiss"
+                  onClick={onDismissBreakEndMood}
+                  title={t.cancel}
+                >
+                  <IconClose size={9} />
+                </button>
+              )}
+            </div>
+            <div className="break-mood-pills">
               {MOOD_TYPES.map((m) => (
                 <button
                   key={m}
@@ -408,19 +463,44 @@ export function TimerPage({
                   onClick={() => onSelectBreakEndMood(m)}
                   title={`${t.moodPromptEnd}: ${t.moodLabels[m]}`}
                 >
-                  <span>{MOOD_EMOJIS[m]}</span>
+                  <span className={`mood-dot mood-${m}`} />
+                  <span>{t.moodLabels[m]}</span>
                 </button>
               ))}
             </div>
-          )}
+          </div>
+        )}
 
-        {timerMode === "break" && breakChecklistItems.length > 0 && (
-          <div className="break-reminders-strip no-drag">
-            {breakChecklistItems.map((note, idx) => (
-              <span key={`${note}-${idx}`} className="break-reminder-note-pill">
-                {note}
-              </span>
-            ))}
+        {showBreakChecklist && (
+          <div
+            className={
+              hideUntilHover
+                ? "break-reminders-strip hover-reveal hover-collapse no-drag"
+                : "break-reminders-strip no-drag"
+            }
+          >
+            {breakChecklistItems.map((note, idx) => {
+              const checkKey = `${idx}:${note}`;
+              const isDone = Boolean(checkedReminders[checkKey]);
+              return (
+                <button
+                  key={checkKey}
+                  type="button"
+                  className={`break-reminder-note-pill ${isDone ? "checked" : ""}`}
+                  onClick={() =>
+                    setCheckedReminders((prev) => ({
+                      ...prev,
+                      [checkKey]: !prev[checkKey],
+                    }))
+                  }
+                >
+                  <span className="break-check-box" aria-hidden="true">
+                    {isDone && <IconCheck size={7} />}
+                  </span>
+                  <span>{note}</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -452,6 +532,7 @@ export function TimerPage({
             onRateIdea={onRateParkingIdea}
             onDeleteEntry={onDeleteParkingEntry}
             onChangeBucket={onChangeParkingBucket}
+            onBreakLayoutChange={onBreakParkingLayoutChange}
             onOpenLightbox={onOpenLightbox}
           />
         </div>
@@ -472,13 +553,25 @@ export function TimerPage({
           <button
             className={isRunning || isBreakAlarm ? "primary-btn" : ""}
             onClick={onStartWorkFromBreak}
-            title={breakKind === "short" ? t.returnToWorkBtn : t.startWorkBtn}
+            title={
+              breakKind === "long"
+                ? t.finishSessionTooltip
+                : breakKind === "short"
+                  ? t.returnToWorkBtn
+                  : t.startWorkBtn
+            }
           >
-            <IconPlay size={11} />
+            {breakKind === "long" ? (
+              <IconCheck size={11} />
+            ) : (
+              <IconPlay size={11} />
+            )}
             <span>
-              {breakKind === "short"
-                ? t.returnToWorkCompact
-                : t.startWorkCompact}
+              {breakKind === "long"
+                ? t.finishSessionBtn
+                : breakKind === "short"
+                  ? t.returnToWorkCompact
+                  : t.startWorkCompact}
             </span>
           </button>
         </div>
